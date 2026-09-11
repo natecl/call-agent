@@ -17,9 +17,11 @@ from .domain import (
     DialPlacedEvent,
     DialSpec,
     E164,
+    LiveAudioFormat,
     MediaChunkEvent,
     MediaStartEvent,
     MediaStopEvent,
+    SampleRate,
     StreamId,
     WebhookEvent,
     WebhookEventType,
@@ -45,6 +47,7 @@ class _DialPayload(_WireModel):
     stream_bidirectional_mode: Literal["rtp"] = "rtp"
     stream_bidirectional_target_legs: Literal["self"] = "self"
     stream_bidirectional_codec: Codec
+    stream_bidirectional_sampling_rate: SampleRate
     stream_codec: Codec
 
 
@@ -77,7 +80,7 @@ class _WebhookEnvelope(_WireModel):
 
 class _L16Format(_WireModel):
     encoding: Literal[Codec.L16]
-    sample_rate: Literal[16000]
+    sample_rate: SampleRate
     channels: Literal[1]
 
 
@@ -186,6 +189,9 @@ def serialize_dial(spec: DialSpec) -> dict[str, Any]:
         webhook_url=spec.webhook_url,
         client_state=spec.client_state.encode(),
         stream_bidirectional_codec=spec.codec,
+        stream_bidirectional_sampling_rate=LiveAudioFormat.for_codec(
+            spec.codec
+        ).rate,
         stream_codec=spec.codec,
     )
     return payload.model_dump(mode="json", by_alias=True)
@@ -213,6 +219,7 @@ def parse_media_frame(
             stream_id=frame.stream_id,
             call_control_id=frame.start.call_control_id,
             codec=frame.start.media_format.encoding,
+            sample_rate=frame.start.media_format.sample_rate,
         )
     if isinstance(frame, _MediaFrame):
         return MediaChunkEvent(
@@ -340,9 +347,11 @@ class StubTelnyxMedia:
         self,
         submit: Submit = _ignore_event,
         append_outbound: AppendAudio = _ignore_audio,
+        sample_rate: SampleRate = 16000,
     ) -> None:
         self._submit = submit
         self._append_outbound = append_outbound
+        self._sample_rate = sample_rate
 
     def begin(self) -> None:
         self._submit(
@@ -354,7 +363,7 @@ class StubTelnyxMedia:
                         "call_control_id": "stub-call-0001",
                         "media_format": {
                             "encoding": "L16",
-                            "sample_rate": 16000,
+                            "sample_rate": self._sample_rate,
                             "channels": 1,
                         },
                     },

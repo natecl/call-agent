@@ -60,7 +60,7 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 
 - We accept six small unions on `Call` in exchange for never special-casing transport arrival order.
 - We accept a heuristic `assess_transcript` in exchange for the fake never owning the verdict. A tool-call verdict via GPT-Live delegation is the day-2 upgrade.
-- We accept raw L16 written as WAV and PCMU written raw in exchange for zero transcoding.
+- We accept raw L16 written as WAV and PCMU written raw in exchange for zero transcoding at 16 kHz. An L16 stream that Telnyx opens at 8 kHz is resampled 2x in the reducer so GPT-Live still runs at 16 kHz.
 - We accept `quick-ask --live` hosting the FastAPI app in the same process in exchange for one command and no job service. `PUBLIC_BASE_URL` must route to it.
 - We accept no mid-call crash resume. A crashed live call ends with Telnyx's own timeout.
 
@@ -75,6 +75,7 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 - Which phrases should end a `stock` or `aisle` call without a false terminal decision? The needles live in one table and are the first thing to tune against live transcripts.
 - Should webhook signature verification (`TELNYX_PUBLIC_KEY`) gate the live route before the first public tunnel test?
 - The GPT-Live version header used by the launch recipe (`OpenAI-Alpha: quicksilver=v3`) may have changed. It is a config value, not code.
+- The dial now sends `stream_bidirectional_sampling_rate: 16000` for L16. No live call has yet confirmed that Telnyx opens the media stream at 16 kHz in response. If it opens at 8 kHz, the resample path carries the call at narrowband quality.
 
 ## Next implementation step
 

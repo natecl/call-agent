@@ -19,6 +19,7 @@ from .domain import (
     LiveOutputTranscriptEvent,
     LiveSessionSpec,
     LiveStartedEvent,
+    SampleRate,
 )
 
 
@@ -265,6 +266,7 @@ class StubScenario(BaseModel):
     skip_disclosure: bool = False
     dial_override: dict[str, Any] = {}
     far_party_hangs_up: bool = False
+    media_sample_rate: SampleRate = 16000
 
 
 class StubGptLive:

@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import struct
 from collections.abc import Iterator
 
 import pytest
@@ -18,6 +20,7 @@ from call_agent.domain import (
     FirstName,
     LiveStarting,
     MediaStartEvent,
+    MediaStreaming,
     Mode,
     Question,
     QuestionType,
@@ -113,10 +116,86 @@ def test_media_stream_opens_live_when_connected_precedes_start(
         stream_id=StreamId("stream-1"),
         call_control_id=CALL_CONTROL_ID,
         codec=Codec.L16,
+        sample_rate=16000,
     )
     assert answered_handle.call.live == LiveStarting()
     assert session_start["type"] == "session.start"
     assert session_start["session"]["model"] == "gpt-live-1"
+    assert session_start["session"]["audio"] == {
+        "format": {"type": "audio/pcm", "rate": 16000},
+        "output": {"voice": "marin"},
+    }
+
+
+def test_media_stream_accepts_8k_l16_start_and_opens_live_at_16k(
+    answered_handle: CallHandle,
+) -> None:
+    client = TestClient(app)
+    with client.websocket_connect("/media-stream") as websocket:
+        websocket.send_text(
+            json.dumps({"event": "connected", "version": "1.0.0"})
+        )
+        websocket.send_text(
+            json.dumps(
+                {
+                    "event": "start",
+                    "sequence_number": "1",
+                    "stream_id": "stream-1",
+                    "start": {
+                        "call_control_id": str(CALL_CONTROL_ID),
+                        "media_format": {
+                            "encoding": "L16",
+                            "sample_rate": 8000,
+                            "channels": 1,
+                        },
+                    },
+                }
+            )
+        )
+        websocket.send_text(
+            json.dumps(
+                {
+                    "event": "media",
+                    "sequence_number": "2",
+                    "stream_id": "stream-1",
+                    "media": {
+                        "payload": base64.b64encode(
+                            struct.pack("<4h", 0, 100, -100, 50)
+                        ).decode(),
+                        "track": "inbound",
+                        "chunk": 1,
+                        "timestamp": "20",
+                    },
+                }
+            )
+        )
+
+    start_event = answered_handle.queue.get_nowait()
+    asyncio.run(answered_handle._process_event(start_event))
+    chunk_event = answered_handle.queue.get_nowait()
+    asyncio.run(answered_handle._process_event(chunk_event))
+    session_start = json.loads(
+        (answered_handle.run_dir.path / "session_start.json").read_text()
+    )
+
+    assert start_event == MediaStartEvent(
+        stream_id=StreamId("stream-1"),
+        call_control_id=CALL_CONTROL_ID,
+        codec=Codec.L16,
+        sample_rate=8000,
+    )
+    assert answered_handle.call.media == MediaStreaming(
+        stream_id=StreamId("stream-1"),
+        codec=Codec.L16,
+        sample_rate=8000,
+    )
+    assert answered_handle.call.live == LiveStarting(
+        buffered_audio=(
+            base64.b64encode(
+                struct.pack("<8h", 0, 50, 100, 0, -100, -25, 50, 50)
+            ).decode(),
+        )
+    )
     assert session_start["session"]["audio"] == {
         "format": {"type": "audio/pcm", "rate": 16000},
         "output": {"voice": "marin"},
