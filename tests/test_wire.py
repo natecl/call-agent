@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from call_agent.domain import (
     ClientState,
@@ -144,6 +145,63 @@ def test_parse_media_frames_returns_domain_events() -> None:
         ),
         MediaStopEvent(stream_id=StreamId("stream-1")),
     )
+
+
+def test_parse_media_frame_skips_connected_and_dtmf_and_rejects_error() -> None:
+    connected = json.dumps({"event": "connected", "version": "1.0.0"})
+    dtmf = json.dumps(
+        {
+            "event": "dtmf",
+            "stream_id": "stream-1",
+            "occurred_at": "2026-09-11T00:00:00Z",
+            "sequence_number": "5",
+            "dtmf": {"digit": "1"},
+        }
+    )
+    start = json.dumps(
+        {
+            "event": "start",
+            "sequence_number": "1",
+            "stream_id": "stream-1",
+            "start": {
+                "call_control_id": "v3:abc",
+                "media_format": {
+                    "encoding": "PCMU",
+                    "sample_rate": 8000,
+                    "channels": 1,
+                },
+            },
+        }
+    )
+    error = json.dumps(
+        {
+            "event": "error",
+            "stream_id": "stream-1",
+            "payload": {
+                "code": 100004,
+                "title": "invalid_media",
+                "detail": "Media provided was not base64 encoded",
+            },
+        }
+    )
+
+    parsed = (
+        parse_media_frame(connected),
+        parse_media_frame(dtmf),
+        parse_media_frame(start),
+    )
+
+    assert parsed == (
+        None,
+        None,
+        MediaStartEvent(
+            stream_id=StreamId("stream-1"),
+            call_control_id="v3:abc",
+            codec=Codec.PCMU,
+        ),
+    )
+    with pytest.raises(ValidationError, match="'error'"):
+        parse_media_frame(error)
 
 
 def test_serialize_session_start_matches_gpt_live_payload() -> None:
