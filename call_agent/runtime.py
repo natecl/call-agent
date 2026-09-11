@@ -4,11 +4,15 @@ import asyncio
 import base64
 import json
 import shutil
+import time
 import uuid
 import wave
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel
 
 from .config import Settings
 from .domain import (
@@ -18,8 +22,6 @@ from .domain import (
     ClientState,
     CloseLiveEffect,
     Codec,
-    ConversationOpen,
-    ConversationTerminal,
     DialEffect,
     DialPlacedEvent,
     DialSpec,
@@ -28,8 +30,6 @@ from .domain import (
     ForwardAudioEffect,
     HangupEffect,
     LiveAudioFormat,
-    LiveInputTranscriptEvent,
-    LiveOutputTranscriptEvent,
     MarkEffect,
     MediaChunkEvent,
     MediaStartEvent,
@@ -55,6 +55,7 @@ from .gpt_live import (
     serialize_session_start,
 )
 from .ledger import Ledger
+from .report import JournalRow, Refs, build_call_report
 from .telnyx import (
     LiveTelnyxHttp,
     StubTelnyxHttp,
@@ -63,6 +64,18 @@ from .telnyx import (
     TelnyxMedia,
     serialize_dial,
 )
+
+TRACKS = ("dial", "telnyx", "media", "live", "conversation", "hangup")
+
+
+def _journal_payload(model: BaseModel) -> dict[str, Any]:
+    payload = model.model_dump(mode="json")
+    for key in ("payload_b64", "delta_b64"):
+        if key in payload:
+            payload[key.replace("_b64", "_bytes")] = len(
+                base64.b64decode(payload.pop(key))
+            )
+    return payload
 
 
 class RunDir:
@@ -75,6 +88,9 @@ class RunDir:
         self.root = root
         self.call_control_id = call_control_id
         self.path = root / call_control_id
+        self.started_at = datetime.now(UTC)
+        self.rows: list[JournalRow] = []
+        self._clock_start = time.monotonic()
         self._codec = codec
         self._sample_rate: SampleRate = LiveAudioFormat.for_codec(codec).rate
         self._inbound = bytearray()
@@ -99,6 +115,7 @@ class RunDir:
         self,
         sequence: int,
         event: CallEvent,
+        transitions: dict[str, str],
     ) -> None:
         if isinstance(event, MediaStartEvent):
             self._codec = event.codec
@@ -106,16 +123,23 @@ class RunDir:
             self._write_audio()
         if isinstance(event, MediaChunkEvent):
             self.append_inbound(event.payload_b64)
-        payload = event.model_dump(mode="json")
-        if "payload_b64" in payload:
-            payload["payload_bytes"] = len(
-                base64.b64decode(payload.pop("payload_b64"))
-            )
-        if "delta_b64" in payload:
-            payload["delta_bytes"] = len(
-                base64.b64decode(payload.pop("delta_b64"))
-            )
-        row = {"seq": sequence, **payload}
+        row = _journal_payload(event)
+        if transitions:
+            row["transitions"] = transitions
+        self._append_row(sequence, row)
+
+    def journal_effect(self, sequence: int, effect: Effect) -> None:
+        row = _journal_payload(effect)
+        row["effect"] = row.pop("kind")
+        self._append_row(sequence, row)
+
+    def _append_row(self, sequence: int, payload: dict[str, Any]) -> None:
+        row = {
+            "seq": sequence,
+            "t_ms": round((time.monotonic() - self._clock_start) * 1000),
+            **payload,
+        }
+        self.rows.append(row)
         with (self.path / "events.jsonl").open("a") as events:
             events.write(json.dumps(row, sort_keys=True) + "\n")
 
@@ -141,23 +165,41 @@ class RunDir:
     def finish(
         self,
         result: QuickAskResult,
-        transcript: Transcript,
+        call: Call,
+        settings: ReduceSettings,
     ) -> QuickAskResult:
-        self.write_transcript(transcript)
+        self.write_transcript(call.conversation.transcript)
         self._write_audio()
+        refs = Refs(
+            result=f"{self.call_control_id}/result.json",
+            transcript=f"{self.call_control_id}/transcript.json",
+            events=f"{self.call_control_id}/events.jsonl",
+            inbound_audio=(
+                f"{self.call_control_id}/audio/{self._audio_name('inbound')}"
+            ),
+            outbound_audio=(
+                f"{self.call_control_id}/audio/{self._audio_name('outbound')}"
+            ),
+        )
         final_result = result.model_copy(
             update={
-                "transcript_ref": (
-                    f"{self.call_control_id}/transcript.json"
-                ),
-                "audio_ref": (
-                    f"{self.call_control_id}/audio/{self._audio_name('inbound')}"
-                ),
+                "transcript_ref": refs.transcript,
+                "audio_ref": refs.inbound_audio,
             }
         )
         self.write_json(
             "result.json", final_result.model_dump(mode="json")
         )
+        report = build_call_report(
+            call,
+            final_result,
+            self.rows,
+            self.started_at,
+            datetime.now(UTC),
+            settings,
+            refs,
+        )
+        self.write_json("call_report.json", report.model_dump(mode="json"))
         return final_result
 
     def _write_audio(self) -> None:
@@ -211,7 +253,6 @@ def build_ports(
         faults = scenario or StubScenario()
         media = StubTelnyxMedia(
             submit=submit,
-            append_outbound=run_dir.append_outbound,
             sample_rate=faults.media_sample_rate,
             echo_marks=not faults.playback_never_drains,
         )
@@ -289,21 +330,29 @@ class CallHandle:
         return self._result
 
     async def _process_event(self, event: CallEvent) -> None:
+        before = self.call
         self.call, effects = reduce(
-            self.call,
+            before,
             event,
             self._reduce_settings,
         )
         if isinstance(event, DialPlacedEvent):
             self.run_dir.bind(event.call_control_id)
             BOOK.bind(event.call_control_id, self)
+        transitions = {
+            track: getattr(self.call, track).kind
+            for track in TRACKS
+            if getattr(self.call, track).kind != getattr(before, track).kind
+        }
         self._sequence += 1
-        self.run_dir.journal_event(self._sequence, event)
-        self.run_dir.write_transcript(self._transcript())
+        self.run_dir.journal_event(self._sequence, event, transitions)
+        self.run_dir.write_transcript(self.call.conversation.transcript)
         for effect in effects:
             await self._perform(effect)
 
     async def _perform(self, effect: Effect) -> None:
+        self._sequence += 1
+        self.run_dir.journal_effect(self._sequence, effect)
         if isinstance(effect, DialEffect):
             self.run_dir.write_json(
                 "dial.json", serialize_dial(effect.spec)
@@ -349,16 +398,9 @@ class CallHandle:
         if isinstance(effect, FinishEffect):
             self._result = self.run_dir.finish(
                 effect.result,
-                self._transcript(),
+                self.call,
+                self._reduce_settings,
             )
-
-    def _transcript(self) -> Transcript:
-        conversation = self.call.conversation
-        if isinstance(
-            conversation, (ConversationOpen, ConversationTerminal)
-        ):
-            return conversation.transcript
-        raise RuntimeError("call has no transcript")
 
 
 class CallBook:

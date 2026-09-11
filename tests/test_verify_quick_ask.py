@@ -139,14 +139,9 @@ def test_verify_fails_clean_hangup_when_playback_never_drains(
         workspace=_workspace(workspace),
         scenario=StubScenario(playback_never_drains=True),
     )
-    kinds = [
-        json.loads(line)["kind"]
-        for line in (
-            workspace.artifacts_dir / report.call_control_id / "events.jsonl"
-        )
-        .read_text()
-        .splitlines()
-    ]
+    run_dir = workspace.artifacts_dir / report.call_control_id
+    kinds = [row.get("kind") for row in _rows(run_dir)]
+    call_report = json.loads((run_dir / "call_report.json").read_text())
 
     assert [check.passed for check in report.checks] == [
         True,
@@ -157,9 +152,91 @@ def test_verify_fails_clean_hangup_when_playback_never_drains(
     ]
     assert report.passed is False
     assert "status=answered" in report.checks[3].detail
+    assert "marks_sent=1" in report.checks[3].detail
     assert "drain_timed_out=True" in report.checks[3].detail
+    assert "hangup_path=drain_timeout" in report.checks[3].detail
     assert "hangup_drain_timeout" in kinds
     assert "hangup_trail_elapsed" not in kinds
+    assert call_report["hangup"]["path"] == "drain_timeout"
+    assert call_report["timing_ms"]["final_mark_echoed"] is None
+
+
+def test_verify_passes_with_one_final_mark_when_goodbye_audio_storms(
+    workspace: SimpleNamespace,
+) -> None:
+    report = verify_quick_ask(
+        workspace=_workspace(workspace),
+        scenario=StubScenario(audio_chunks_after_closing_line=98),
+    )
+    run_dir = workspace.artifacts_dir / report.call_control_id
+    rows = _rows(run_dir)
+    marks = [row["name"] for row in rows if row.get("effect") == "mark"]
+    echoes = [row["name"] for row in rows if row.get("kind") == "media_mark"]
+    verdict_row = next(
+        row
+        for row in rows
+        if row.get("transitions", {}).get("conversation")
+        == "conversation_terminal"
+    )
+    call_report = json.loads((run_dir / "call_report.json").read_text())
+    timing = call_report["timing_ms"]
+
+    assert report.passed is True
+    assert marks == ["hangup"]
+    assert echoes == ["hangup"]
+    assert verdict_row["transitions"] == {
+        "conversation": "conversation_terminal",
+        "hangup": "hangup_draining",
+        "live": "live_closing",
+    }
+    assert call_report["status"] == "answered"
+    assert call_report["call_control_id"] == "stub-call-0001"
+    assert call_report["hangup"] == {
+        "path": "trail",
+        "cause": "normal_clearing",
+        "source": "caller",
+        "final_mark": "hangup",
+        "trailing_silence_s": 0.0,
+        "drain_timeout_s": 10.0,
+    }
+    assert call_report["counts"] == {
+        "events": 121,
+        "effects": 113,
+        "marks_sent": 1,
+        "mark_echoes": 1,
+        "stale_mark_echoes": 0,
+        "output_audio_chunks": 101,
+        "output_audio_chunks_after_verdict": 99,
+        "inbound_media_chunks": 3,
+        "transcript_turns": 3,
+    }
+    assert call_report["refs"] == {
+        "result": "stub-call-0001/result.json",
+        "transcript": "stub-call-0001/transcript.json",
+        "events": "stub-call-0001/events.jsonl",
+        "inbound_audio": "stub-call-0001/audio/inbound.wav",
+        "outbound_audio": "stub-call-0001/audio/outbound.wav",
+    }
+    assert (
+        timing["dial_placed"]
+        <= timing["answered"]
+        <= timing["media_streaming"]
+        <= timing["live_active"]
+        <= timing["verdict"]
+        <= timing["live_closed"]
+        <= timing["final_mark_sent"]
+        <= timing["final_mark_echoed"]
+        <= timing["hangup_sent"]
+        <= timing["call_ended"]
+        <= call_report["duration_ms"]
+    )
+
+
+def _rows(run_dir: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in (run_dir / "events.jsonl").read_text().splitlines()
+    ]
 
 
 def test_verify_quick_ask_passes_when_telnyx_streams_l16_at_8000(
@@ -187,4 +264,4 @@ def test_verify_quick_ask_passes_when_telnyx_streams_l16_at_8000(
         "rate": 16000,
     }
     assert inbound_shape == (8000, 960)
-    assert outbound_shape == (8000, 640)
+    assert outbound_shape == (8000, 800)

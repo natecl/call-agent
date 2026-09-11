@@ -22,8 +22,8 @@ You should see five `[PASS]` lines and `5/5 passed`, and the command exits 0. Th
 1. `did_in_ledger`. The user has exactly one number in the ledger, and provisioning twice returns the same number.
 2. `dial_payload`. The Call Control body has `from` set to that number, `to` set to the destination, a `wss://` `stream_url`, `stream_bidirectional_mode: rtp`, and `stream_bidirectional_target_legs: self`.
 3. `disclosure_first`. The GPT-Live `session.start` instructions name the caller ("on behalf of Nathan") before the question, and the agent's first transcript turn does too.
-4. `clean_hangup`. The verdict comes from the transcript, Telnyx echoes the final playback mark, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s) fails this check.
-5. `result_artifact`. `result.json` is a valid `QuickAskResult`, and its `transcript_ref` and `audio_ref` point at files that exist.
+4. `clean_hangup`. The verdict comes from the transcript, the agent closes GPT-Live and plays out what it still sends, sends exactly one Telnyx mark named `hangup` once GPT-Live confirms the close, Telnyx echoes it, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s), or a call that sends more than one mark, fails this check.
+5. `result_artifact`. `result.json` is a valid `QuickAskResult`, its `transcript_ref` and `audio_ref` point at files that exist, and `call_report.json` is a valid `CallReport` whose refs exist.
 
 To run the test suite:
 
@@ -40,7 +40,13 @@ call-agent quick-ask --to +14155552671 --ask hours --name Nathan
 call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nathan
 ```
 
-`quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, and `result.json`.
+`quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, and `call_report.json`.
+
+## Read a call
+
+Start with `call_report.json`. It names the call (`call_control_id`, `run_id`, `to`, `from_did`, `mode`), the outcome (`status`, `answer_text`, `reason`), and how the call ended under `hangup`: `path` is `trail` when the final mark's echo and the trailing silence triggered the hangup, `drain_timeout` when the echo never came, `failure` when an error ended the call, and `far_party` when the callee hung up first. `timing_ms` gives milliseconds from the run start to each step (`answered`, `live_active`, `verdict`, `live_closed`, `final_mark_sent`, `final_mark_echoed`, `hangup_sent`, `call_ended`). `counts` includes `marks_sent`, `mark_echoes`, `stale_mark_echoes`, and `output_audio_chunks_after_verdict`. `refs` points at every other artifact.
+
+`events.jsonl` is the full sequence. Every row has `seq` and `t_ms`. Rows with `kind` are events, and a `transitions` object on an event row lists the tracks whose state it changed. Rows with `effect` are what the runtime did in response (`play_audio`, `mark`, `schedule`, `hangup`, `close_live`, `finish`). Audio payloads appear as byte counts.
 
 ## Enable live mode later
 

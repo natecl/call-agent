@@ -349,7 +349,6 @@ class LiveTelnyxMedia:
 
 Submit = Callable[[CallEvent], None]
 WriteJson = Callable[[str, dict[str, Any]], None]
-AppendAudio = Callable[[str], None]
 
 
 def _ignore_event(event: CallEvent) -> None:
@@ -360,20 +359,14 @@ def _ignore_json(name: str, payload: dict[str, Any]) -> None:
     return None
 
 
-def _ignore_audio(payload_b64: str) -> None:
-    return None
-
-
 class StubTelnyxMedia:
     def __init__(
         self,
         submit: Submit = _ignore_event,
-        append_outbound: AppendAudio = _ignore_audio,
         sample_rate: SampleRate = 16000,
         echo_marks: bool = True,
     ) -> None:
         self._submit = submit
-        self._append_outbound = append_outbound
         self._sample_rate = sample_rate
         self._echo_marks = echo_marks
 
@@ -422,7 +415,7 @@ class StubTelnyxMedia:
         )
 
     async def play(self, payload_b64: str) -> None:
-        self._append_outbound(payload_b64)
+        return None
 
     async def mark(self, name: str) -> None:
         if not self._echo_marks:
