@@ -55,7 +55,7 @@ CLI verb `verify-quick-ask` calls `verify_quick_ask`.
 
 ## verify-call-agent
 
-The Cursor skill drives the four CLI verbs in stub mode and never sets live keys.
+The Cursor skill drives the stub CLI verbs and never sets live keys.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
