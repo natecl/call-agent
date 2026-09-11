@@ -169,12 +169,16 @@ async def test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail
     while not handle.call.finished:
         await handle._process_event(handle.queue.get_nowait())
     result = json.loads((handle.run_dir.path / "result.json").read_text())
-    kinds = [
-        json.loads(line).get("kind")
+    rows = [
+        json.loads(line)
         for line in (handle.run_dir.path / "events.jsonl")
         .read_text()
         .splitlines()
     ]
+    kinds = [row.get("kind") for row in rows]
+    report = json.loads(
+        (handle.run_dir.path / "call_report.json").read_text()
+    )
 
     assert marks_after_live_closed == ["hangup"]
     assert played_before_mark == 99
@@ -189,6 +193,19 @@ async def test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail
     }
     assert result["status"] == "answered"
     assert result["answer_text"] == "We're open 9 to 5."
+    assert [row["effect"] for row in rows if "effect" in row][-5:] == [
+        "play_audio",
+        "mark",
+        "schedule",
+        "hangup",
+        "finish",
+    ]
+    assert report["hangup"]["path"] == "trail"
+    assert report["counts"]["marks_sent"] == 1
+    assert report["counts"]["output_audio_chunks_after_verdict"] == 99
+    assert report["timing_ms"]["final_mark_sent"] <= report["timing_ms"][
+        "final_mark_echoed"
+    ] <= report["timing_ms"]["hangup_sent"] <= report["timing_ms"]["call_ended"]
 
 
 async def test_drain_timeout_hangs_up_anyway_and_journals_the_timeout(
