@@ -18,7 +18,7 @@ $ call-agent verify-quick-ask
 [PASS] did_in_ledger      one row for user verify, from_did +15555550100
 [PASS] dial_payload       from=+15555550100 to=+14155552671 stream_url=wss://... rtp/self
 [PASS] disclosure_first   "on behalf of Nathan" at 41, ask at 118
-[PASS] clean_hangup       verdict answered, then hangup, then call.hangup
+[PASS] clean_hangup       verdict answered, playback drained, then hangup, then call.hangup
 [PASS] result_artifact    result.json valid, transcript_ref and audio_ref exist
 5/5 passed
 ```
@@ -36,17 +36,19 @@ report = verify_quick_ask(VerifyInput(), workspace)
 
 **One closed result.** `QuickAskResult` is a discriminated union on `status`. `answered` requires `answer_text`. `declined`, `no_answer`, and `failed` pin it to `None`. Completed variants carry `transcript_ref` and `audio_ref`. The contradictory combination cannot be built.
 
-**The call is a product of tracks, reduced by one pure function.** `Call` holds six small discriminated unions, one per fact that can advance on its own: dial, Telnyx call state, media stream, GPT-Live session, conversation, hangup. `reduce(call, event) -> (call, effects)` is the only place a transition happens. Each event advances one track, and a few guards read across tracks: open GPT-Live when Telnyx is answered and media is streaming, forward audio only when GPT-Live is active, hang up once when the conversation is terminal, finish when the hangup is confirmed or Telnyx ends the call. A media `start` that arrives before `call.answered` is a legal state, so the live race between the webhook and the socket needs no special case. Per model-the-domain.
+**The call is a product of tracks, reduced by one pure function.** `Call` holds six small discriminated unions, one per fact that can advance on its own: dial, Telnyx call state, media stream, GPT-Live session, conversation, hangup. `reduce(call, event) -> (call, effects)` is the only place a transition happens. Each event advances one track, and a few guards read across tracks: open GPT-Live when Telnyx is answered and media is streaming, forward audio only when GPT-Live is active, drain the playback once the conversation is terminal and hang up once after it, finish when the hangup is confirmed or Telnyx ends the call. A media `start` that arrives before `call.answered` is a legal state, so the live race between the webhook and the socket needs no special case. Per model-the-domain.
+
+**The hangup waits for the goodbye.** GPT-Live sends the closing line's transcript while it is still streaming that line's audio, and Telnyx plays what it has buffered in real time, so a hangup at the verdict cuts the last word. The verdict moves the hangup track to `HangupDraining(marks_sent)` and sends a Telnyx `mark` frame. Every `PlayAudioEffect` during the drain is followed by a new mark. Telnyx echoes a mark when the media before it has finished playing, so the echo of the latest mark is the playback-complete signal. It schedules `HangupTrailElapsedEvent` after `hangup_trailing_silence_s` (0.4 s), and only a trail that still names the latest mark emits `HangupEffect` and `CloseLiveEffect`. `ScheduleEffect(delay_s, event)` keeps the reducer clockless. The runtime performs it with `loop.call_later`. If no echo arrives, `HangupDrainTimeoutEvent` hangs up after `hangup_drain_timeout_s` (10 s), the journal records it, and `verify-quick-ask` fails `clean_hangup` with `drain_timed_out=True`. Failures and a far-party hangup are not delayed. Both durations are `Settings` fields.
 
 **Verdict from evidence.** `assess_transcript(transcript, question) -> Verdict | None` is pure. It reads what the business said and what the agent said and returns `Answered(answer_text)` or `Declined`, or `None` to keep listening. Fakes supply transcript deltas. They never supply the verdict. The question table (`QuestionType` to default text, spoken ask, and answer needles) is the one place per-question policy lives.
 
-**Three ports, fakes only there.** `TelnyxHttp` (numbers, dial, hangup), `TelnyxMedia` (frames in, playback out), and `GptLive` (`session.start` out, events in) are Protocols. Wire JSON is a private Pydantic model inside `telnyx.py` and `gpt_live.py`. Parsers return domain events. Stub adapters replay raw JSON fixtures through those same parsers, so CI runs the production parsing code and zero network. Per boundary-discipline.
+**Three ports, fakes only there.** `TelnyxHttp` (numbers, dial, hangup), `TelnyxMedia` (frames and mark echoes in, playback and marks out), and `GptLive` (`session.start` out, events in) are Protocols. Wire JSON is a private Pydantic model inside `telnyx.py` and `gpt_live.py`. Parsers return domain events. Stub adapters replay raw JSON fixtures through those same parsers, so CI runs the production parsing code and zero network. Per boundary-discipline.
 
 **One owner per call.** `CallHandle` owns one `Call`, one `asyncio.Queue` of events, the three ports, and the run directory. Its loop pops an event, reduces, performs the effects, and journals. `CallBook` maps `CallControlId` and `RunId` to a handle so the FastAPI routes can find the owner. The book stores owners, never call fields. Stub ports enqueue their scripted events with `put_nowait` inside the port call that triggers them, so the loop never waits and never sleeps. Per separate-before-serializing-shared-state.
 
 **Artifacts are the proof.** Each run writes only under `CALL_AGENT_ARTIFACTS_DIR/<call_control_id>/`: `dial.json` and `session_start.json` as the boundary serialized them, `events.jsonl` in reduction order, `transcript.json`, `audio/inbound.wav` and `audio/outbound.wav` (L16) or `.pcmu`, `hangup.json`, and `result.json`. `verify_quick_ask` reads those files and the ledger. It does not spy on mocks. Per prove-it-works and build-the-lever.
 
-**Idempotent by shape.** `did provision` returns the active row when one exists, resumes an `ordering` row against the Telnyx order, and only then orders a new number. `UNIQUE(user_id)` and `UNIQUE(did)` hold in SQLite. The reducer emits the hangup effect on exactly one edge, and the Telnyx adapter treats "already ended" as success. Per make-operations-idempotent.
+**Idempotent by shape.** `did provision` returns the active row when one exists, resumes an `ordering` row against the Telnyx order, and only then orders a new number. `UNIQUE(user_id)` and `UNIQUE(did)` hold in SQLite. The reducer emits the hangup effect on exactly one edge, the move from `HangupDraining` to `HangupRequested`, and the Telnyx adapter treats "already ended" as success. Per make-operations-idempotent.
 
 ## Synthesis decision
 
@@ -63,6 +65,7 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 - We accept raw L16 written as WAV and PCMU written raw in exchange for zero transcoding at 16 kHz. An L16 stream that Telnyx opens at 8 kHz is resampled 2x in the reducer so GPT-Live still runs at 16 kHz.
 - We accept `quick-ask --live` hosting the FastAPI app in the same process in exchange for one command and no job service. `PUBLIC_BASE_URL` must route to it.
 - We accept no mid-call crash resume. A crashed live call ends with Telnyx's own timeout.
+- We accept up to `hangup_drain_timeout_s` of extra call time when Telnyx never echoes the final mark, in exchange for never cutting the closing line. The timeout is journaled and fails `verify-quick-ask`.
 
 ## Alternatives considered
 
@@ -76,6 +79,7 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 - Should webhook signature verification (`TELNYX_PUBLIC_KEY`) gate the live route before the first public tunnel test?
 - The GPT-Live version header used by the launch recipe (`OpenAI-Alpha: quicksilver=v3`) may have changed. It is a config value, not code.
 - The dial now sends `stream_bidirectional_sampling_rate: 16000` for L16. No live call has yet confirmed that Telnyx opens the media stream at 16 kHz in response. If it opens at 8 kHz, the resample path carries the call at narrowband quality.
+- No live call has yet confirmed that Telnyx echoes `mark` on a bidirectional RTP stream opened by `dial`. If it does not, every call ends through the drain timeout and `clean_hangup` fails until the signal is fixed.
 
 ## Next implementation step
 
