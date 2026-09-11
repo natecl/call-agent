@@ -28,6 +28,7 @@ from call_agent.domain import (
     LiveClosedEvent,
     LiveClosing,
     LiveDormant,
+    LiveInputTranscriptEvent,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
     LiveSessionId,
@@ -48,6 +49,7 @@ from call_agent.domain import (
     StreamId,
     TelnyxAnswered,
     Transcript,
+    Turn,
     UserId,
     WebhookEvent,
     assess_transcript,
@@ -378,6 +380,56 @@ def test_dial_placed_only_changes_pending_dial(
 
     assert reduced == call
     assert effects == ()
+
+
+def test_split_closing_turns_still_verdict_and_enter_hangup_drain(
+    reduce_settings: ReduceSettings,
+) -> None:
+    question = Question.from_cli(QuestionType.HOURS, None)
+    split_closing = Transcript(
+        turns=(
+            Turn(speaker=Speaker.BUSINESS, text="We're open 9 to 5."),
+            Turn(speaker=Speaker.AGENT, text="Thanks,"),
+            Turn(
+                speaker=Speaker.AGENT,
+                text=" that's all I needed. Goodbye.",
+            ),
+        )
+    )
+
+    verdict = assess_transcript(split_closing, question)
+    call, before_close = reduce(
+        speaking_call(),
+        LiveOutputTranscriptEvent(delta="Thanks,"),
+        reduce_settings,
+    )
+    call, _ = reduce(
+        call,
+        LiveInputTranscriptEvent(delta="We're open 9 to 5."),
+        reduce_settings,
+    )
+    call, effects = reduce(
+        call,
+        LiveOutputTranscriptEvent(delta=" that's all I needed. Goodbye."),
+        reduce_settings,
+    )
+
+    assert verdict == Answered(answer_text="We're open 9 to 5.")
+    assert before_close == ()
+    assert isinstance(call.conversation, ConversationTerminal)
+    assert call.conversation.verdict == Answered(
+        answer_text="We're open 9 to 5."
+    )
+    assert call.hangup == HangupDraining()
+    assert call.live == LiveClosing()
+    assert [effect.model_dump(mode="json") for effect in effects] == [
+        {
+            "kind": "schedule",
+            "delay_s": 10.0,
+            "event": {"kind": "hangup_drain_timeout"},
+        },
+        {"kind": "close_live"},
+    ]
 
 
 def test_assess_transcript_waits_for_closing_then_answers_or_declines() -> None:
