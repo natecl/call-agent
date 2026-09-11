@@ -123,8 +123,12 @@ class _StopFrame(_WireModel):
     stream_id: StreamId
 
 
+class _IgnoredFrame(_WireModel):
+    event: Literal["connected", "dtmf"]
+
+
 _InboundMediaFrame: TypeAlias = Annotated[
-    _StartFrame | _MediaFrame | _StopFrame,
+    _StartFrame | _MediaFrame | _StopFrame | _IgnoredFrame,
     Field(discriminator="event"),
 ]
 _MEDIA_ADAPTER = TypeAdapter(_InboundMediaFrame)
@@ -205,7 +209,7 @@ def parse_webhook(raw: bytes) -> WebhookEvent:
 
 def parse_media_frame(
     raw: str,
-) -> MediaStartEvent | MediaChunkEvent | MediaStopEvent:
+) -> MediaStartEvent | MediaChunkEvent | MediaStopEvent | None:
     frame = _MEDIA_ADAPTER.validate_json(raw)
     if isinstance(frame, _StartFrame):
         return MediaStartEvent(
@@ -218,7 +222,9 @@ def parse_media_frame(
             stream_id=frame.stream_id,
             payload_b64=frame.media.payload,
         )
-    return MediaStopEvent(stream_id=frame.stream_id)
+    if isinstance(frame, _StopFrame):
+        return MediaStopEvent(stream_id=frame.stream_id)
+    return None
 
 
 class LiveTelnyxHttp:
@@ -342,46 +348,46 @@ class StubTelnyxMedia:
         self._append_outbound = append_outbound
 
     def begin(self) -> None:
-        start = json.dumps(
-            {
-                "event": "start",
-                "stream_id": "stub-stream-0001",
-                "start": {
-                    "call_control_id": "stub-call-0001",
-                    "media_format": {
-                        "encoding": "L16",
-                        "sample_rate": 16000,
-                        "channels": 1,
-                    },
-                },
-            }
-        )
-        self._submit(parse_media_frame(start))
-        payload = base64.b64encode(bytes(640)).decode()
-        for chunk in range(1, 4):
-            raw = json.dumps(
+        self._submit(
+            self._parse(
                 {
-                    "event": "media",
+                    "event": "start",
                     "stream_id": "stub-stream-0001",
-                    "media": {
-                        "payload": payload,
-                        "track": "inbound",
-                        "chunk": chunk,
-                        "timestamp": str(chunk * 20),
+                    "start": {
+                        "call_control_id": "stub-call-0001",
+                        "media_format": {
+                            "encoding": "L16",
+                            "sample_rate": 16000,
+                            "channels": 1,
+                        },
                     },
                 }
             )
-            self._submit(parse_media_frame(raw))
+        )
+        payload = base64.b64encode(bytes(640)).decode()
+        for chunk in range(1, 4):
+            self._submit(
+                self._parse(
+                    {
+                        "event": "media",
+                        "stream_id": "stub-stream-0001",
+                        "media": {
+                            "payload": payload,
+                            "track": "inbound",
+                            "chunk": chunk,
+                            "timestamp": str(chunk * 20),
+                        },
+                    }
+                )
+            )
 
     def stop(self) -> None:
         self._submit(
-            parse_media_frame(
-                json.dumps(
-                    {
-                        "event": "stop",
-                        "stream_id": "stub-stream-0001",
-                    }
-                )
+            self._parse(
+                {
+                    "event": "stop",
+                    "stream_id": "stub-stream-0001",
+                }
             )
         )
 
@@ -390,6 +396,13 @@ class StubTelnyxMedia:
 
     async def close(self) -> None:
         return None
+
+    @staticmethod
+    def _parse(frame: dict[str, Any]) -> CallEvent:
+        event = parse_media_frame(json.dumps(frame))
+        if event is None:
+            raise ValueError("stub fixture produced an ignored frame")
+        return event
 
 
 class StubTelnyxHttp:
