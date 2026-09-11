@@ -60,6 +60,7 @@ def test_serialize_dial_matches_call_control_payload() -> None:
         "stream_bidirectional_mode": "rtp",
         "stream_bidirectional_target_legs": "self",
         "stream_bidirectional_codec": "L16",
+        "stream_bidirectional_sampling_rate": 16000,
         "stream_codec": "L16",
     }
 
@@ -176,6 +177,7 @@ def test_parse_media_frames_returns_domain_events() -> None:
             stream_id=StreamId("stream-1"),
             call_control_id="v3:abc",
             codec=Codec.L16,
+            sample_rate=16000,
         ),
         MediaChunkEvent(
             stream_id=StreamId("stream-1"),
@@ -236,10 +238,43 @@ def test_parse_media_frame_skips_connected_and_dtmf_and_rejects_error() -> None:
             stream_id=StreamId("stream-1"),
             call_control_id="v3:abc",
             codec=Codec.PCMU,
+            sample_rate=8000,
         ),
     )
     with pytest.raises(ValidationError, match="'error'"):
         parse_media_frame(error)
+
+
+def _start_frame(encoding: str, sample_rate: int) -> str:
+    return json.dumps(
+        {
+            "event": "start",
+            "stream_id": "stream-1",
+            "start": {
+                "call_control_id": "v3:abc",
+                "media_format": {
+                    "encoding": encoding,
+                    "sample_rate": sample_rate,
+                    "channels": 1,
+                },
+            },
+        }
+    )
+
+
+def test_parse_media_start_accepts_l16_at_8000_and_rejects_other_rates() -> None:
+    parsed = parse_media_frame(_start_frame("L16", 8000))
+
+    assert parsed == MediaStartEvent(
+        stream_id=StreamId("stream-1"),
+        call_control_id="v3:abc",
+        codec=Codec.L16,
+        sample_rate=8000,
+    )
+    with pytest.raises(ValidationError, match="sample_rate"):
+        parse_media_frame(_start_frame("L16", 48000))
+    with pytest.raises(ValidationError, match="sample_rate"):
+        parse_media_frame(_start_frame("PCMU", 16000))
 
 
 def test_serialize_session_start_matches_gpt_live_payload() -> None:

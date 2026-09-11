@@ -1,4 +1,5 @@
 import json
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -124,3 +125,31 @@ def test_verify_fails_when_far_party_hangs_up_before_answering(
         "reason: far party hung up before an answer"
         in report.checks[3].detail
     )
+
+
+def test_verify_quick_ask_passes_when_telnyx_streams_l16_at_8000(
+    workspace: SimpleNamespace,
+) -> None:
+    report = verify_quick_ask(
+        workspace=_workspace(workspace),
+        scenario=StubScenario(media_sample_rate=8000),
+    )
+
+    run_dir = workspace.artifacts_dir / report.call_control_id
+    dial = json.loads((run_dir / "dial.json").read_text())
+    session_start = json.loads(
+        (run_dir / "session_start.json").read_text()
+    )
+    with wave.open(str(run_dir / "audio" / "inbound.wav")) as inbound:
+        inbound_shape = (inbound.getframerate(), inbound.getnframes())
+    with wave.open(str(run_dir / "audio" / "outbound.wav")) as outbound:
+        outbound_shape = (outbound.getframerate(), outbound.getnframes())
+
+    assert report.passed is True
+    assert dial["stream_bidirectional_sampling_rate"] == 16000
+    assert session_start["session"]["audio"]["format"] == {
+        "type": "audio/pcm",
+        "rate": 16000,
+    }
+    assert inbound_shape == (8000, 960)
+    assert outbound_shape == (8000, 640)

@@ -69,6 +69,7 @@ def test_media_start_before_answer_opens_live_once_and_dedupes_webhook() -> None
             stream_id=StreamId("stream-1"),
             call_control_id="call-1",
             codec=Codec.L16,
+            sample_rate=16000,
         ),
         settings,
     )
