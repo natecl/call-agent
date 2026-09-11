@@ -49,7 +49,10 @@ class LiveTelnyxClient implements TelnyxClient {
   }
 
   async startStreaming(options: StartStreamingOptions): Promise<void> {
-    this.log.info({ callControlId: options.callControlId, streamUrl: options.streamUrl }, 'Starting media stream');
+    this.log.info(
+      { callControlId: options.callControlId, streamUrl: options.streamUrl },
+      'Starting media stream',
+    );
     await this.post(`/calls/${options.callControlId}/actions/streaming_start`, {
       stream_url: options.streamUrl,
       stream_track: options.streamTrack ?? this.config.TELNYX_STREAM_TRACK,

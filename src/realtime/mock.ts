@@ -5,9 +5,9 @@ import { generateSpokenTone, toFrames } from '../audio/tone.js';
 import type { RealtimeEvents, RealtimeSession } from './types.js';
 
 const CANNED_REPLIES = [
-  "Sure, I can help with that. Could you tell me a little more?",
-  "Got it. Let me take care of that for you.",
-  "Thanks for waiting. Is there anything else I can do?",
+  'Sure, I can help with that. Could you tell me a little more?',
+  'Got it. Let me take care of that for you.',
+  'Thanks for waiting. Is there anything else I can do?',
   "No problem at all. I've noted that down.",
 ];
 

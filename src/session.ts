@@ -99,6 +99,9 @@ export class CallSession {
     if (this.closed) return;
     this.closed = true;
     this.realtime.close();
-    this.log.info({ streamId: this.metadata.streamId, metrics: this.metrics }, 'Call session closed');
+    this.log.info(
+      { streamId: this.metadata.streamId, metrics: this.metrics },
+      'Call session closed',
+    );
   }
 }

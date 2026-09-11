@@ -44,45 +44,45 @@ npm run demo
 
 ## Scripts
 
-| Script | Purpose |
-| --- | --- |
-| `npm run dev` | Start the server with hot reload (tsx). |
-| `npm run build` | Bundle to `dist/` with tsup. |
-| `npm start` | Run the built server. |
-| `npm run typecheck` | Type-check with `tsc --noEmit`. |
-| `npm run lint` | Lint with ESLint. |
-| `npm run test` | Run the Vitest suite. |
-| `npm run demo` | Run a simulated inbound call in the terminal. |
+| Script              | Purpose                                       |
+| ------------------- | --------------------------------------------- |
+| `npm run dev`       | Start the server with hot reload (tsx).       |
+| `npm run build`     | Bundle to `dist/` with tsup.                  |
+| `npm start`         | Run the built server.                         |
+| `npm run typecheck` | Type-check with `tsc --noEmit`.               |
+| `npm run lint`      | Lint with ESLint.                             |
+| `npm run test`      | Run the Vitest suite.                         |
+| `npm run demo`      | Run a simulated inbound call in the terminal. |
 
 ## Configuration
 
 All configuration is via environment variables (see `.env.example`). Everything
 is optional — without credentials the app uses mock backends.
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PORT` | `3000` | HTTP/WebSocket port. |
-| `PUBLIC_HOST` | — | Public host Telnyx streams media to (e.g. an ngrok host). |
-| `TELNYX_API_KEY` | — | Enables the live Telnyx Call Control client. |
-| `TELNYX_STREAM_TRACK` | `inbound_track` | Which track(s) to stream. |
-| `OPENAI_API_KEY` | — | Enables the live GPT-Live backend. |
-| `OPENAI_MODEL` | `gpt-realtime` | Realtime model. |
-| `OPENAI_VOICE` | `marin` | Output voice. |
-| `SYSTEM_PROMPT` | see `.env.example` | Agent persona. |
-| `GREETING` | see `.env.example` | Opening line. |
-| `REALTIME_BACKEND` | `auto` | `auto` \| `openai` \| `mock`. |
-| `TELNYX_BACKEND` | `auto` | `auto` \| `live` \| `mock`. |
+| Variable              | Default            | Description                                               |
+| --------------------- | ------------------ | --------------------------------------------------------- |
+| `PORT`                | `3000`             | HTTP/WebSocket port.                                      |
+| `PUBLIC_HOST`         | —                  | Public host Telnyx streams media to (e.g. an ngrok host). |
+| `TELNYX_API_KEY`      | —                  | Enables the live Telnyx Call Control client.              |
+| `TELNYX_STREAM_TRACK` | `inbound_track`    | Which track(s) to stream.                                 |
+| `OPENAI_API_KEY`      | —                  | Enables the live GPT-Live backend.                        |
+| `OPENAI_MODEL`        | `gpt-realtime`     | Realtime model.                                           |
+| `OPENAI_VOICE`        | `marin`            | Output voice.                                             |
+| `SYSTEM_PROMPT`       | see `.env.example` | Agent persona.                                            |
+| `GREETING`            | see `.env.example` | Opening line.                                             |
+| `REALTIME_BACKEND`    | `auto`             | `auto` \| `openai` \| `mock`.                             |
+| `TELNYX_BACKEND`      | `auto`             | `auto` \| `live` \| `mock`.                               |
 
 ## HTTP endpoints
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/` | Demo console. |
-| `GET` | `/healthz` | Health check. |
-| `GET` | `/api/status` | Backend/config status. |
-| `POST` | `/telnyx/webhook` | Telnyx Call Control webhooks. |
-| `POST` | `/demo/simulate` | Run a simulated inbound call, returns transcript + audio. |
-| `WS` | `/telnyx/media` | Telnyx Media Streaming endpoint. |
+| Method | Path              | Purpose                                                   |
+| ------ | ----------------- | --------------------------------------------------------- |
+| `GET`  | `/`               | Demo console.                                             |
+| `GET`  | `/healthz`        | Health check.                                             |
+| `GET`  | `/api/status`     | Backend/config status.                                    |
+| `POST` | `/telnyx/webhook` | Telnyx Call Control webhooks.                             |
+| `POST` | `/demo/simulate`  | Run a simulated inbound call, returns transcript + audio. |
+| `WS`   | `/telnyx/media`   | Telnyx Media Streaming endpoint.                          |
 
 ## Going live
 

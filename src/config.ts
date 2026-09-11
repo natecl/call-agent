@@ -10,7 +10,7 @@ import { logger } from './logger.js';
  */
 const envSchema = z.object({
   NODE_ENV: z.string().default('development'),
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().min(0).max(65535).default(3000),
   HOST: z.string().default('0.0.0.0'),
 
   /** Publicly reachable wss host Telnyx should stream media to (no scheme). */
@@ -31,9 +31,7 @@ const envSchema = z.object({
     .default(
       'You are a friendly, concise consumer phone assistant. Keep replies short and natural for a voice call.',
     ),
-  GREETING: z
-    .string()
-    .default('Hi! Thanks for calling. How can I help you today?'),
+  GREETING: z.string().default('Hi! Thanks for calling. How can I help you today?'),
 
   /** Force a backend regardless of credential presence. Useful for demos/tests. */
   REALTIME_BACKEND: z.enum(['auto', 'openai', 'mock']).default('auto'),

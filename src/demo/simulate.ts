@@ -18,7 +18,7 @@ export interface SimulatedCallResult {
 const DEFAULT_CALLER_LINES = [
   "Hi, I'd like to check my order status.",
   "It's order number 12345.",
-  "Great, thank you!",
+  'Great, thank you!',
 ];
 
 function waitForResponse(realtime: RealtimeSession, timeoutMs = 3000): Promise<void> {
