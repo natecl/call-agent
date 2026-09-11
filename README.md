@@ -40,13 +40,15 @@ call-agent quick-ask --to +14155552671 --ask hours --name Nathan
 call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nathan
 ```
 
-`quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, and `call_report.json`.
+`quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json`.
 
 ## Read a call
 
 Start with `call_report.json`. It names the call (`call_control_id`, `run_id`, `to`, `from_did`, `mode`), the outcome (`status`, `answer_text`, `reason`), and how the call ended under `hangup`: `path` is `trail` when the final mark's echo and the trailing silence triggered the hangup, `drain_timeout` when the echo never came, `failure` when an error ended the call, and `far_party` when the callee hung up first. `timing_ms` gives milliseconds from the run start to each step (`answered`, `live_active`, `verdict`, `live_closed`, `final_mark_sent`, `final_mark_echoed`, `hangup_sent`, `call_ended`). `counts` includes `marks_sent`, `mark_echoes`, `stale_mark_echoes`, and `output_audio_chunks_after_verdict`. `refs` points at every other artifact.
 
 `events.jsonl` is the full sequence. Every row has `seq` and `t_ms`. Rows with `kind` are events, and a `transitions` object on an event row lists the tracks whose state it changed. Rows with `effect` are what the runtime did in response (`play_audio`, `mark`, `schedule`, `hangup`, `close_live`, `finish`). Audio payloads appear as byte counts.
+
+`call_report.redacted.json` is the shareable view. `call_report.json`, `transcript.json`, and the audio files stay local. Never send `transcript.json`, audio, or `call_report.json` to product analytics. Landing analytics stay separate. This repo has no landing code.
 
 ## Enable live mode later
 

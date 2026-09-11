@@ -40,8 +40,9 @@ Each `quick-ask` run writes one run directory.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
-| run directory | shipped | Writes `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, and `call_report.json` under `CALL_AGENT_ARTIFACTS_DIR` in a directory named for `call_control_id`. | `call_agent/runtime.py` `RunDir`. `README.md`. `docs/design.md` Shape, "Artifacts are the proof." |
+| run directory | shipped | Writes `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json` under `CALL_AGENT_ARTIFACTS_DIR` in a directory named for `call_control_id`. | `call_agent/runtime.py` `RunDir`. `README.md`. `docs/design.md` Shape, "Artifacts are the proof." |
 | `CallReport` | shipped | Records `timing_ms`, `hangup.path` as trail, drain_timeout, failure, or far_party, `counts.marks_sent`, and refs, and `result_artifact` checks that `CallReport` and those refs exist. | `call_agent/report.py` `CallReport` `HangupSummary.path` `Counts.marks_sent`. `call_agent/verify.py` `result_artifact`. `tests/test_verify_quick_ask.py` |
+| `call_report.redacted.json` | shipped | Writes a `RedactedCallReport` sibling from `redact_call_report` after `call_report.json`. Phone fields are `[phone]`. The caller field is `[name]` or `None`. | `call_agent/report.py` `redact_call_report`. `call_agent/runtime.py` `RunDir.finish`. `tests/test_report.py` |
 
 ## verify-quick-ask
 

@@ -7,6 +7,7 @@ from .domain import (
     E164,
     HANGUP_MARK,
     Call,
+    FirstName,
     FrozenModel,
     HangupConfirmed,
     HangupRequested,
@@ -81,6 +82,62 @@ class CallReport(FrozenModel):
     hangup: HangupSummary
     counts: Counts
     refs: Refs
+
+
+MaskedE164: TypeAlias = Literal["[phone]"]
+MaskedFirstName: TypeAlias = Literal["[name]"]
+
+
+class RedactedHangupSummary(FrozenModel):
+    path: HangupPath | None
+    trailing_silence_s: float
+    drain_timeout_s: float
+
+
+class RedactedCallReport(FrozenModel):
+    mode: Mode
+    to: MaskedE164
+    from_did: MaskedE164
+    caller_first_name: MaskedFirstName | None
+    status: Literal["answered", "declined", "no_answer", "failed"]
+    started_at: datetime
+    ended_at: datetime
+    duration_ms: int
+    timing_ms: TimingMs
+    hangup: RedactedHangupSummary
+    counts: Counts
+
+
+def mask_e164(value: E164) -> MaskedE164:
+    return "[phone]"
+
+
+def mask_first_name(value: FirstName | None) -> MaskedFirstName | None:
+    if value is None:
+        return None
+    return "[name]"
+
+
+def redact_call_report(
+    report: CallReport, *, caller_first_name: FirstName | None
+) -> RedactedCallReport:
+    return RedactedCallReport(
+        mode=report.mode,
+        to=mask_e164(report.to),
+        from_did=mask_e164(report.from_did),
+        caller_first_name=mask_first_name(caller_first_name),
+        status=report.status,
+        started_at=report.started_at,
+        ended_at=report.ended_at,
+        duration_ms=report.duration_ms,
+        timing_ms=report.timing_ms,
+        hangup=RedactedHangupSummary(
+            path=report.hangup.path,
+            trailing_silence_s=report.hangup.trailing_silence_s,
+            drain_timeout_s=report.hangup.drain_timeout_s,
+        ),
+        counts=report.counts,
+    )
 
 
 _TIMING_TRANSITIONS: dict[str, tuple[str, str]] = {
