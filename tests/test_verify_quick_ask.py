@@ -187,4 +187,4 @@ def test_verify_quick_ask_passes_when_telnyx_streams_l16_at_8000(
         "rate": 16000,
     }
     assert inbound_shape == (8000, 960)
-    assert outbound_shape == (8000, 320)
+    assert outbound_shape == (8000, 800)

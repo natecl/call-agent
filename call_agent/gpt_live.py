@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal, Protocol, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 from websockets.asyncio.client import ClientConnection, connect
+from websockets.exceptions import ConnectionClosed
 
 from .domain import (
     CLOSING_LINE,
@@ -179,6 +180,7 @@ class LiveGptLive:
         extra_headers: str | None,
         submit: Submit,
         write_json: WriteJson = _ignore_json,
+        close_timeout_s: float = 5.0,
     ) -> None:
         self._endpoint = endpoint
         self._headers = {"Authorization": f"Bearer {api_key}"}
@@ -191,9 +193,11 @@ class LiveGptLive:
             self._headers[name.strip()] = value.strip()
         self._submit = submit
         self._write_json = write_json
+        self._close_timeout_s = close_timeout_s
         self._connection: ClientConnection | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._closing = False
+        self._closed_reported = False
 
     async def start(self, spec: LiveSessionSpec) -> None:
         payload = serialize_session_start(spec)
@@ -233,13 +237,20 @@ class LiveGptLive:
         if self._connection is None or self._closing:
             return
         self._closing = True
-        await self._connection.send(json.dumps({"type": "session.close"}))
+        try:
+            await self._connection.send(json.dumps({"type": "session.close"}))
+        except ConnectionClosed:
+            pass
+        # The server flushes the audio it still holds and then ends the
+        # session. Waiting for the reader keeps that audio ahead of the
+        # single playback mark the reducer sends on LiveClosedEvent.
+        reader = self._reader_task
+        if reader is None or reader is asyncio.current_task():
+            await self._connection.close()
+            return
+        await asyncio.wait({reader}, timeout=self._close_timeout_s)
         await self._connection.close()
-        if (
-            self._reader_task is not None
-            and self._reader_task is not asyncio.current_task()
-        ):
-            await self._reader_task
+        await reader
 
     async def _send(self, payload: dict[str, Any]) -> None:
         if self._connection is None:
@@ -252,11 +263,18 @@ class LiveGptLive:
         try:
             async for raw in self._connection:
                 event = parse_event(str(raw))
-                if event is not None:
-                    self._submit(event)
+                if event is None:
+                    continue
+                if isinstance(event, LiveClosedEvent):
+                    self._closed_reported = True
+                self._submit(event)
         except Exception as error:
             if not self._closing:
                 self._submit(LiveErrorEvent(message=str(error)))
+                return
+        if not self._closed_reported:
+            self._closed_reported = True
+            self._submit(LiveClosedEvent())
 
 
 class StubScenario(BaseModel):
@@ -268,6 +286,7 @@ class StubScenario(BaseModel):
     far_party_hangs_up: bool = False
     media_sample_rate: SampleRate = 16000
     playback_never_drains: bool = False
+    audio_chunks_after_closing_line: int = Field(default=2, ge=0)
 
 
 class StubGptLive:
@@ -339,16 +358,7 @@ class StubGptLive:
                 }
             )
         )
-        audio = base64.b64encode(bytes(640)).decode()
-        for _ in range(2):
-            self._submit(
-                self._parse(
-                    {
-                        "type": "session.output_audio.delta",
-                        "delta": audio,
-                    }
-                )
-            )
+        self._emit_audio(2)
         self._submit(
             self._parse(
                 {
@@ -357,6 +367,7 @@ class StubGptLive:
                 }
             )
         )
+        self._emit_audio(self._scenario.audio_chunks_after_closing_line)
 
     async def speak_first(self, line: str) -> None:
         self.spoken_lines.append(line)
@@ -368,7 +379,20 @@ class StubGptLive:
         if self._closed:
             return
         self._closed = True
+        self._emit_audio(1)
         self._submit(self._parse({"type": "session.closed"}))
+
+    def _emit_audio(self, chunks: int) -> None:
+        audio = base64.b64encode(bytes(640)).decode()
+        for _ in range(chunks):
+            self._submit(
+                self._parse(
+                    {
+                        "type": "session.output_audio.delta",
+                        "delta": audio,
+                    }
+                )
+            )
 
     @staticmethod
     def _halves(text: str) -> tuple[str, str]:
