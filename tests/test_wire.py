@@ -1,9 +1,12 @@
+import asyncio
 import json
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from call_agent.domain import (
+    CallEvent,
     ClientState,
     Codec,
     DialSpec,
@@ -23,7 +26,7 @@ from call_agent.domain import (
     UserId,
     WebhookEvent,
 )
-from call_agent.gpt_live import parse_event, serialize_session_start
+from call_agent.gpt_live import LiveGptLive, parse_event, serialize_session_start
 from call_agent.telnyx import (
     parse_media_frame,
     parse_webhook,
@@ -363,6 +366,83 @@ def test_parse_gpt_live_events_returns_domain_events() -> None:
         LiveOutputAudioEvent(delta_b64="AAA="),
         LiveClosedEvent(),
     )
+
+
+class FlushingLiveSocket:
+    def __init__(self, replies_after_close: list[dict[str, Any]]) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.closed = False
+        self._replies_after_close = replies_after_close
+        self._frames: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def send(self, raw: str) -> None:
+        message = json.loads(raw)
+        self.sent.append(message)
+        if message["type"] == "session.close":
+            for reply in self._replies_after_close:
+                self._frames.put_nowait(json.dumps(reply))
+            self._frames.put_nowait(None)
+
+    async def close(self) -> None:
+        self.closed = True
+        self._frames.put_nowait(None)
+
+    def __aiter__(self) -> "FlushingLiveSocket":
+        return self
+
+    async def __anext__(self) -> str:
+        frame = await self._frames.get()
+        if frame is None:
+            raise StopAsyncIteration
+        return frame
+
+
+@pytest.mark.parametrize(
+    "replies_after_close",
+    [
+        [{"type": "session.output_audio.delta", "delta": "AAA="}],
+        [
+            {"type": "session.output_audio.delta", "delta": "AAA="},
+            {"type": "session.closed"},
+        ],
+    ],
+    ids=["server_closes_silently", "server_sends_session_closed"],
+)
+async def test_live_gpt_live_close_flushes_audio_then_reports_closed_once(
+    monkeypatch: pytest.MonkeyPatch,
+    replies_after_close: list[dict[str, Any]],
+) -> None:
+    socket = FlushingLiveSocket(replies_after_close)
+
+    async def fake_connect(endpoint: str, additional_headers: dict[str, str]):
+        return socket
+
+    monkeypatch.setattr("call_agent.gpt_live.connect", fake_connect)
+    events: list[CallEvent] = []
+    live = LiveGptLive(
+        endpoint="wss://live.example.test/v1/live/sessions",
+        api_key="key",
+        extra_headers=None,
+        submit=events.append,
+    )
+
+    await live.start(
+        LiveSessionSpec(
+            model="gpt-live-1",
+            instructions="Call on behalf of Nathan.",
+            audio=LiveAudioFormat(type="audio/pcm", rate=16000),
+            voice="marin",
+        )
+    )
+    await live.close()
+    await live.close()
+
+    assert [message["type"] for message in socket.sent] == [
+        "session.start",
+        "session.close",
+    ]
+    assert events == [LiveOutputAudioEvent(delta_b64="AAA="), LiveClosedEvent()]
+    assert socket.closed is True
 
 
 def test_parse_gpt_live_rejects_realtime_and_ignores_usage() -> None:

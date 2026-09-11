@@ -19,15 +19,20 @@ from call_agent.domain import (
     Failed,
     FinishEffect,
     FirstName,
+    HangupDraining,
     HangupEffect,
+    HangupMarked,
     HangupRequested,
     LiveActive,
     LiveClosed,
+    LiveClosedEvent,
+    LiveClosing,
     LiveDormant,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
     LiveSessionId,
     LiveStarting,
+    MarkEffect,
     MediaStartEvent,
     MediaStreaming,
     Mode,
@@ -116,7 +121,7 @@ def mark_echo(name: str):
     )
 
 
-def test_verdict_while_output_audio_is_in_flight_marks_playback_and_defers_hangup(
+def test_verdict_closes_live_and_drains_without_a_mark_per_chunk(
     reduce_settings: ReduceSettings,
 ) -> None:
     call, audio_effects = reduce(
@@ -134,21 +139,18 @@ def test_verdict_while_output_audio_is_in_flight_marks_playback_and_defers_hangu
     assert isinstance(call.conversation, ConversationTerminal)
     assert call.conversation.verdict == Answered(answer_text="We're open 9 to 5.")
     assert [effect.model_dump(mode="json") for effect in verdict_effects] == [
-        {"kind": "mark", "name": "hangup-1"},
         {
             "kind": "schedule",
             "delay_s": 10.0,
             "event": {"kind": "hangup_drain_timeout"},
         },
+        {"kind": "close_live"},
     ]
-    assert call.hangup.model_dump(mode="json") == {
-        "kind": "hangup_draining",
-        "marks_sent": 1,
-    }
-    assert call.live == LiveActive(session_id=LiveSessionId("live-1"))
+    assert call.hangup == HangupDraining()
+    assert call.live == LiveClosing()
 
 
-def test_hangup_fires_once_after_the_last_mark_echo_and_the_trailing_silence(
+def test_goodbye_audio_storm_sends_one_final_mark_after_live_closes_and_hangs_up_once(
     reduce_settings: ReduceSettings,
 ) -> None:
     call, _ = reduce(
@@ -156,47 +158,57 @@ def test_hangup_fires_once_after_the_last_mark_echo_and_the_trailing_silence(
         LiveOutputTranscriptEvent(delta=CLOSING_LINE),
         reduce_settings,
     )
-    call, first_echo_effects = reduce(call, mark_echo("hangup-1"), reduce_settings)
-    call, late_audio_effects = reduce(
-        call, LiveOutputAudioEvent(delta_b64=AUDIO), reduce_settings
-    )
-    call, stale_trail_effects = reduce(
-        call, first_echo_effects[0].event, reduce_settings
-    )
-    call, second_echo_effects = reduce(call, mark_echo("hangup-2"), reduce_settings)
+    storm_effects: list = []
+    for _ in range(98):
+        call, effects = reduce(
+            call, LiveOutputAudioEvent(delta_b64=AUDIO), reduce_settings
+        )
+        storm_effects.extend(effects)
+    call, closed_effects = reduce(call, LiveClosedEvent(), reduce_settings)
+    marked = call.hangup
+    call, echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
     call, trail_effects = reduce(
-        call, second_echo_effects[0].event, reduce_settings
+        call, echo_effects[0].event, reduce_settings
     )
     call, repeat_effects = reduce(
-        call, second_echo_effects[0].event, reduce_settings
+        call, echo_effects[0].event, reduce_settings
     )
+    call, late_echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
 
-    assert [effect.model_dump(mode="json") for effect in first_echo_effects] == [
+    assert storm_effects == [PlayAudioEffect(delta_b64=AUDIO)] * 98
+    assert closed_effects == (MarkEffect(name="hangup"),)
+    assert marked == HangupMarked()
+    assert [effect.model_dump(mode="json") for effect in echo_effects] == [
         {
             "kind": "schedule",
             "delay_s": 0.4,
-            "event": {"kind": "hangup_trail_elapsed", "mark": "hangup-1"},
+            "event": {"kind": "hangup_trail_elapsed"},
         }
     ]
-    assert [effect.model_dump(mode="json") for effect in late_audio_effects] == [
-        {"kind": "play_audio", "delta_b64": AUDIO},
-        {"kind": "mark", "name": "hangup-2"},
-    ]
-    assert stale_trail_effects == ()
-    assert [effect.model_dump(mode="json") for effect in second_echo_effects] == [
-        {
-            "kind": "schedule",
-            "delay_s": 0.4,
-            "event": {"kind": "hangup_trail_elapsed", "mark": "hangup-2"},
-        }
-    ]
-    assert trail_effects == (
-        HangupEffect(call_control_id="call-1"),
-        CloseLiveEffect(),
-    )
-    assert call.hangup == HangupRequested()
+    assert trail_effects == (HangupEffect(call_control_id="call-1"),)
+    assert call.hangup == HangupRequested(via="trail")
     assert call.live == LiveClosed()
     assert repeat_effects == ()
+    assert late_echo_effects == ()
+
+
+def test_stale_mark_echo_does_not_arm_the_trail(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, _ = reduce(
+        speaking_call(),
+        LiveOutputTranscriptEvent(delta=CLOSING_LINE),
+        reduce_settings,
+    )
+    call, early_echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
+    call, _ = reduce(call, LiveClosedEvent(), reduce_settings)
+    call, stale_echo_effects = reduce(
+        call, mark_echo("hangup-1"), reduce_settings
+    )
+
+    assert early_echo_effects == ()
+    assert stale_echo_effects == ()
+    assert call.hangup == HangupMarked()
 
 
 def test_drain_timeout_hangs_up_without_a_mark_echo(
@@ -207,17 +219,35 @@ def test_drain_timeout_hangs_up_without_a_mark_echo(
         LiveOutputTranscriptEvent(delta=CLOSING_LINE),
         reduce_settings,
     )
+    call, closed_effects = reduce(call, LiveClosedEvent(), reduce_settings)
     call, timeout_effects = reduce(
-        call, verdict_effects[1].event, reduce_settings
+        call, verdict_effects[0].event, reduce_settings
     )
-    call, late_echo_effects = reduce(call, mark_echo("hangup-1"), reduce_settings)
+    call, late_echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
 
-    assert timeout_effects == (
-        HangupEffect(call_control_id="call-1"),
-        CloseLiveEffect(),
-    )
-    assert call.hangup == HangupRequested()
+    assert closed_effects == (MarkEffect(name="hangup"),)
+    assert timeout_effects == (HangupEffect(call_control_id="call-1"),)
+    assert call.hangup == HangupRequested(via="drain_timeout")
     assert late_echo_effects == ()
+
+
+def test_drain_timeout_before_live_closes_hangs_up_without_a_second_close(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, verdict_effects = reduce(
+        speaking_call(),
+        LiveOutputTranscriptEvent(delta=CLOSING_LINE),
+        reduce_settings,
+    )
+    call, timeout_effects = reduce(
+        call, verdict_effects[0].event, reduce_settings
+    )
+    call, late_closed_effects = reduce(call, LiveClosedEvent(), reduce_settings)
+
+    assert timeout_effects == (HangupEffect(call_control_id="call-1"),)
+    assert call.hangup == HangupRequested(via="drain_timeout")
+    assert late_closed_effects == ()
+    assert call.live == LiveClosed()
 
 
 def test_streaming_failed_during_the_drain_still_hangs_up(
@@ -241,7 +271,6 @@ def test_streaming_failed_during_the_drain_still_hangs_up(
 
     assert effects == (
         HangupEffect(call_control_id="call-1"),
-        CloseLiveEffect(),
         FinishEffect(
             result=Failed(
                 call_control_id="call-1",
@@ -249,6 +278,7 @@ def test_streaming_failed_during_the_drain_still_hangs_up(
             )
         ),
     )
+    assert call.hangup == HangupRequested(via="failure")
     assert call.finished is True
 
 
@@ -329,7 +359,7 @@ def test_streaming_failed_hangs_up_closes_live_and_fails_the_call(
         FinishEffect(result=result),
     )
     assert dormant_call.finished is True
-    assert dormant_call.hangup == HangupRequested()
+    assert dormant_call.hangup == HangupRequested(via="failure")
     assert dormant_call.live == LiveDormant()
     assert starting_call.live == LiveClosed()
 
