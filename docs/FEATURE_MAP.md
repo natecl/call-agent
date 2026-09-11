@@ -1,6 +1,6 @@
 # Feature map
 
-Rationale is in [docs/design.md](design.md).
+This file lists what `main` implements today. It is not a plan. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md).
 
 ## Status
 
@@ -28,10 +28,10 @@ CLI verb `quick-ask` drives `run_quick_ask`.
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `quick-ask` | shipped | Runs one outbound call through `run_quick_ask` with `--to`, `--ask`, `--name`, and `--item` for stock and aisle. | `call_agent/cli.py` `quick_ask`. `call_agent/runtime.py` `run_quick_ask`. `tests/test_cli.py` `test_quick_ask_stub_prints_answered_result`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
-| `quick-ask --live` | gated | Hosts FastAPI routes `/webhooks/telnyx` and `/media-stream` via `serve_in_process` and runs `run_quick_ask` when `--live` is set and `_require_live_gate` passes. | `call_agent/cli.py` `_run_request` `_require_live_gate`. `call_agent/server.py` `serve_in_process`. `call_agent/runtime.py` `run_quick_ask`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
+| `quick-ask --live` | gated | Hosts FastAPI routes `/webhooks/telnyx` and `/media-stream` with `serve_in_process` and runs `run_quick_ask` when `--live` is set and `_require_live_gate` passes. | `call_agent/cli.py` `_run_request` `_require_live_gate`. `call_agent/server.py` `serve_in_process`. `call_agent/runtime.py` `run_quick_ask`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `Call` | shipped | Holds six tracks named dial, telnyx, media, live, conversation, and hangup, and `reduce` applies every transition. | `call_agent/domain.py` `Call` `reduce`. `docs/design.md` Shape, "The call is a product of tracks, reduced by one pure function." `tests/test_domain.py` |
 | `HANGUP_MARK` | shipped | Sends one Telnyx mark named `hangup` after live closes, and `clean_hangup` requires `marks_sent == 1`. | `call_agent/domain.py` `HANGUP_MARK = "hangup"`. `call_agent/verify.py` `clean_hangup`. `tests/test_domain.py` `test_goodbye_audio_storm_sends_one_final_mark_after_live_closes_and_hangs_up_once`. `tests/test_runtime.py` `test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail`. `tests/test_verify_quick_ask.py` `test_verify_passes_with_one_final_mark_when_goodbye_audio_storms` |
-| `CLOSING_LINE` | shipped | `assess_transcript` joins agent text, sets `collapsed = " ".join(agent_text.split())`, and requires casefold containment of `Thanks, that's all I needed. Goodbye.` | `call_agent/domain.py` `CLOSING_LINE` `assess_transcript`. `tests/test_domain.py` `test_split_closing_turns_still_verdict_and_enter_hangup_drain` |
+| `CLOSING_LINE` | shipped | `assess_transcript` joins agent text, sets `collapsed = " ".join(agent_text.split())`, and requires casefold containment of `Thanks, that's all I needed. Goodbye.`. | `call_agent/domain.py` `CLOSING_LINE` `assess_transcript`. `tests/test_domain.py` `test_split_closing_turns_still_verdict_and_enter_hangup_drain` |
 | `HangupTrailElapsedEvent` | shipped | Schedules `HangupTrailElapsedEvent` after `hangup_trailing_silence_s` of 0.4 s on the final mark echo and hangs up with path trail, and a 10 s `HangupDrainTimeoutEvent` fails `clean_hangup`. | `call_agent/domain.py` `HangupTrailElapsedEvent` `HangupDrainTimeoutEvent`. `call_agent/config.py` `hangup_trailing_silence_s` `hangup_drain_timeout_s`. `call_agent/verify.py` `marks_sent == 1` `hangup_path == "trail"` last audio then trail then `call.hangup`. `docs/design.md` Shape, "The hangup waits for the goodbye." |
 
 ## Run directory
@@ -86,7 +86,7 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
-| hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.` | `README.md`. `call_agent/domain.py` `build_instructions` |
+| hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
 | iMessage | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |
