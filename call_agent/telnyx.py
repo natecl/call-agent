@@ -398,10 +398,14 @@ class StubTelnyxHttp:
         submit: Submit = _ignore_event,
         media: StubTelnyxMedia | None = None,
         write_json: WriteJson = _ignore_json,
+        dial_override: dict[str, Any] | None = None,
+        far_party_hangs_up: bool = False,
     ) -> None:
         self._submit = submit
         self._media = media or StubTelnyxMedia(submit)
         self._write_json = write_json
+        self._dial_override = dial_override or {}
+        self._far_party_hangs_up = far_party_hangs_up
         self._orders: dict[str, OrderedNumber] = {}
         self._number_counter = 0
         self._hung_up = False
@@ -422,7 +426,9 @@ class StubTelnyxHttp:
         return self._orders[order_id]
 
     def dial(self, spec: DialSpec) -> DialPlacedEvent:
-        self._write_json("dial.json", serialize_dial(spec))
+        self._write_json(
+            "dial.json", serialize_dial(spec) | self._dial_override
+        )
         placed = DialPlacedEvent(
             call_control_id="stub-call-0001",
             call_leg_id="stub-leg-0001",
@@ -453,6 +459,19 @@ class StubTelnyxHttp:
                 )
             )
         )
+        if self._far_party_hangs_up:
+            self._hung_up = True
+            self._media.stop()
+            self._submit(
+                parse_webhook(
+                    self._webhook(
+                        "webhook-hangup-0001",
+                        "call.hangup",
+                        hangup_cause="normal_clearing",
+                        hangup_source="callee",
+                    )
+                )
+            )
         return placed
 
     def hangup(self, call_control_id: CallControlId) -> None:

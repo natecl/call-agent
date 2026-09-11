@@ -17,9 +17,9 @@ from .domain import (
     UserId,
 )
 from .ledger import Ledger
-from .runtime import run_quick_ask
+from .runtime import run_quick_ask, validate_live
 from .server import serve_in_process
-from .telnyx import StubTelnyxHttp
+from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
 from .verify import VerifyInput, format_report, verify_quick_ask
 
 
@@ -35,18 +35,33 @@ LIVE_GATE_MESSAGE = (
 @did_app.command("provision")
 def did_provision(
     user: str = typer.Option("default", "--user"),
+    live: bool = typer.Option(False, "--live"),
 ) -> None:
     settings = Settings()
     try:
         user_id = UserId(user)
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint="--user") from error
+    telnyx: TelnyxHttp = StubTelnyxHttp()
+    if live:
+        _require_live_gate(settings)
+        try:
+            validate_live(settings)
+        except ValueError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+        telnyx = LiveTelnyxHttp(settings.telnyx_api_key or "")
     record = Ledger(settings.call_agent_db_path).provision(
         user_id,
-        StubTelnyxHttp(),
+        telnyx,
         settings.telnyx_connection_id or "stub-connection",
     )
     if record.did is None:
+        typer.echo(
+            f"DID order {record.order_id} is still pending at Telnyx; "
+            "re-run did provision to resume it",
+            err=True,
+        )
         raise typer.Exit(code=1)
     typer.echo(record.did)
 
@@ -68,7 +83,7 @@ def did_list() -> None:
 def quick_ask(
     to: str = typer.Option(..., "--to"),
     ask: QuestionType = typer.Option(..., "--ask"),
-    name: str = typer.Option("Nathan", "--name"),
+    name: str = typer.Option(..., "--name"),
     item: str | None = typer.Option(None, "--item"),
     user: str = typer.Option("default", "--user"),
     live: bool = typer.Option(False, "--live"),
@@ -141,11 +156,8 @@ async def _run_request(
 ) -> QuickAskResult:
     if request.mode is Mode.STUB:
         return await run_quick_ask(request, settings)
-    server = await serve_in_process(settings)
-    task = getattr(server, "_call_agent_task")
+    running = await serve_in_process(settings)
     try:
         return await run_quick_ask(request, settings)
     finally:
-        server.should_exit = True
-        await server.shutdown()
-        await task
+        await running.stop()

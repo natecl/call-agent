@@ -263,6 +263,8 @@ class StubScenario(BaseModel):
 
     canned_answer: str | None = None
     skip_disclosure: bool = False
+    dial_override: dict[str, Any] = {}
+    far_party_hangs_up: bool = False
 
 
 class StubGptLive:

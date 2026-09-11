@@ -204,11 +204,14 @@ def build_ports(
             submit=submit,
             append_outbound=run_dir.append_outbound,
         )
+        faults = scenario or StubScenario()
         return Ports(
             telnyx_http=StubTelnyxHttp(
                 submit=submit,
                 media=media,
                 write_json=run_dir.write_json,
+                dial_override=faults.dial_override,
+                far_party_hangs_up=faults.far_party_hangs_up,
             ),
             telnyx_media=media,
             gpt_live=StubGptLive(
@@ -379,7 +382,7 @@ class CallBook:
 BOOK = CallBook()
 
 
-def _validate_live(settings: Settings) -> None:
+def validate_live(settings: Settings) -> None:
     missing: list[str] = []
     if not settings.quick_ask_live:
         missing.append("QUICK_ASK_LIVE")
@@ -407,7 +410,7 @@ async def run_quick_ask(
     scenario: StubScenario | None = None,
 ) -> QuickAskResult:
     if request.mode is Mode.LIVE:
-        _validate_live(settings)
+        validate_live(settings)
     run_id = RunId(str(uuid.uuid4()))
     codec = Codec(settings.telnyx_stream_codec)
     run_dir = RunDir(

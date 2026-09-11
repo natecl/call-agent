@@ -141,8 +141,10 @@ def verify_quick_ask(
         name="did_in_ledger",
         passed=did_passed,
         detail=(
-            f"{len(rows)} row for user {verify_input.user_id}, "
-            f"from_did {first_provision.did}"
+            f"{len(rows)} row(s) for user {verify_input.user_id}, "
+            f"ledger has {rows[0].did if rows else None}, "
+            f"expected from_did {verify_input.from_did}, "
+            f"provisions agree={first_provision.did == second_provision.did}"
         ),
     )
 
@@ -163,7 +165,11 @@ def verify_quick_ask(
             f"from={dial.get('from')} to={dial.get('to')} "
             f"stream_url={dial.get('stream_url')} "
             f"mode={dial.get('stream_bidirectional_mode')}/"
-            f"{dial.get('stream_bidirectional_target_legs')}"
+            f"{dial.get('stream_bidirectional_target_legs')} "
+            f"codec={dial.get('stream_codec')}/"
+            f"{dial.get('stream_bidirectional_codec')}, "
+            f"expected from={verify_input.from_did} to={verify_input.to} "
+            "wss:// rtp/self matching codecs"
         ),
     )
 
@@ -195,9 +201,10 @@ def verify_quick_ask(
         name="disclosure_first",
         passed=ordered and spoken,
         detail=(
-            f"disclosure={instructions.find(disclosure)} "
-            f"ask={instructions.find(verify_input.question_text)} "
-            f"spoken={spoken}"
+            f"instructions disclosure_at={instructions.find(disclosure)} "
+            f"ask_at={instructions.find(verify_input.question_text)} "
+            f"first_agent_turn_discloses={spoken}, "
+            f"expected '{disclosure}' before the ask and spoken first"
         ),
     )
 
@@ -229,11 +236,18 @@ def verify_quick_ask(
         name="clean_hangup",
         passed=clean_hangup_passed,
         detail=(
-            f"verdict={artifact_result.get('status')} "
+            f"status={artifact_result.get('status')} "
+            f"hangup_json={(run_dir / 'hangup.json').is_file()} "
             f"transcript_seq="
             f"{transcript_sequences[-1] if transcript_sequences else None} "
             f"hangup_seq="
-            f"{hangup_sequences[-1] if hangup_sequences else None}"
+            f"{hangup_sequences[-1] if hangup_sequences else None}, "
+            "expected status answered|declined and verdict before call.hangup"
+            + (
+                f" (reason: {artifact_result.get('reason')})"
+                if artifact_result.get("reason")
+                else ""
+            )
         ),
     )
 
