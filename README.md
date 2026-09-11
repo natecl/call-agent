@@ -22,7 +22,7 @@ You should see five `[PASS]` lines and `5/5 passed`, and the command exits 0. Th
 1. `did_in_ledger`. The user has exactly one number in the ledger, and provisioning twice returns the same number.
 2. `dial_payload`. The Call Control body has `from` set to that number, `to` set to the destination, a `wss://` `stream_url`, `stream_bidirectional_mode: rtp`, and `stream_bidirectional_target_legs: self`.
 3. `disclosure_first`. The GPT-Live `session.start` instructions name the caller ("on behalf of Nathan") before the question, and the agent's first transcript turn does too.
-4. `clean_hangup`. The verdict comes from the transcript, the hangup follows the verdict, and Telnyx confirms with `call.hangup`.
+4. `clean_hangup`. The verdict comes from the transcript, Telnyx echoes the final playback mark, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s) fails this check.
 5. `result_artifact`. `result.json` is a valid `QuickAskResult`, and its `transcript_ref` and `audio_ref` point at files that exist.
 
 To run the test suite:

@@ -3,6 +3,8 @@ import wave
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from call_agent.domain import E164
 from call_agent.gpt_live import StubScenario
 from call_agent.verify import VerifyInput, VerifyWorkspace, verify_quick_ask
@@ -125,6 +127,39 @@ def test_verify_fails_when_far_party_hangs_up_before_answering(
         "reason: far party hung up before an answer"
         in report.checks[3].detail
     )
+
+
+def test_verify_fails_clean_hangup_when_playback_never_drains(
+    workspace: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HANGUP_DRAIN_TIMEOUT_S", "0")
+
+    report = verify_quick_ask(
+        workspace=_workspace(workspace),
+        scenario=StubScenario(playback_never_drains=True),
+    )
+    kinds = [
+        json.loads(line)["kind"]
+        for line in (
+            workspace.artifacts_dir / report.call_control_id / "events.jsonl"
+        )
+        .read_text()
+        .splitlines()
+    ]
+
+    assert [check.passed for check in report.checks] == [
+        True,
+        True,
+        True,
+        False,
+        True,
+    ]
+    assert report.passed is False
+    assert "status=answered" in report.checks[3].detail
+    assert "drain_timed_out=True" in report.checks[3].detail
+    assert "hangup_drain_timeout" in kinds
+    assert "hangup_trail_elapsed" not in kinds
 
 
 def test_verify_quick_ask_passes_when_telnyx_streams_l16_at_8000(
