@@ -187,6 +187,25 @@ def test_parse_media_frames_returns_domain_events() -> None:
     )
 
 
+def test_parse_media_mark_echo_returns_domain_event() -> None:
+    mark = json.dumps(
+        {
+            "event": "mark",
+            "stream_id": "stream-1",
+            "sequence_number": "5",
+            "mark": {"name": "hangup-1"},
+        }
+    )
+
+    parsed = parse_media_frame(mark)
+
+    assert parsed.model_dump(mode="json") == {
+        "kind": "media_mark",
+        "stream_id": "stream-1",
+        "name": "hangup-1",
+    }
+
+
 def test_parse_media_frame_skips_connected_and_dtmf_and_rejects_error() -> None:
     connected = json.dumps({"event": "connected", "version": "1.0.0"})
     dtmf = json.dumps(
