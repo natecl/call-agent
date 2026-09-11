@@ -675,7 +675,8 @@ def assess_transcript(
     agent_text = " ".join(
         turn.text for turn in transcript.turns if turn.speaker is Speaker.AGENT
     )
-    if CLOSING_LINE.casefold() not in agent_text.casefold():
+    collapsed = " ".join(agent_text.split())
+    if CLOSING_LINE.casefold() not in collapsed.casefold():
         return None
     business_text = transcript.business_text()
     if not business_text.strip():
