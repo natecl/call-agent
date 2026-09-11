@@ -22,6 +22,7 @@ from .domain import (
     MediaStopEvent,
     StreamId,
     WebhookEvent,
+    WebhookEventType,
 )
 
 
@@ -61,16 +62,11 @@ class _WebhookPayload(_WireModel):
     call_control_id: CallControlId
     hangup_cause: str | None = None
     hangup_source: str | None = None
+    failure_reason: str | None = None
 
 
 class _WebhookData(_WireModel):
-    event_type: Literal[
-        "call.initiated",
-        "call.answered",
-        "streaming.started",
-        "streaming.stopped",
-        "call.hangup",
-    ]
+    event_type: WebhookEventType
     id: str
     payload: _WebhookPayload
 
@@ -204,6 +200,7 @@ def parse_webhook(raw: bytes) -> WebhookEvent:
         call_control_id=data.payload.call_control_id,
         hangup_cause=data.payload.hangup_cause,
         hangup_source=data.payload.hangup_source,
+        failure_reason=data.payload.failure_reason,
     )
 
 

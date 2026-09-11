@@ -462,19 +462,24 @@ class DialPlacedEvent(FrozenModel):
     call_session_id: str
 
 
+WebhookEventType: TypeAlias = Literal[
+    "call.initiated",
+    "call.answered",
+    "streaming.started",
+    "streaming.failed",
+    "streaming.stopped",
+    "call.hangup",
+]
+
+
 class WebhookEvent(FrozenModel):
     kind: Literal["webhook"] = "webhook"
     webhook_id: str
-    event_type: Literal[
-        "call.initiated",
-        "call.answered",
-        "streaming.started",
-        "streaming.stopped",
-        "call.hangup",
-    ]
+    event_type: WebhookEventType
     call_control_id: CallControlId
     hangup_cause: str | None = None
     hangup_source: str | None = None
+    failure_reason: str | None = None
 
 
 class MediaStartEvent(FrozenModel):
@@ -769,6 +774,9 @@ def reduce(
         call = call.model_copy(update=updates)
         if event.event_type == "call.hangup":
             return _end_for_webhook(call, previous_telnyx, ())
+        if event.event_type == "streaming.failed":
+            reason = event.failure_reason or "unknown"
+            return _fail(call, f"Telnyx media streaming failed: {reason}")
         return _maybe_open_live(call, settings)
 
     if isinstance(event, MediaStartEvent):
