@@ -265,10 +265,8 @@ class LiveLinqHttp:
         if not api_token:
             raise LinqConfigError("live Linq requires LINQ_API_TOKEN")
         self._base_url = base_url.rstrip("/")
-        self._client = client or httpx.Client(
-            headers={"Authorization": f"Bearer {api_token}"},
-            timeout=30.0,
-        )
+        self._client = client or httpx.Client(timeout=30.0)
+        self._client.headers["Authorization"] = f"Bearer {api_token}"
 
     def send(self, message: OutboundChat) -> SendReceipt:
         response = self._client.post(
