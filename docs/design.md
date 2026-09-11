@@ -60,7 +60,7 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 
 - We accept six small unions on `Call` in exchange for never special-casing transport arrival order.
 - We accept a heuristic `assess_transcript` in exchange for the fake never owning the verdict. A tool-call verdict via GPT-Live delegation is the day-2 upgrade.
-- We accept raw L16 written as WAV and PCMU written raw in exchange for zero transcoding.
+- We accept raw L16 written as WAV and PCMU written raw in exchange for zero transcoding when Telnyx honors the requested 16 kHz. An 8 kHz L16 leg is resampled 2x in the reducer so GPT-Live still runs at 16 kHz.
 - We accept `quick-ask --live` hosting the FastAPI app in the same process in exchange for one command and no job service. `PUBLIC_BASE_URL` must route to it.
 - We accept no mid-call crash resume. A crashed live call ends with Telnyx's own timeout.
 

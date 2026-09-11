@@ -27,6 +27,7 @@ from .domain import (
     FinishEffect,
     ForwardAudioEffect,
     HangupEffect,
+    LiveAudioFormat,
     LiveInputTranscriptEvent,
     LiveOutputTranscriptEvent,
     MediaChunkEvent,
@@ -38,6 +39,7 @@ from .domain import (
     QuickAskResult,
     ReduceSettings,
     RunId,
+    SampleRate,
     SpeakFirstEffect,
     TimeoutEvent,
     Transcript,
@@ -72,6 +74,7 @@ class RunDir:
         self.call_control_id = call_control_id
         self.path = root / call_control_id
         self._codec = codec
+        self._sample_rate: SampleRate = LiveAudioFormat.for_codec(codec).rate
         self._inbound = bytearray()
         self._outbound = bytearray()
         self.path.mkdir(parents=True, exist_ok=True)
@@ -97,6 +100,7 @@ class RunDir:
     ) -> None:
         if isinstance(event, MediaStartEvent):
             self._codec = event.codec
+            self._sample_rate = event.sample_rate
             self._write_audio()
         if isinstance(event, MediaChunkEvent):
             self.append_inbound(event.payload_b64)
@@ -164,12 +168,11 @@ class RunDir:
         self._write_wav(audio_dir / "inbound.wav", self._inbound)
         self._write_wav(audio_dir / "outbound.wav", self._outbound)
 
-    @staticmethod
-    def _write_wav(path: Path, audio: bytearray) -> None:
+    def _write_wav(self, path: Path, audio: bytearray) -> None:
         with wave.open(str(path), "wb") as output:
             output.setnchannels(1)
             output.setsampwidth(2)
-            output.setframerate(16000)
+            output.setframerate(self._sample_rate)
             output.writeframes(audio)
 
     def _audio_name(self, direction: str) -> str:
@@ -200,11 +203,12 @@ def build_ports(
     scenario: StubScenario | None = None,
 ) -> Ports:
     if mode is Mode.STUB:
+        faults = scenario or StubScenario()
         media = StubTelnyxMedia(
             submit=submit,
             append_outbound=run_dir.append_outbound,
+            sample_rate=faults.media_sample_rate,
         )
-        faults = scenario or StubScenario()
         return Ports(
             telnyx_http=StubTelnyxHttp(
                 submit=submit,

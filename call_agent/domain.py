@@ -15,6 +15,8 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
+from .audio import resample_pcm16
+
 
 class FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -92,6 +94,9 @@ class Speaker(StrEnum):
 class Codec(StrEnum):
     L16 = "L16"
     PCMU = "PCMU"
+
+
+SampleRate: TypeAlias = Literal[8000, 16000]
 
 
 class QuestionSpec(NamedTuple):
@@ -279,7 +284,7 @@ class DialSpec(FrozenModel):
 
 class LiveAudioFormat(FrozenModel):
     type: Literal["audio/pcm", "audio/pcmu"]
-    rate: Literal[16000, 8000]
+    rate: SampleRate
 
     @classmethod
     def for_codec(cls, codec: Codec) -> LiveAudioFormat:
@@ -370,6 +375,7 @@ class MediaStreaming(FrozenModel):
     kind: Literal["media_streaming"] = "media_streaming"
     stream_id: StreamId
     codec: Codec
+    sample_rate: SampleRate
 
 
 class MediaStopped(FrozenModel):
@@ -487,6 +493,7 @@ class MediaStartEvent(FrozenModel):
     stream_id: StreamId
     call_control_id: CallControlId
     codec: Codec
+    sample_rate: SampleRate
 
 
 class MediaChunkEvent(FrozenModel):
@@ -655,6 +662,31 @@ def _maybe_open_live(
     return call, ()
 
 
+def _resample_b64(
+    payload_b64: str, from_rate: SampleRate, to_rate: SampleRate
+) -> str:
+    if from_rate == to_rate:
+        return payload_b64
+    pcm = resample_pcm16(base64.b64decode(payload_b64), from_rate, to_rate)
+    return base64.b64encode(pcm).decode()
+
+
+def _to_live_rate(media: MediaStreaming, payload_b64: str) -> str:
+    return _resample_b64(
+        payload_b64,
+        media.sample_rate,
+        LiveAudioFormat.for_codec(media.codec).rate,
+    )
+
+
+def _to_media_rate(media: MediaStreaming, delta_b64: str) -> str:
+    return _resample_b64(
+        delta_b64,
+        LiveAudioFormat.for_codec(media.codec).rate,
+        media.sample_rate,
+    )
+
+
 def _call_control_id(call: Call) -> str:
     if isinstance(call.dial, DialPlaced):
         return str(call.dial.call_control_id)
@@ -785,23 +817,27 @@ def reduce(
                 "media": MediaStreaming(
                     stream_id=event.stream_id,
                     codec=event.codec,
+                    sample_rate=event.sample_rate,
                 )
             }
         )
         return _maybe_open_live(call, settings)
 
     if isinstance(event, MediaChunkEvent):
+        if not isinstance(call.media, MediaStreaming) or not isinstance(
+            call.live, (LiveStarting, LiveActive)
+        ):
+            return call, ()
+        payload = _to_live_rate(call.media, event.payload_b64)
         if isinstance(call.live, LiveActive):
-            return call, (ForwardAudioEffect(payload_b64=event.payload_b64),)
-        if isinstance(call.live, LiveStarting):
-            buffered = call.live.buffered_audio + (event.payload_b64,)
-            return (
-                call.model_copy(
-                    update={"live": LiveStarting(buffered_audio=buffered)}
-                ),
-                (),
-            )
-        return call, ()
+            return call, (ForwardAudioEffect(payload_b64=payload),)
+        buffered = call.live.buffered_audio + (payload,)
+        return (
+            call.model_copy(
+                update={"live": LiveStarting(buffered_audio=buffered)}
+            ),
+            (),
+        )
 
     if isinstance(event, MediaStopEvent):
         return call.model_copy(update={"media": MediaStopped()}), ()
@@ -823,9 +859,13 @@ def reduce(
         )
 
     if isinstance(event, LiveOutputAudioEvent):
-        if isinstance(call.media, MediaStreaming):
-            return call, (PlayAudioEffect(delta_b64=event.delta_b64),)
-        return call, ()
+        if not isinstance(call.media, MediaStreaming):
+            return call, ()
+        return call, (
+            PlayAudioEffect(
+                delta_b64=_to_media_rate(call.media, event.delta_b64)
+            ),
+        )
 
     if isinstance(
         event, (LiveInputTranscriptEvent, LiveOutputTranscriptEvent)
