@@ -15,6 +15,8 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
+from .audio import resample_pcm16
+
 
 class FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -92,6 +94,9 @@ class Speaker(StrEnum):
 class Codec(StrEnum):
     L16 = "L16"
     PCMU = "PCMU"
+
+
+SampleRate: TypeAlias = Literal[8000, 16000]
 
 
 class QuestionSpec(NamedTuple):
@@ -279,7 +284,7 @@ class DialSpec(FrozenModel):
 
 class LiveAudioFormat(FrozenModel):
     type: Literal["audio/pcm", "audio/pcmu"]
-    rate: Literal[16000, 8000]
+    rate: SampleRate
 
     @classmethod
     def for_codec(cls, codec: Codec) -> LiveAudioFormat:
@@ -370,6 +375,7 @@ class MediaStreaming(FrozenModel):
     kind: Literal["media_streaming"] = "media_streaming"
     stream_id: StreamId
     codec: Codec
+    sample_rate: SampleRate
 
 
 class MediaStopped(FrozenModel):
@@ -396,12 +402,16 @@ class LiveActive(FrozenModel):
     session_id: LiveSessionId
 
 
+class LiveClosing(FrozenModel):
+    kind: Literal["live_closing"] = "live_closing"
+
+
 class LiveClosed(FrozenModel):
     kind: Literal["live_closed"] = "live_closed"
 
 
 LiveTrack: TypeAlias = Annotated[
-    LiveDormant | LiveStarting | LiveActive | LiveClosed,
+    LiveDormant | LiveStarting | LiveActive | LiveClosing | LiveClosed,
     Field(discriminator="kind"),
 ]
 
@@ -423,20 +433,39 @@ ConversationTrack: TypeAlias = Annotated[
 ]
 
 
+HANGUP_MARK = "hangup"
+
+HangupVia: TypeAlias = Literal["trail", "drain_timeout", "failure"]
+
+
 class HangupIdle(FrozenModel):
     kind: Literal["hangup_idle"] = "hangup_idle"
 
 
+class HangupDraining(FrozenModel):
+    kind: Literal["hangup_draining"] = "hangup_draining"
+
+
+class HangupMarked(FrozenModel):
+    kind: Literal["hangup_marked"] = "hangup_marked"
+
+
 class HangupRequested(FrozenModel):
     kind: Literal["hangup_requested"] = "hangup_requested"
+    via: HangupVia
 
 
 class HangupConfirmed(FrozenModel):
     kind: Literal["hangup_confirmed"] = "hangup_confirmed"
+    via: HangupVia
 
 
 HangupTrack: TypeAlias = Annotated[
-    HangupIdle | HangupRequested | HangupConfirmed,
+    HangupIdle
+    | HangupDraining
+    | HangupMarked
+    | HangupRequested
+    | HangupConfirmed,
     Field(discriminator="kind"),
 ]
 
@@ -462,19 +491,24 @@ class DialPlacedEvent(FrozenModel):
     call_session_id: str
 
 
+WebhookEventType: TypeAlias = Literal[
+    "call.initiated",
+    "call.answered",
+    "streaming.started",
+    "streaming.failed",
+    "streaming.stopped",
+    "call.hangup",
+]
+
+
 class WebhookEvent(FrozenModel):
     kind: Literal["webhook"] = "webhook"
     webhook_id: str
-    event_type: Literal[
-        "call.initiated",
-        "call.answered",
-        "streaming.started",
-        "streaming.stopped",
-        "call.hangup",
-    ]
+    event_type: WebhookEventType
     call_control_id: CallControlId
     hangup_cause: str | None = None
     hangup_source: str | None = None
+    failure_reason: str | None = None
 
 
 class MediaStartEvent(FrozenModel):
@@ -482,6 +516,7 @@ class MediaStartEvent(FrozenModel):
     stream_id: StreamId
     call_control_id: CallControlId
     codec: Codec
+    sample_rate: SampleRate
 
 
 class MediaChunkEvent(FrozenModel):
@@ -493,6 +528,12 @@ class MediaChunkEvent(FrozenModel):
 class MediaStopEvent(FrozenModel):
     kind: Literal["media_stop"] = "media_stop"
     stream_id: StreamId
+
+
+class MediaMarkEvent(FrozenModel):
+    kind: Literal["media_mark"] = "media_mark"
+    stream_id: StreamId
+    name: str
 
 
 class LiveStartedEvent(FrozenModel):
@@ -528,19 +569,30 @@ class TimeoutEvent(FrozenModel):
     kind: Literal["timeout"] = "timeout"
 
 
+class HangupTrailElapsedEvent(FrozenModel):
+    kind: Literal["hangup_trail_elapsed"] = "hangup_trail_elapsed"
+
+
+class HangupDrainTimeoutEvent(FrozenModel):
+    kind: Literal["hangup_drain_timeout"] = "hangup_drain_timeout"
+
+
 CallEvent: TypeAlias = Annotated[
     DialPlacedEvent
     | WebhookEvent
     | MediaStartEvent
     | MediaChunkEvent
     | MediaStopEvent
+    | MediaMarkEvent
     | LiveStartedEvent
     | LiveInputTranscriptEvent
     | LiveOutputTranscriptEvent
     | LiveOutputAudioEvent
     | LiveClosedEvent
     | LiveErrorEvent
-    | TimeoutEvent,
+    | TimeoutEvent
+    | HangupTrailElapsedEvent
+    | HangupDrainTimeoutEvent,
     Field(discriminator="kind"),
 ]
 
@@ -570,6 +622,17 @@ class PlayAudioEffect(FrozenModel):
     delta_b64: str
 
 
+class MarkEffect(FrozenModel):
+    kind: Literal["mark"] = "mark"
+    name: str
+
+
+class ScheduleEffect(FrozenModel):
+    kind: Literal["schedule"] = "schedule"
+    delay_s: float = Field(ge=0)
+    event: CallEvent
+
+
 class HangupEffect(FrozenModel):
     kind: Literal["hangup"] = "hangup"
     call_control_id: CallControlId
@@ -590,6 +653,8 @@ Effect: TypeAlias = Annotated[
     | SpeakFirstEffect
     | ForwardAudioEffect
     | PlayAudioEffect
+    | MarkEffect
+    | ScheduleEffect
     | HangupEffect
     | CloseLiveEffect
     | FinishEffect,
@@ -600,6 +665,8 @@ Effect: TypeAlias = Annotated[
 class ReduceSettings(FrozenModel):
     live_model: str
     voice: str
+    hangup_trailing_silence_s: float = Field(ge=0)
+    hangup_drain_timeout_s: float = Field(ge=0)
 
 
 def assess_transcript(
@@ -608,7 +675,8 @@ def assess_transcript(
     agent_text = " ".join(
         turn.text for turn in transcript.turns if turn.speaker is Speaker.AGENT
     )
-    if CLOSING_LINE.casefold() not in agent_text.casefold():
+    collapsed = " ".join(agent_text.split())
+    if CLOSING_LINE.casefold() not in collapsed.casefold():
         return None
     business_text = transcript.business_text()
     if not business_text.strip():
@@ -650,6 +718,31 @@ def _maybe_open_live(
     return call, ()
 
 
+def _resample_b64(
+    payload_b64: str, from_rate: SampleRate, to_rate: SampleRate
+) -> str:
+    if from_rate == to_rate:
+        return payload_b64
+    pcm = resample_pcm16(base64.b64decode(payload_b64), from_rate, to_rate)
+    return base64.b64encode(pcm).decode()
+
+
+def _to_live_rate(media: MediaStreaming, payload_b64: str) -> str:
+    return _resample_b64(
+        payload_b64,
+        media.sample_rate,
+        LiveAudioFormat.for_codec(media.codec).rate,
+    )
+
+
+def _to_media_rate(media: MediaStreaming, delta_b64: str) -> str:
+    return _resample_b64(
+        delta_b64,
+        LiveAudioFormat.for_codec(media.codec).rate,
+        media.sample_rate,
+    )
+
+
 def _call_control_id(call: Call) -> str:
     if isinstance(call.dial, DialPlaced):
         return str(call.dial.call_control_id)
@@ -673,16 +766,19 @@ def _finish(
     return finished, effects + (FinishEffect(result=result),)
 
 
+def _close_live(call: Call) -> tuple[dict[str, Any], tuple[Effect, ...]]:
+    if isinstance(call.live, (LiveStarting, LiveActive)):
+        return {"live": LiveClosed()}, (CloseLiveEffect(),)
+    return {}, ()
+
+
 def _end_for_webhook(
     call: Call, previous_telnyx: TelnyxTrack, effects: tuple[Effect, ...]
 ) -> tuple[Call, tuple[Effect, ...]]:
-    updates: dict[str, Any] = {}
-    extra_effects = effects
-    if not isinstance(call.live, LiveClosed):
-        updates["live"] = LiveClosed()
-        extra_effects += (CloseLiveEffect(),)
+    updates, close_effects = _close_live(call)
+    extra_effects = effects + close_effects
     if isinstance(call.hangup, HangupRequested):
-        updates["hangup"] = HangupConfirmed()
+        updates["hangup"] = HangupConfirmed(via=call.hangup.via)
     call = call.model_copy(update=updates)
     if isinstance(call.conversation, ConversationTerminal):
         return _finish(call, _result_from_verdict(call), extra_effects)
@@ -703,6 +799,17 @@ def _end_for_webhook(
     )
 
 
+def _hang_up(call: Call, via: HangupVia) -> tuple[Call, tuple[Effect, ...]]:
+    if not isinstance(call.dial, DialPlaced):
+        raise ValueError("placed dial required")
+    updates, effects = _close_live(call)
+    updates["hangup"] = HangupRequested(via=via)
+    return (
+        call.model_copy(update=updates),
+        (HangupEffect(call_control_id=call.dial.call_control_id),) + effects,
+    )
+
+
 def _fail(
     call: Call, reason: str
 ) -> tuple[Call, tuple[Effect, ...]]:
@@ -711,13 +818,13 @@ def _fail(
     if (
         isinstance(call.dial, DialPlaced)
         and not isinstance(call.telnyx, TelnyxEnded)
-        and isinstance(call.hangup, HangupIdle)
+        and isinstance(call.hangup, (HangupIdle, HangupDraining, HangupMarked))
     ):
-        updates["hangup"] = HangupRequested()
+        updates["hangup"] = HangupRequested(via="failure")
         effects += (HangupEffect(call_control_id=call.dial.call_control_id),)
-    if not isinstance(call.live, (LiveDormant, LiveClosed)):
-        updates["live"] = LiveClosed()
-        effects += (CloseLiveEffect(),)
+    close_updates, close_effects = _close_live(call)
+    updates |= close_updates
+    effects += close_effects
     call = call.model_copy(update=updates)
     return _finish(
         call,
@@ -769,6 +876,9 @@ def reduce(
         call = call.model_copy(update=updates)
         if event.event_type == "call.hangup":
             return _end_for_webhook(call, previous_telnyx, ())
+        if event.event_type == "streaming.failed":
+            reason = event.failure_reason or "unknown"
+            return _fail(call, f"Telnyx media streaming failed: {reason}")
         return _maybe_open_live(call, settings)
 
     if isinstance(event, MediaStartEvent):
@@ -777,23 +887,27 @@ def reduce(
                 "media": MediaStreaming(
                     stream_id=event.stream_id,
                     codec=event.codec,
+                    sample_rate=event.sample_rate,
                 )
             }
         )
         return _maybe_open_live(call, settings)
 
     if isinstance(event, MediaChunkEvent):
+        if not isinstance(call.media, MediaStreaming) or not isinstance(
+            call.live, (LiveStarting, LiveActive)
+        ):
+            return call, ()
+        payload = _to_live_rate(call.media, event.payload_b64)
         if isinstance(call.live, LiveActive):
-            return call, (ForwardAudioEffect(payload_b64=event.payload_b64),)
-        if isinstance(call.live, LiveStarting):
-            buffered = call.live.buffered_audio + (event.payload_b64,)
-            return (
-                call.model_copy(
-                    update={"live": LiveStarting(buffered_audio=buffered)}
-                ),
-                (),
-            )
-        return call, ()
+            return call, (ForwardAudioEffect(payload_b64=payload),)
+        buffered = call.live.buffered_audio + (payload,)
+        return (
+            call.model_copy(
+                update={"live": LiveStarting(buffered_audio=buffered)}
+            ),
+            (),
+        )
 
     if isinstance(event, MediaStopEvent):
         return call.model_copy(update={"media": MediaStopped()}), ()
@@ -815,9 +929,35 @@ def reduce(
         )
 
     if isinstance(event, LiveOutputAudioEvent):
-        if isinstance(call.media, MediaStreaming):
-            return call, (PlayAudioEffect(delta_b64=event.delta_b64),)
-        return call, ()
+        if not isinstance(call.media, MediaStreaming):
+            return call, ()
+        return call, (
+            PlayAudioEffect(
+                delta_b64=_to_media_rate(call.media, event.delta_b64)
+            ),
+        )
+
+    if isinstance(event, MediaMarkEvent):
+        if not isinstance(call.hangup, HangupMarked) or (
+            event.name != HANGUP_MARK
+        ):
+            return call, ()
+        return call, (
+            ScheduleEffect(
+                delay_s=settings.hangup_trailing_silence_s,
+                event=HangupTrailElapsedEvent(),
+            ),
+        )
+
+    if isinstance(event, HangupTrailElapsedEvent):
+        if not isinstance(call.hangup, HangupMarked):
+            return call, ()
+        return _hang_up(call, via="trail")
+
+    if isinstance(event, HangupDrainTimeoutEvent):
+        if not isinstance(call.hangup, (HangupDraining, HangupMarked)):
+            return call, ()
+        return _hang_up(call, via="drain_timeout")
 
     if isinstance(
         event, (LiveInputTranscriptEvent, LiveOutputTranscriptEvent)
@@ -847,17 +987,31 @@ def reduce(
         if isinstance(call.hangup, HangupIdle) and isinstance(
             call.dial, DialPlaced
         ):
-            updates["hangup"] = HangupRequested()
+            # The closing line's transcript arrives while GPT-Live is still
+            # streaming that line's audio. Closing the session makes it flush
+            # what is left and confirm with session.closed, which is when the
+            # single playback mark can go out behind the last chunk.
             effects += (
-                HangupEffect(call_control_id=call.dial.call_control_id),
+                ScheduleEffect(
+                    delay_s=settings.hangup_drain_timeout_s,
+                    event=HangupDrainTimeoutEvent(),
+                ),
             )
-        if not isinstance(call.live, LiveClosed):
-            updates["live"] = LiveClosed()
-            effects += (CloseLiveEffect(),)
+            if isinstance(call.live, (LiveStarting, LiveActive)):
+                updates["hangup"] = HangupDraining()
+                updates["live"] = LiveClosing()
+                effects += (CloseLiveEffect(),)
+            else:
+                updates["hangup"] = HangupMarked()
+                effects += (MarkEffect(name=HANGUP_MARK),)
         return call.model_copy(update=updates), effects
 
     if isinstance(event, LiveClosedEvent):
-        return call.model_copy(update={"live": LiveClosed()}), ()
+        updates = {"live": LiveClosed()}
+        if not isinstance(call.hangup, HangupDraining):
+            return call.model_copy(update=updates), ()
+        updates["hangup"] = HangupMarked()
+        return call.model_copy(update=updates), (MarkEffect(name=HANGUP_MARK),)
 
     if isinstance(event, LiveErrorEvent):
         return _fail(call, event.message)

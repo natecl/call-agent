@@ -6,6 +6,11 @@ import pytest
 from call_agent.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def instant_trailing_silence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(

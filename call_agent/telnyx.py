@@ -17,11 +17,15 @@ from .domain import (
     DialPlacedEvent,
     DialSpec,
     E164,
+    LiveAudioFormat,
     MediaChunkEvent,
+    MediaMarkEvent,
     MediaStartEvent,
     MediaStopEvent,
+    SampleRate,
     StreamId,
     WebhookEvent,
+    WebhookEventType,
 )
 
 
@@ -44,6 +48,7 @@ class _DialPayload(_WireModel):
     stream_bidirectional_mode: Literal["rtp"] = "rtp"
     stream_bidirectional_target_legs: Literal["self"] = "self"
     stream_bidirectional_codec: Codec
+    stream_bidirectional_sampling_rate: SampleRate
     stream_codec: Codec
 
 
@@ -61,16 +66,11 @@ class _WebhookPayload(_WireModel):
     call_control_id: CallControlId
     hangup_cause: str | None = None
     hangup_source: str | None = None
+    failure_reason: str | None = None
 
 
 class _WebhookData(_WireModel):
-    event_type: Literal[
-        "call.initiated",
-        "call.answered",
-        "streaming.started",
-        "streaming.stopped",
-        "call.hangup",
-    ]
+    event_type: WebhookEventType
     id: str
     payload: _WebhookPayload
 
@@ -81,7 +81,7 @@ class _WebhookEnvelope(_WireModel):
 
 class _L16Format(_WireModel):
     encoding: Literal[Codec.L16]
-    sample_rate: Literal[16000]
+    sample_rate: SampleRate
     channels: Literal[1]
 
 
@@ -123,8 +123,22 @@ class _StopFrame(_WireModel):
     stream_id: StreamId
 
 
+class _MarkBody(_WireModel):
+    name: str
+
+
+class _MarkFrame(_WireModel):
+    event: Literal["mark"]
+    stream_id: StreamId
+    mark: _MarkBody
+
+
+class _IgnoredFrame(_WireModel):
+    event: Literal["connected", "dtmf"]
+
+
 _InboundMediaFrame: TypeAlias = Annotated[
-    _StartFrame | _MediaFrame | _StopFrame,
+    _StartFrame | _MediaFrame | _StopFrame | _MarkFrame | _IgnoredFrame,
     Field(discriminator="event"),
 ]
 _MEDIA_ADAPTER = TypeAdapter(_InboundMediaFrame)
@@ -174,6 +188,8 @@ class TelnyxHttp(Protocol):
 class TelnyxMedia(Protocol):
     async def play(self, payload_b64: str) -> None: ...
 
+    async def mark(self, name: str) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -186,6 +202,9 @@ def serialize_dial(spec: DialSpec) -> dict[str, Any]:
         webhook_url=spec.webhook_url,
         client_state=spec.client_state.encode(),
         stream_bidirectional_codec=spec.codec,
+        stream_bidirectional_sampling_rate=LiveAudioFormat.for_codec(
+            spec.codec
+        ).rate,
         stream_codec=spec.codec,
     )
     return payload.model_dump(mode="json", by_alias=True)
@@ -200,25 +219,33 @@ def parse_webhook(raw: bytes) -> WebhookEvent:
         call_control_id=data.payload.call_control_id,
         hangup_cause=data.payload.hangup_cause,
         hangup_source=data.payload.hangup_source,
+        failure_reason=data.payload.failure_reason,
     )
 
 
 def parse_media_frame(
     raw: str,
-) -> MediaStartEvent | MediaChunkEvent | MediaStopEvent:
+) -> (
+    MediaStartEvent | MediaChunkEvent | MediaStopEvent | MediaMarkEvent | None
+):
     frame = _MEDIA_ADAPTER.validate_json(raw)
     if isinstance(frame, _StartFrame):
         return MediaStartEvent(
             stream_id=frame.stream_id,
             call_control_id=frame.start.call_control_id,
             codec=frame.start.media_format.encoding,
+            sample_rate=frame.start.media_format.sample_rate,
         )
     if isinstance(frame, _MediaFrame):
         return MediaChunkEvent(
             stream_id=frame.stream_id,
             payload_b64=frame.media.payload,
         )
-    return MediaStopEvent(stream_id=frame.stream_id)
+    if isinstance(frame, _StopFrame):
+        return MediaStopEvent(stream_id=frame.stream_id)
+    if isinstance(frame, _MarkFrame):
+        return MediaMarkEvent(stream_id=frame.stream_id, name=frame.mark.name)
+    return None
 
 
 class LiveTelnyxHttp:
@@ -311,13 +338,17 @@ class LiveTelnyxMedia:
             {"event": "media", "media": {"payload": payload_b64}}
         )
 
+    async def mark(self, name: str) -> None:
+        await self._websocket.send_json(
+            {"event": "mark", "mark": {"name": name}}
+        )
+
     async def close(self) -> None:
         await self._websocket.close()
 
 
 Submit = Callable[[CallEvent], None]
 WriteJson = Callable[[str, dict[str, Any]], None]
-AppendAudio = Callable[[str], None]
 
 
 def _ignore_event(event: CallEvent) -> None:
@@ -328,68 +359,86 @@ def _ignore_json(name: str, payload: dict[str, Any]) -> None:
     return None
 
 
-def _ignore_audio(payload_b64: str) -> None:
-    return None
-
-
 class StubTelnyxMedia:
     def __init__(
         self,
         submit: Submit = _ignore_event,
-        append_outbound: AppendAudio = _ignore_audio,
+        sample_rate: SampleRate = 16000,
+        echo_marks: bool = True,
     ) -> None:
         self._submit = submit
-        self._append_outbound = append_outbound
+        self._sample_rate = sample_rate
+        self._echo_marks = echo_marks
 
     def begin(self) -> None:
-        start = json.dumps(
-            {
-                "event": "start",
-                "stream_id": "stub-stream-0001",
-                "start": {
-                    "call_control_id": "stub-call-0001",
-                    "media_format": {
-                        "encoding": "L16",
-                        "sample_rate": 16000,
-                        "channels": 1,
-                    },
-                },
-            }
-        )
-        self._submit(parse_media_frame(start))
-        payload = base64.b64encode(bytes(640)).decode()
-        for chunk in range(1, 4):
-            raw = json.dumps(
+        self._submit(
+            self._parse(
                 {
-                    "event": "media",
+                    "event": "start",
                     "stream_id": "stub-stream-0001",
-                    "media": {
-                        "payload": payload,
-                        "track": "inbound",
-                        "chunk": chunk,
-                        "timestamp": str(chunk * 20),
+                    "start": {
+                        "call_control_id": "stub-call-0001",
+                        "media_format": {
+                            "encoding": "L16",
+                            "sample_rate": self._sample_rate,
+                            "channels": 1,
+                        },
                     },
                 }
             )
-            self._submit(parse_media_frame(raw))
+        )
+        payload = base64.b64encode(bytes(640)).decode()
+        for chunk in range(1, 4):
+            self._submit(
+                self._parse(
+                    {
+                        "event": "media",
+                        "stream_id": "stub-stream-0001",
+                        "media": {
+                            "payload": payload,
+                            "track": "inbound",
+                            "chunk": chunk,
+                            "timestamp": str(chunk * 20),
+                        },
+                    }
+                )
+            )
 
     def stop(self) -> None:
         self._submit(
-            parse_media_frame(
-                json.dumps(
-                    {
-                        "event": "stop",
-                        "stream_id": "stub-stream-0001",
-                    }
-                )
+            self._parse(
+                {
+                    "event": "stop",
+                    "stream_id": "stub-stream-0001",
+                }
             )
         )
 
     async def play(self, payload_b64: str) -> None:
-        self._append_outbound(payload_b64)
+        return None
+
+    async def mark(self, name: str) -> None:
+        if not self._echo_marks:
+            return
+        self._submit(
+            self._parse(
+                {
+                    "event": "mark",
+                    "stream_id": "stub-stream-0001",
+                    "mark": {"name": name},
+                }
+            )
+        )
 
     async def close(self) -> None:
         return None
+
+    @staticmethod
+    def _parse(frame: dict[str, Any]) -> CallEvent:
+        event = parse_media_frame(json.dumps(frame))
+        if event is None:
+            raise ValueError("stub fixture produced an ignored frame")
+        return event
 
 
 class StubTelnyxHttp:

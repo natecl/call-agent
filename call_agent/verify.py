@@ -22,6 +22,7 @@ from .domain import (
 )
 from .gpt_live import StubScenario
 from .ledger import Ledger
+from .report import CallReport
 from .runtime import run_quick_ask
 from .telnyx import StubTelnyxHttp
 
@@ -208,7 +209,11 @@ def verify_quick_ask(
         ),
     )
 
-    events = _read_json_lines(run_dir / "events.jsonl")
+    rows = _read_json_lines(run_dir / "events.jsonl")
+    events = [row for row in rows if "kind" in row]
+    marks_sent = sum(1 for row in rows if row.get("effect") == "mark")
+    call_report = _read_json(run_dir / "call_report.json")
+    hangup_path = call_report.get("hangup", {}).get("path")
     transcript_sequences = [
         int(event["seq"])
         for event in events
@@ -221,15 +226,40 @@ def verify_quick_ask(
         if event.get("kind") == "webhook"
         and event.get("event_type") == "call.hangup"
     ]
+    last_audio_sequence = max(
+        (
+            int(event["seq"])
+            for event in events
+            if event.get("kind") == "live_output_audio"
+        ),
+        default=0,
+    )
+    trail_sequences = [
+        int(event["seq"])
+        for event in events
+        if event.get("kind") == "hangup_trail_elapsed"
+    ]
+    drain_timed_out = any(
+        event.get("kind") == "hangup_drain_timeout" for event in events
+    )
     artifact_result = _read_json(run_dir / "result.json")
     terminal_before_hangup = bool(
         transcript_sequences
         and hangup_sequences
         and transcript_sequences[-1] < hangup_sequences[-1]
     )
+    drained_before_hangup = bool(
+        trail_sequences
+        and hangup_sequences
+        and last_audio_sequence < trail_sequences[-1] < hangup_sequences[-1]
+        and not drain_timed_out
+    )
     clean_hangup_passed = (
         (run_dir / "hangup.json").is_file()
         and terminal_before_hangup
+        and drained_before_hangup
+        and marks_sent == 1
+        and hangup_path == "trail"
         and artifact_result.get("status") in {"answered", "declined"}
     )
     clean_hangup_check = VerifyCheck(
@@ -240,9 +270,16 @@ def verify_quick_ask(
             f"hangup_json={(run_dir / 'hangup.json').is_file()} "
             f"transcript_seq="
             f"{transcript_sequences[-1] if transcript_sequences else None} "
+            f"last_audio_seq={last_audio_sequence} "
+            f"marks_sent={marks_sent} "
+            f"trail_seq={trail_sequences[-1] if trail_sequences else None} "
+            f"drain_timed_out={drain_timed_out} "
+            f"hangup_path={hangup_path} "
             f"hangup_seq="
             f"{hangup_sequences[-1] if hangup_sequences else None}, "
-            "expected status answered|declined and verdict before call.hangup"
+            "expected status answered|declined, verdict before call.hangup, "
+            "one final mark, and the trailing silence after the last audio "
+            "and before call.hangup"
             + (
                 f" (reason: {artifact_result.get('reason')})"
                 if artifact_result.get("reason")
@@ -264,13 +301,25 @@ def verify_quick_ask(
         ).is_file()
         and (active_workspace.artifacts_dir / audio_ref).is_file()
     )
-    result_passed = parsed_result == result and refs_exist
+    parsed_report = CallReport.model_validate(call_report)
+    report_refs_exist = all(
+        (active_workspace.artifacts_dir / ref).is_file()
+        for ref in parsed_report.refs.model_dump().values()
+    )
+    result_passed = (
+        parsed_result == result
+        and refs_exist
+        and parsed_report.call_control_id == result.call_control_id
+        and report_refs_exist
+    )
     result_check = VerifyCheck(
         name="result_artifact",
         passed=result_passed,
         detail=(
             f"artifacts_dir={active_workspace.artifacts_dir} "
-            f"result={run_dir / 'result.json'} refs_exist={refs_exist}"
+            f"result={run_dir / 'result.json'} refs_exist={refs_exist} "
+            f"call_report={run_dir / 'call_report.json'} "
+            f"report_refs_exist={report_refs_exist}"
         ),
     )
 
