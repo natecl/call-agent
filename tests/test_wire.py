@@ -1,10 +1,19 @@
 import json
 
+import pytest
+
 from call_agent.domain import (
     ClientState,
     Codec,
     DialSpec,
     E164,
+    LiveAudioFormat,
+    LiveClosedEvent,
+    LiveInputTranscriptEvent,
+    LiveOutputAudioEvent,
+    LiveOutputTranscriptEvent,
+    LiveSessionSpec,
+    LiveStartedEvent,
     MediaChunkEvent,
     MediaStartEvent,
     MediaStopEvent,
@@ -13,6 +22,7 @@ from call_agent.domain import (
     UserId,
     WebhookEvent,
 )
+from call_agent.gpt_live import parse_event, serialize_session_start
 from call_agent.telnyx import (
     parse_media_frame,
     parse_webhook,
@@ -134,3 +144,83 @@ def test_parse_media_frames_returns_domain_events() -> None:
         ),
         MediaStopEvent(stream_id=StreamId("stream-1")),
     )
+
+
+def test_serialize_session_start_matches_gpt_live_payload() -> None:
+    spec = LiveSessionSpec(
+        model="gpt-live-1",
+        instructions="Call on behalf of Nathan.",
+        audio=LiveAudioFormat(type="audio/pcm", rate=16000),
+        voice="marin",
+    )
+
+    payload = serialize_session_start(spec)
+
+    assert payload == {
+        "type": "session.start",
+        "session": {
+            "model": "gpt-live-1",
+            "instructions": "Call on behalf of Nathan.",
+            "audio": {
+                "format": {"type": "audio/pcm", "rate": 16000},
+                "output": {"voice": "marin"},
+            },
+        },
+    }
+
+
+def test_parse_gpt_live_events_returns_domain_events() -> None:
+    parsed = (
+        parse_event(
+            json.dumps(
+                {
+                    "type": "session.started",
+                    "session": {"id": "live-1"},
+                }
+            )
+        ),
+        parse_event(
+            json.dumps(
+                {
+                    "type": "session.input_transcript.delta",
+                    "delta": "Open until five.",
+                }
+            )
+        ),
+        parse_event(
+            json.dumps(
+                {
+                    "type": "session.output_transcript.delta",
+                    "delta": "Thanks.",
+                }
+            )
+        ),
+        parse_event(
+            json.dumps(
+                {
+                    "type": "session.output_audio.delta",
+                    "delta": "AAA=",
+                }
+            )
+        ),
+        parse_event(json.dumps({"type": "session.closed"})),
+    )
+
+    assert parsed == (
+        LiveStartedEvent(session_id="live-1"),
+        LiveInputTranscriptEvent(delta="Open until five."),
+        LiveOutputTranscriptEvent(delta="Thanks."),
+        LiveOutputAudioEvent(delta_b64="AAA="),
+        LiveClosedEvent(),
+    )
+
+
+def test_parse_gpt_live_rejects_realtime_and_ignores_usage() -> None:
+    with pytest.raises(ValueError, match="Realtime event"):
+        parse_event(json.dumps({"type": "session.update"}))
+    with pytest.raises(ValueError, match="Realtime event"):
+        parse_event(json.dumps({"type": "conversation.item.create"}))
+    with pytest.raises(ValueError, match="Realtime event"):
+        parse_event(json.dumps({"type": "response.create"}))
+
+    assert parse_event(json.dumps({"type": "session.usage.updated"})) is None
