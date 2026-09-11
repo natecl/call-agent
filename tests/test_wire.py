@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from call_agent.domain import (
     ClientState,
@@ -97,6 +98,44 @@ def test_parse_webhook_returns_domain_event() -> None:
     )
 
 
+def test_parse_webhook_streaming_failed_carries_failure_reason() -> None:
+    raw = json.dumps(
+        {
+            "data": {
+                "event_type": "streaming.failed",
+                "id": "webhook-2",
+                "occurred_at": "2026-09-11T00:00:00Z",
+                "record_type": "event",
+                "payload": {
+                    "call_control_id": "v3:abc",
+                    "call_leg_id": "leg-1",
+                    "call_session_id": "session-1",
+                    "connection_id": "connection-1",
+                    "client_state": "opaque",
+                    "failure_reason": "connection_failed",
+                    "stream_id": "stream-1",
+                    "stream_type": "websocket",
+                    "stream_params": {
+                        "stream_url": "wss://calls.example.test/media-stream",
+                        "track": "inbound_track",
+                    },
+                },
+            }
+        }
+    ).encode()
+
+    event = parse_webhook(raw)
+
+    assert event == WebhookEvent(
+        webhook_id="webhook-2",
+        event_type="streaming.failed",
+        call_control_id="v3:abc",
+        hangup_cause=None,
+        hangup_source=None,
+        failure_reason="connection_failed",
+    )
+
+
 def test_parse_media_frames_returns_domain_events() -> None:
     start = json.dumps(
         {
@@ -144,6 +183,63 @@ def test_parse_media_frames_returns_domain_events() -> None:
         ),
         MediaStopEvent(stream_id=StreamId("stream-1")),
     )
+
+
+def test_parse_media_frame_skips_connected_and_dtmf_and_rejects_error() -> None:
+    connected = json.dumps({"event": "connected", "version": "1.0.0"})
+    dtmf = json.dumps(
+        {
+            "event": "dtmf",
+            "stream_id": "stream-1",
+            "occurred_at": "2026-09-11T00:00:00Z",
+            "sequence_number": "5",
+            "dtmf": {"digit": "1"},
+        }
+    )
+    start = json.dumps(
+        {
+            "event": "start",
+            "sequence_number": "1",
+            "stream_id": "stream-1",
+            "start": {
+                "call_control_id": "v3:abc",
+                "media_format": {
+                    "encoding": "PCMU",
+                    "sample_rate": 8000,
+                    "channels": 1,
+                },
+            },
+        }
+    )
+    error = json.dumps(
+        {
+            "event": "error",
+            "stream_id": "stream-1",
+            "payload": {
+                "code": 100004,
+                "title": "invalid_media",
+                "detail": "Media provided was not base64 encoded",
+            },
+        }
+    )
+
+    parsed = (
+        parse_media_frame(connected),
+        parse_media_frame(dtmf),
+        parse_media_frame(start),
+    )
+
+    assert parsed == (
+        None,
+        None,
+        MediaStartEvent(
+            stream_id=StreamId("stream-1"),
+            call_control_id="v3:abc",
+            codec=Codec.PCMU,
+        ),
+    )
+    with pytest.raises(ValidationError, match="'error'"):
+        parse_media_frame(error)
 
 
 def test_serialize_session_start_matches_gpt_live_payload() -> None:

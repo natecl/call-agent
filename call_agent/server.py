@@ -39,6 +39,8 @@ async def media_stream(websocket: WebSocket) -> None:
     try:
         while True:
             event = parse_media_frame(await websocket.receive_text())
+            if event is None:
+                continue
             if isinstance(event, MediaStartEvent):
                 try:
                     handle = BOOK.by_call_control_id(
