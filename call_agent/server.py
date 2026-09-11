@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import NamedTuple
 
 import uvicorn
 from fastapi import (
@@ -57,7 +58,17 @@ async def media_stream(websocket: WebSocket) -> None:
         return
 
 
-async def serve_in_process(settings: Settings) -> uvicorn.Server:
+class RunningServer(NamedTuple):
+    server: uvicorn.Server
+    task: asyncio.Task[None]
+
+    async def stop(self) -> None:
+        self.server.should_exit = True
+        await self.server.shutdown()
+        await self.task
+
+
+async def serve_in_process(settings: Settings) -> RunningServer:
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -66,6 +77,4 @@ async def serve_in_process(settings: Settings) -> uvicorn.Server:
             log_level="warning",
         )
     )
-    task = asyncio.create_task(server.serve())
-    setattr(server, "_call_agent_task", task)
-    return server
+    return RunningServer(server, asyncio.create_task(server.serve()))
