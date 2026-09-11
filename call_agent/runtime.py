@@ -55,7 +55,7 @@ from .gpt_live import (
     serialize_session_start,
 )
 from .ledger import Ledger
-from .report import JournalRow, Refs, build_call_report
+from .report import JournalRow, Refs, build_call_report, redact_call_report
 from .telnyx import (
     LiveTelnyxHttp,
     StubTelnyxHttp,
@@ -200,6 +200,13 @@ class RunDir:
             refs,
         )
         self.write_json("call_report.json", report.model_dump(mode="json"))
+        self.write_json(
+            "call_report.redacted.json",
+            redact_call_report(
+                report,
+                caller_first_name=call.request.caller,
+            ).model_dump(mode="json"),
+        )
         return final_result
 
     def _write_audio(self) -> None:
