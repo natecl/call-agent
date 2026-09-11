@@ -4,13 +4,20 @@ from pydantic import ValidationError
 from call_agent.domain import (
     Answered,
     Call,
+    CloseLiveEffect,
     Codec,
     Declined,
     DialPlaced,
     DialPlacedEvent,
     E164,
+    Failed,
+    FinishEffect,
     FirstName,
+    HangupEffect,
+    HangupRequested,
+    LiveClosed,
     LiveDormant,
+    LiveStarting,
     MediaStartEvent,
     Mode,
     OpenLiveEffect,
@@ -22,6 +29,7 @@ from call_agent.domain import (
     RunId,
     Speaker,
     StreamId,
+    TelnyxAnswered,
     Transcript,
     UserId,
     WebhookEvent,
@@ -93,6 +101,39 @@ def test_media_start_before_answer_opens_live_once_and_dedupes_webhook() -> None
     assert not isinstance(call.live, LiveDormant)
     assert duplicate_call == call
     assert duplicate_effects == ()
+
+
+def test_streaming_failed_hangs_up_closes_live_and_fails_the_call() -> None:
+    settings = ReduceSettings(live_model="gpt-live-1", voice="marin")
+    failed = WebhookEvent(
+        webhook_id="webhook-failed-1",
+        event_type="streaming.failed",
+        call_control_id="call-1",
+        failure_reason="connection_failed",
+    )
+    answered = make_call().model_copy(update={"telnyx": TelnyxAnswered()})
+    starting = answered.model_copy(update={"live": LiveStarting()})
+
+    dormant_call, dormant_effects = reduce(answered, failed, settings)
+    starting_call, starting_effects = reduce(starting, failed, settings)
+
+    result = Failed(
+        call_control_id="call-1",
+        reason="Telnyx media streaming failed: connection_failed",
+    )
+    assert dormant_effects == (
+        HangupEffect(call_control_id="call-1"),
+        FinishEffect(result=result),
+    )
+    assert starting_effects == (
+        HangupEffect(call_control_id="call-1"),
+        CloseLiveEffect(),
+        FinishEffect(result=result),
+    )
+    assert dormant_call.finished is True
+    assert dormant_call.hangup == HangupRequested()
+    assert dormant_call.live == LiveDormant()
+    assert starting_call.live == LiveClosed()
 
 
 def test_dial_placed_only_changes_pending_dial() -> None:

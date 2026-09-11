@@ -98,6 +98,44 @@ def test_parse_webhook_returns_domain_event() -> None:
     )
 
 
+def test_parse_webhook_streaming_failed_carries_failure_reason() -> None:
+    raw = json.dumps(
+        {
+            "data": {
+                "event_type": "streaming.failed",
+                "id": "webhook-2",
+                "occurred_at": "2026-09-11T00:00:00Z",
+                "record_type": "event",
+                "payload": {
+                    "call_control_id": "v3:abc",
+                    "call_leg_id": "leg-1",
+                    "call_session_id": "session-1",
+                    "connection_id": "connection-1",
+                    "client_state": "opaque",
+                    "failure_reason": "connection_failed",
+                    "stream_id": "stream-1",
+                    "stream_type": "websocket",
+                    "stream_params": {
+                        "stream_url": "wss://calls.example.test/media-stream",
+                        "track": "inbound_track",
+                    },
+                },
+            }
+        }
+    ).encode()
+
+    event = parse_webhook(raw)
+
+    assert event == WebhookEvent(
+        webhook_id="webhook-2",
+        event_type="streaming.failed",
+        call_control_id="v3:abc",
+        hangup_cause=None,
+        hangup_source=None,
+        failure_reason="connection_failed",
+    )
+
+
 def test_parse_media_frames_returns_domain_events() -> None:
     start = json.dumps(
         {

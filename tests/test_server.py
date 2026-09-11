@@ -26,6 +26,7 @@ from call_agent.domain import (
     StreamId,
     TelnyxAnswered,
     UserId,
+    WebhookEvent,
 )
 from call_agent.runtime import BOOK, CallHandle, RunDir, build_ports
 from call_agent.server import app
@@ -119,4 +120,59 @@ def test_media_stream_opens_live_when_connected_precedes_start(
     assert session_start["session"]["audio"] == {
         "format": {"type": "audio/pcm", "rate": 16000},
         "output": {"voice": "marin"},
+    }
+
+
+def test_streaming_failed_webhook_hangs_up_and_fails_the_call(
+    answered_handle: CallHandle,
+) -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/webhooks/telnyx",
+        json={
+            "data": {
+                "event_type": "streaming.failed",
+                "id": "webhook-failed-1",
+                "occurred_at": "2026-09-11T00:00:00Z",
+                "record_type": "event",
+                "payload": {
+                    "call_control_id": str(CALL_CONTROL_ID),
+                    "call_leg_id": "leg-1",
+                    "call_session_id": "session-1",
+                    "connection_id": "connection-1",
+                    "client_state": "opaque",
+                    "failure_reason": "connection_failed",
+                    "stream_id": "stream-1",
+                    "stream_type": "websocket",
+                    "stream_params": {
+                        "stream_url": "wss://calls.example.test/media-stream",
+                        "track": "inbound_track",
+                    },
+                },
+            }
+        },
+    )
+
+    event = answered_handle.queue.get_nowait()
+    asyncio.run(answered_handle._process_event(event))
+    run_path = answered_handle.run_dir.path
+    hangup = json.loads((run_path / "hangup.json").read_text())
+    result = json.loads((run_path / "result.json").read_text())
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert event == WebhookEvent(
+        webhook_id="webhook-failed-1",
+        event_type="streaming.failed",
+        call_control_id=CALL_CONTROL_ID,
+        failure_reason="connection_failed",
+    )
+    assert hangup == {"call_control_id": "v3:abc"}
+    assert result == {
+        "status": "failed",
+        "answer_text": None,
+        "call_control_id": "v3:abc",
+        "transcript_ref": "v3:abc/transcript.json",
+        "audio_ref": "v3:abc/audio/inbound.wav",
+        "reason": "Telnyx media streaming failed: connection_failed",
     }
