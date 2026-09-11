@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>call-agent · demo console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="badge">Telnyx × GPT-Live</div>
+        <h1>Consumer AI Call Agent</h1>
+        <p class="subtitle">
+          Bridges Telnyx Media Streaming with the OpenAI GPT-Live (Realtime) API. Use the console
+          below to run a full inbound call end-to-end — no phone required.
+        </p>
+      </header>
+
+      <section class="cards">
+        <div class="card">
+          <h2>Service status</h2>
+          <dl id="status" class="status-grid">
+            <dt>State</dt>
+            <dd id="st-state">…</dd>
+            <dt>Realtime backend</dt>
+            <dd id="st-backend">…</dd>
+            <dt>Telnyx</dt>
+            <dd id="st-telnyx">…</dd>
+            <dt>Model</dt>
+            <dd id="st-model">…</dd>
+            <dt>Active calls</dt>
+            <dd id="st-active">…</dd>
+          </dl>
+        </div>
+
+        <div class="card">
+          <h2>Simulate an inbound call</h2>
+          <p class="muted">
+            Streams synthesised caller audio through the media bridge and plays back the agent's
+            reply.
+          </p>
+          <button id="run" class="primary">Place simulated call</button>
+          <div id="metrics" class="metrics hidden">
+            <span><strong id="m-in">0</strong> caller frames</span>
+            <span><strong id="m-out">0</strong> agent frames</span>
+            <span><strong id="m-dur">0</strong> ms</span>
+          </div>
+          <audio id="player" controls class="hidden"></audio>
+        </div>
+      </section>
+
+      <section class="card transcript-card">
+        <h2>Transcript</h2>
+        <div id="transcript" class="transcript">
+          <p class="muted">Run a call to see the conversation.</p>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
