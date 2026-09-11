@@ -60,10 +60,11 @@ The Cursor skill drives the four CLI verbs in stub mode and never sets live keys
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, and `verify-quick-ask` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, and `verify-message` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the five stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
+| `.cursor/skills/verify-call-agent/features/verify-message.md` | shipped | Covers the five MessagingPort checks and the register-webhook gate. | `.cursor/skills/verify-call-agent/features/verify-message.md` |
 | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
 
 ## Live adapters
@@ -74,11 +75,25 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 | --- | --- | --- | --- |
 | live Telnyx and OpenAI | gated | Defines `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive` for `--live` and `--mode live`. | `call_agent/telnyx.py` `LiveTelnyxHttp` `LiveTelnyxMedia`. `call_agent/gpt_live.py` `LiveGptLive`. `README.md` |
 
+## MessagingPort and Linq
+
+Telnyx owns PSTN calls. Linq Partner API V3 owns the peer iMessage kickoff thread. SMS stays off. Sandbox outbound `message.parts` text from `+12138653024` to `+17272701288` was confirmed on Builder's box. That is sandbox prove only, not product-live.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `MessagingPort` | shipped | Protocol `send` / `receive` over chat `parts`, not an SMS body. | `call_agent/messaging.py` `MessagingPort` `OutboundChat` `InboundMessage`. `tests/test_messaging.py` `test_stub_send_and_receive_round_trip` |
+| Linq V3 outbound | shipped | Stub records `POST /chats` with `preferred_service: iMessage`. `LiveLinqHttp` sends the same JSON and fails loud without `LINQ_API_TOKEN`. | `call_agent/linq.py` `serialize_outbound` `StubLinq` `LiveLinqHttp`. `tests/test_messaging.py` `test_text_chat_is_parts_not_sms_body` `test_live_constructor_fails_without_token` `test_live_send_posts_chats_parts_shape` |
+| Linq V3 inbound skeleton | shipped | Parses `message.received` (2026-02-03 and 2025-01-01), verifies Standard Webhooks signatures, ignores SMS. Stub-testable with no public URL. | `call_agent/linq.py` `parse_inbound` `verify_linq_signature`. `call_agent/server.py` `/webhooks/linq`. `tests/test_messaging.py` `test_signature_accepts_good_and_rejects_bad` `test_linq_webhook_route_verifies_signature` |
+| `verify-message` | shipped | Five stub checks: send shape, inbound map, signature, live token gate, iMessage-only. | `call_agent/verify_message.py` `verify_message`. `call_agent/cli.py` `verify_message_command`. `tests/test_cli.py` `test_verify_message_stub_exits_zero`. `.cursor/skills/verify-call-agent/features/verify-message.md` |
+| `linq register-webhook` | gated | `POST /webhook-subscriptions` after `LINQ_API_TOKEN` and `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL` are set. Fails loud if either is missing. | `call_agent/cli.py` `linq_register_webhook`. `tests/test_cli.py` `test_linq_register_webhook_fails_without_token` `test_linq_register_webhook_fails_without_url` |
+| always-on Linq webhook URL | not shipped | Public HTTPS URL comes from the parallel Cloudflare Workers track. Until it lands, poll `GET /api/partner/v3/chats/{chatId}/messages`. A temp tunnel is interim only. | `docs/linq.md` |
+| SMS | not shipped | No SMS adapter. Outbound pins iMessage. Inbound SMS events are ignored. | `call_agent/linq.py` `serialize_outbound` `parse_inbound`. `tests/test_messaging.py` `test_receive_ignores_sms_and_non_message_events` |
+
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`.
+`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md).
 
-`README.md` states "Day 1 ships quick-ask only. Booking, hold queues, packaging, and iMessage are out of scope."
+`README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off.
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
 
@@ -89,5 +104,4 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 | `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
 | hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
-| iMessage | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |

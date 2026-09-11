@@ -26,6 +26,7 @@ step "doctor"
 [ -x "$CLI" ] || { echo "call-agent is not installed in .venv. Run: $REPO/.venv/bin/pip install -e '.[dev]'"; exit 1; }
 run "$PY" -c "import call_agent; print('import ok')"
 run "$CLI" --help | grep -q "verify-quick-ask" || { echo "verify-quick-ask verb missing from --help"; exit 1; }
+run "$CLI" --help | grep -q "verify-message" || { echo "verify-message verb missing from --help"; exit 1; }
 
 step "did provision twice returns the same DID"
 FIRST="$(run "$CLI" did provision --user default | tail -n1)"
@@ -50,6 +51,10 @@ cp -r "$CALL_AGENT_ARTIFACTS_DIR" "$EVIDENCE/quick-ask-artifacts"
 step "verify-quick-ask stub checklist"
 run "$CLI" verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub | tee "$EVIDENCE/verify-quick-ask.txt" >/dev/null
 grep -q "5/5 passed" "$EVIDENCE/verify-quick-ask.txt"
+
+step "verify-message stub checklist"
+run "$CLI" verify-message | tee "$EVIDENCE/verify-message.txt" >/dev/null
+grep -q "5/5 passed" "$EVIDENCE/verify-message.txt"
 
 step "live mode is gated"
 set +e

@@ -17,15 +17,28 @@ from .domain import (
     UserId,
 )
 from .ledger import Ledger
+from .linq import (
+    LinqConfigError,
+    LiveLinqHttp,
+    resolve_webhook_url,
+    validate_linq_live_token,
+)
 from .runtime import run_quick_ask, validate_live
 from .server import serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
 from .verify import VerifyInput, format_report, verify_quick_ask
+from .verify_message import (
+    MessageVerifyInput,
+    format_message_report,
+    verify_message,
+)
 
 
 app = typer.Typer(no_args_is_help=True)
 did_app = typer.Typer(no_args_is_help=True)
+linq_app = typer.Typer(no_args_is_help=True)
 app.add_typer(did_app, name="did")
+app.add_typer(linq_app, name="linq")
 
 LIVE_GATE_MESSAGE = (
     "live mode is gated: set QUICK_ASK_LIVE=1 and the keys in .env.example"
@@ -143,6 +156,52 @@ def verify_quick_ask_command(
     typer.echo(format_report(report))
     if not report.passed:
         raise typer.Exit(code=1)
+
+
+@app.command("verify-message")
+def verify_message_command(
+    to: str = typer.Option("+14155552671", "--to"),
+    from_did: str = typer.Option("+15555550100", "--from-did"),
+    text: str = typer.Option("kickoff", "--text"),
+) -> None:
+    try:
+        report = verify_message(
+            MessageVerifyInput(
+                from_did=E164(from_did),
+                to=E164(to),
+                text=text,
+            )
+        )
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(format_message_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+@linq_app.command("register-webhook")
+def linq_register_webhook() -> None:
+    settings = Settings()
+    try:
+        validate_linq_live_token(settings.linq_api_token)
+        target_url = resolve_webhook_url(
+            settings.linq_webhook_url,
+            settings.public_webhook_url,
+        )
+    except LinqConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    subscription = LiveLinqHttp(settings.linq_api_token or "").register_webhook(
+        target_url
+    )
+    typer.echo(f"subscription_id {subscription.subscription_id}")
+    typer.echo(f"target_url {subscription.target_url}")
+    typer.echo(f"signing_secret {subscription.signing_secret}")
+    typer.echo(
+        "store signing_secret as LINQ_WEBHOOK_SECRET; "
+        "Linq will not return it again"
+    )
 
 
 def _require_live_gate(settings: Settings) -> None:

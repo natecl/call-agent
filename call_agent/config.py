@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     telnyx_connection_id: str | None = None
     telnyx_public_key: str | None = None
     telnyx_stream_codec: str = "L16"
+    linq_api_token: str | None = None
+    linq_from_e164: str | None = None
+    linq_webhook_secret: str | None = None
+    linq_webhook_url: str | None = None
+    public_webhook_url: str | None = None
     openai_api_key: str | None = None
     openai_live_model: str = "gpt-live-1"
     openai_live_voice: str = "marin"
