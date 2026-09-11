@@ -21,3 +21,5 @@ class Settings(BaseSettings):
     call_agent_artifacts_dir: Path = Path("./artifacts")
     quick_ask_live: bool = False
     event_timeout_s: float = 30.0
+    hangup_trailing_silence_s: float = 0.4
+    hangup_drain_timeout_s: float = 10.0

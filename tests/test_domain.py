@@ -252,9 +252,11 @@ def test_streaming_failed_during_the_drain_still_hangs_up(
     assert call.finished is True
 
 
-def test_media_start_before_answer_opens_live_once_and_dedupes_webhook() -> None:
+def test_media_start_before_answer_opens_live_once_and_dedupes_webhook(
+    reduce_settings: ReduceSettings,
+) -> None:
     call = make_call()
-    settings = ReduceSettings(live_model="gpt-live-1", voice="marin")
+    settings = reduce_settings
 
     call, first_effects = reduce(
         call,
@@ -297,8 +299,10 @@ def test_media_start_before_answer_opens_live_once_and_dedupes_webhook() -> None
     assert duplicate_effects == ()
 
 
-def test_streaming_failed_hangs_up_closes_live_and_fails_the_call() -> None:
-    settings = ReduceSettings(live_model="gpt-live-1", voice="marin")
+def test_streaming_failed_hangs_up_closes_live_and_fails_the_call(
+    reduce_settings: ReduceSettings,
+) -> None:
+    settings = reduce_settings
     failed = WebhookEvent(
         webhook_id="webhook-failed-1",
         event_type="streaming.failed",
@@ -330,7 +334,9 @@ def test_streaming_failed_hangs_up_closes_live_and_fails_the_call() -> None:
     assert starting_call.live == LiveClosed()
 
 
-def test_dial_placed_only_changes_pending_dial() -> None:
+def test_dial_placed_only_changes_pending_dial(
+    reduce_settings: ReduceSettings,
+) -> None:
     call = make_call().model_copy(update={"dial": make_call().dial})
     event = DialPlacedEvent(
         call_control_id="call-2",
@@ -338,11 +344,7 @@ def test_dial_placed_only_changes_pending_dial() -> None:
         call_session_id="session-2",
     )
 
-    reduced, effects = reduce(
-        call,
-        event,
-        ReduceSettings(live_model="gpt-live-1", voice="marin"),
-    )
+    reduced, effects = reduce(call, event, reduce_settings)
 
     assert reduced == call
     assert effects == ()

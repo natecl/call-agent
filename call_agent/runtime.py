@@ -30,6 +30,7 @@ from .domain import (
     LiveAudioFormat,
     LiveInputTranscriptEvent,
     LiveOutputTranscriptEvent,
+    MarkEffect,
     MediaChunkEvent,
     MediaStartEvent,
     Mode,
@@ -40,6 +41,7 @@ from .domain import (
     ReduceSettings,
     RunId,
     SampleRate,
+    ScheduleEffect,
     SpeakFirstEffect,
     TimeoutEvent,
     Transcript,
@@ -184,6 +186,9 @@ class _UnboundTelnyxMedia:
     async def play(self, payload_b64: str) -> None:
         raise RuntimeError("Telnyx media WebSocket is not bound")
 
+    async def mark(self, name: str) -> None:
+        raise RuntimeError("Telnyx media WebSocket is not bound")
+
     async def close(self) -> None:
         return None
 
@@ -208,6 +213,7 @@ def build_ports(
             submit=submit,
             append_outbound=run_dir.append_outbound,
             sample_rate=faults.media_sample_rate,
+            echo_marks=not faults.playback_never_drains,
         )
         return Ports(
             telnyx_http=StubTelnyxHttp(
@@ -258,6 +264,8 @@ class CallHandle:
         self._reduce_settings = ReduceSettings(
             live_model=settings.openai_live_model,
             voice=settings.openai_live_voice,
+            hangup_trailing_silence_s=settings.hangup_trailing_silence_s,
+            hangup_drain_timeout_s=settings.hangup_drain_timeout_s,
         )
 
     def submit(self, event: CallEvent) -> None:
@@ -319,6 +327,14 @@ class CallHandle:
         if isinstance(effect, PlayAudioEffect):
             self.run_dir.append_outbound(effect.delta_b64)
             await self.ports.telnyx_media.play(effect.delta_b64)
+            return
+        if isinstance(effect, MarkEffect):
+            await self.ports.telnyx_media.mark(effect.name)
+            return
+        if isinstance(effect, ScheduleEffect):
+            asyncio.get_running_loop().call_later(
+                effect.delay_s, self.submit, effect.event
+            )
             return
         if isinstance(effect, HangupEffect):
             self.run_dir.write_json(

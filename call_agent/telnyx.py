@@ -19,6 +19,7 @@ from .domain import (
     E164,
     LiveAudioFormat,
     MediaChunkEvent,
+    MediaMarkEvent,
     MediaStartEvent,
     MediaStopEvent,
     SampleRate,
@@ -122,12 +123,22 @@ class _StopFrame(_WireModel):
     stream_id: StreamId
 
 
+class _MarkBody(_WireModel):
+    name: str
+
+
+class _MarkFrame(_WireModel):
+    event: Literal["mark"]
+    stream_id: StreamId
+    mark: _MarkBody
+
+
 class _IgnoredFrame(_WireModel):
     event: Literal["connected", "dtmf"]
 
 
 _InboundMediaFrame: TypeAlias = Annotated[
-    _StartFrame | _MediaFrame | _StopFrame | _IgnoredFrame,
+    _StartFrame | _MediaFrame | _StopFrame | _MarkFrame | _IgnoredFrame,
     Field(discriminator="event"),
 ]
 _MEDIA_ADAPTER = TypeAdapter(_InboundMediaFrame)
@@ -177,6 +188,8 @@ class TelnyxHttp(Protocol):
 class TelnyxMedia(Protocol):
     async def play(self, payload_b64: str) -> None: ...
 
+    async def mark(self, name: str) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -212,7 +225,9 @@ def parse_webhook(raw: bytes) -> WebhookEvent:
 
 def parse_media_frame(
     raw: str,
-) -> MediaStartEvent | MediaChunkEvent | MediaStopEvent | None:
+) -> (
+    MediaStartEvent | MediaChunkEvent | MediaStopEvent | MediaMarkEvent | None
+):
     frame = _MEDIA_ADAPTER.validate_json(raw)
     if isinstance(frame, _StartFrame):
         return MediaStartEvent(
@@ -228,6 +243,8 @@ def parse_media_frame(
         )
     if isinstance(frame, _StopFrame):
         return MediaStopEvent(stream_id=frame.stream_id)
+    if isinstance(frame, _MarkFrame):
+        return MediaMarkEvent(stream_id=frame.stream_id, name=frame.mark.name)
     return None
 
 
@@ -321,6 +338,11 @@ class LiveTelnyxMedia:
             {"event": "media", "media": {"payload": payload_b64}}
         )
 
+    async def mark(self, name: str) -> None:
+        await self._websocket.send_json(
+            {"event": "mark", "mark": {"name": name}}
+        )
+
     async def close(self) -> None:
         await self._websocket.close()
 
@@ -348,10 +370,12 @@ class StubTelnyxMedia:
         submit: Submit = _ignore_event,
         append_outbound: AppendAudio = _ignore_audio,
         sample_rate: SampleRate = 16000,
+        echo_marks: bool = True,
     ) -> None:
         self._submit = submit
         self._append_outbound = append_outbound
         self._sample_rate = sample_rate
+        self._echo_marks = echo_marks
 
     def begin(self) -> None:
         self._submit(
@@ -399,6 +423,19 @@ class StubTelnyxMedia:
 
     async def play(self, payload_b64: str) -> None:
         self._append_outbound(payload_b64)
+
+    async def mark(self, name: str) -> None:
+        if not self._echo_marks:
+            return
+        self._submit(
+            self._parse(
+                {
+                    "event": "mark",
+                    "stream_id": "stub-stream-0001",
+                    "mark": {"name": name},
+                }
+            )
+        )
 
     async def close(self) -> None:
         return None

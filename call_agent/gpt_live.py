@@ -267,6 +267,7 @@ class StubScenario(BaseModel):
     dial_override: dict[str, Any] = {}
     far_party_hangs_up: bool = False
     media_sample_rate: SampleRate = 16000
+    playback_never_drains: bool = False
 
 
 class StubGptLive:

@@ -221,15 +221,38 @@ def verify_quick_ask(
         if event.get("kind") == "webhook"
         and event.get("event_type") == "call.hangup"
     ]
+    last_audio_sequence = max(
+        (
+            int(event["seq"])
+            for event in events
+            if event.get("kind") == "live_output_audio"
+        ),
+        default=0,
+    )
+    trail_sequences = [
+        int(event["seq"])
+        for event in events
+        if event.get("kind") == "hangup_trail_elapsed"
+    ]
+    drain_timed_out = any(
+        event.get("kind") == "hangup_drain_timeout" for event in events
+    )
     artifact_result = _read_json(run_dir / "result.json")
     terminal_before_hangup = bool(
         transcript_sequences
         and hangup_sequences
         and transcript_sequences[-1] < hangup_sequences[-1]
     )
+    drained_before_hangup = bool(
+        trail_sequences
+        and hangup_sequences
+        and last_audio_sequence < trail_sequences[-1] < hangup_sequences[-1]
+        and not drain_timed_out
+    )
     clean_hangup_passed = (
         (run_dir / "hangup.json").is_file()
         and terminal_before_hangup
+        and drained_before_hangup
         and artifact_result.get("status") in {"answered", "declined"}
     )
     clean_hangup_check = VerifyCheck(
@@ -240,9 +263,13 @@ def verify_quick_ask(
             f"hangup_json={(run_dir / 'hangup.json').is_file()} "
             f"transcript_seq="
             f"{transcript_sequences[-1] if transcript_sequences else None} "
+            f"last_audio_seq={last_audio_sequence} "
+            f"trail_seq={trail_sequences[-1] if trail_sequences else None} "
+            f"drain_timed_out={drain_timed_out} "
             f"hangup_seq="
             f"{hangup_sequences[-1] if hangup_sequences else None}, "
-            "expected status answered|declined and verdict before call.hangup"
+            "expected status answered|declined, verdict before call.hangup, "
+            "and the trailing silence after the last audio and before call.hangup"
             + (
                 f" (reason: {artifact_result.get('reason')})"
                 if artifact_result.get("reason")
