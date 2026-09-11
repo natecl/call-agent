@@ -211,7 +211,6 @@ def build_ports(
         faults = scenario or StubScenario()
         media = StubTelnyxMedia(
             submit=submit,
-            append_outbound=run_dir.append_outbound,
             sample_rate=faults.media_sample_rate,
             echo_marks=not faults.playback_never_drains,
         )
