@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,24 @@ from call_agent.cli import app
 from call_agent.config import Settings
 from call_agent.domain import E164, UserId
 from call_agent.server import app as fastapi_app
-from tests.test_ledger import _SqlitePg
+
+
+class _SqlitePg:
+    def __init__(self, path: Path) -> None:
+        self._conn = sqlite3.connect(path)
+        self._conn.row_factory = sqlite3.Row
+
+    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        return self._conn.execute(sql.replace("%s", "?"), params)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def close(self) -> None:
+        self._conn.close()
 
 
 runner = CliRunner()
