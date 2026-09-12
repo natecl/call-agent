@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -28,6 +28,7 @@ from .linq import (
 )
 from .messaging import (
     IMESSAGE,
+    ChatId,
     InboundMessage,
     MessagingPort,
     SendReceipt,
@@ -36,12 +37,14 @@ from .messaging import (
 from .persistence import PersistenceConfigError
 from .runtime import normalized_public_host, run_call
 
-BOOK_USAGE = (
-    "book <+E164> party <n> at <time> [name <First>] [notes <text>]"
+PHONE_ASK_TEXT = "okay, sounds good. What's the restaurant's phone number?"
+TIME_ASK_TEXT = "okay, sounds good. What time should I book?"
+PARTY_ASK_TEXT = "okay, sounds good. How many people?"
+PARTY_AND_TIME_ASK_TEXT = (
+    "okay, sounds good. What time, and for how many people?"
 )
-ASK_USAGE = (
-    "ask <+E164> hours|stock <item>|aisle <item> [name <First>]"
-)
+KIND_ASK_TEXT = "okay, sounds good. What should I ask them?"
+ITEM_ASK_TEXT = "okay, sounds good. Which item?"
 
 _BOOK_RE = re.compile(
     r"^book\s+(?P<to>\+[1-9]\d{7,14})\s+party\s+(?P<party>\d+)\s+at\s+"
@@ -59,8 +62,58 @@ _ASK_ITEM_RE = re.compile(
     r"(?P<item>.+?)(?:\s+name\s+(?P<name>.+))?$",
     re.IGNORECASE,
 )
+_E164_RE = re.compile(r"\+[1-9]\d{7,14}")
+_US_PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?1[\s.-]*)?\(?([2-9]\d{2})\)?[\s.-]*([2-9]\d{2})[\s.-]*(\d{4})(?!\d)"
+)
+_PARTY_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+_PARTY_TOKEN = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+_PARTY_RE = re.compile(
+    r"\b(?:party\s+(?:of\s+)?|table\s+for\s+)(" + _PARTY_TOKEN + r")\b",
+    re.IGNORECASE,
+)
+_FOR_PEOPLE_RE = re.compile(
+    r"\bfor\s+(" + _PARTY_TOKEN + r")\s+(?:people|guests|persons?)\b",
+    re.IGNORECASE,
+)
+_BARE_PARTY_RE = re.compile(
+    r"^\s*(" + _PARTY_TOKEN + r")\s*(?:people|guests|persons?)?\s*$",
+    re.IGNORECASE,
+)
+_AT_TIME_RE = re.compile(
+    r"\bat\s+(.+?)(?=\s+for\s+a\s+party|\s+for\s+a\s+table|\s+party\b"
+    r"|\s+name\b|\s+notes\b|$)",
+    re.IGNORECASE,
+)
+_NAME_RE = re.compile(
+    r"\bname\s+([A-Za-z][A-Za-z' -]{0,31})(?=\s+notes\b|$)",
+    re.IGNORECASE,
+)
+_NOTES_RE = re.compile(r"\bnotes\s+(.+)$", re.IGNORECASE)
+_BOOK_INTENT_RE = re.compile(
+    r"\b(reservations?|reserve|book(?:ing)?s?|table|party)\b",
+    re.IGNORECASE,
+)
+_ASK_INTENT_RE = re.compile(
+    r"\b(hours|stock|aisle|open)\b",
+    re.IGNORECASE,
+)
 
 ReplyKind = Literal["ack", "result", "error"]
+WaitingFor = Literal["party", "time", "party_and_time", "to", "kind", "item"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +123,47 @@ class KickoffParsed:
 
 
 @dataclass(frozen=True, slots=True)
-class KickoffMalformed:
+class PendingCollect:
     verb: Literal["book", "ask"]
-    missing: tuple[str, ...]
-    usage: str
+    waiting_for: WaitingFor
+    to: str | None = None
+    party_size: int | None = None
+    time_text: str | None = None
+    constraints: str | None = None
+    question_kind: str | None = None
+    question_item: str | None = None
+    name: str | None = None
+
+    def to_dict(self) -> dict[str, str | int | None]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, object]) -> PendingCollect:
+        party = raw.get("party_size")
+        return cls(
+            verb="ask" if raw.get("verb") == "ask" else "book",
+            waiting_for=_waiting_for_value(raw.get("waiting_for")),
+            to=_optional_str(raw.get("to")),
+            party_size=party if isinstance(party, int) else None,
+            time_text=_optional_str(raw.get("time_text")),
+            constraints=_optional_str(raw.get("constraints")),
+            question_kind=_optional_str(raw.get("question_kind")),
+            question_item=_optional_str(raw.get("question_item")),
+            name=_optional_str(raw.get("name")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class KickoffCollecting:
+    reply: str
+    pending: PendingCollect
+    verb: Literal["book", "ask"]
+
+
+@dataclass(frozen=True, slots=True)
+class KickoffFailed:
+    reason: str
+    verb: Literal["book", "ask"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,28 +217,71 @@ class KickoffSession:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _Extracted:
+    intent: Literal["book", "ask"] | None
+    to: E164 | None
+    party_size: int | None
+    time_text: str | None
+    constraints: str | None
+    name: str | None
+    question_kind: QuestionType | None
+    question_item: str | None
+
+
+def collect_reply_text(waiting_for: WaitingFor) -> str:
+    if waiting_for == "to":
+        return PHONE_ASK_TEXT
+    if waiting_for == "time":
+        return TIME_ASK_TEXT
+    if waiting_for == "party":
+        return PARTY_ASK_TEXT
+    if waiting_for == "party_and_time":
+        return PARTY_AND_TIME_ASK_TEXT
+    if waiting_for == "item":
+        return ITEM_ASK_TEXT
+    return KIND_ASK_TEXT
+
+
+def failed_reply_text(reason: str) -> str:
+    return f"Call failed: {reason}"
+
+
 def parse_kickoff(
     text: str,
     settings: Settings,
     sender: str | None = None,
-) -> KickoffParsed | KickoffMalformed | None:
+) -> KickoffParsed | KickoffCollecting | KickoffFailed | None:
     del sender
+    return intake_kickoff(text, settings)
+
+
+def intake_kickoff(
+    text: str,
+    settings: Settings,
+    pending: PendingCollect | None = None,
+) -> KickoffParsed | KickoffCollecting | KickoffFailed | None:
     normalized = " ".join(text.split())
     if not normalized:
-        return None
-    verb = normalized.split(" ", 1)[0].casefold()
-    if verb not in {"book", "ask"}:
-        return None
-    if verb == "book":
-        return _parse_book(normalized, settings)
-    return _parse_ask(normalized, settings)
-
-
-def malformed_reply_text(malformed: KickoffMalformed) -> str:
-    missing = ", ".join(malformed.missing) if malformed.missing else "fields"
-    return (
-        f"Couldn't parse that. Missing: {missing}. Use: {malformed.usage}"
+        if pending is None:
+            return None
+        return KickoffFailed("I didn't catch that.", pending.verb)
+    extracted = _extract_fields(
+        normalized, waiting_for=None if pending is None else pending.waiting_for
     )
+    if pending is None:
+        if extracted.intent is None:
+            return None
+        return _decide(extracted, settings, verb=extracted.intent)
+    if not _progressed(pending, extracted):
+        return KickoffFailed(
+            "I need the restaurant's phone number."
+            if pending.waiting_for == "to"
+            else "I need a bit more to place the call.",
+            pending.verb,
+        )
+    merged = _merge(pending, extracted)
+    return _decide(merged, settings, verb=pending.verb)
 
 
 def kickoff_ack_text(request: BookRequest | QuickAskRequest) -> str:
@@ -192,6 +325,72 @@ def kickoff_host_mismatch(
 
 def kickoff_json_path(root: Path, event_id: str) -> Path:
     return root / "linq" / event_id / "kickoff.json"
+
+
+def pending_collect_path(root: Path, chat_id: ChatId | str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(chat_id)).strip("._") or "chat"
+    return root / "linq" / "pending" / f"{safe}.json"
+
+
+def load_pending_collect(
+    root: Path, chat_id: ChatId | str
+) -> PendingCollect | None:
+    _require_artifacts_root(root)
+    path = pending_collect_path(root, chat_id)
+    if not path.is_file():
+        return None
+    raw = json.loads(path.read_text())
+    if not isinstance(raw, dict):
+        return None
+    return PendingCollect.from_dict(raw)
+
+
+def save_pending_collect(
+    root: Path,
+    chat_id: ChatId | str,
+    pending: PendingCollect,
+    *,
+    inbound: InboundMessage | None = None,
+) -> Path:
+    _require_artifacts_root(root)
+    path = pending_collect_path(root, chat_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = pending.to_dict()
+    payload["chat_id"] = str(chat_id)
+    if inbound is not None:
+        payload["event_id"] = str(inbound.event_id)
+        payload["message_id"] = str(inbound.message_id)
+        payload["sender"] = str(inbound.sender)
+    payload["saved_at"] = datetime.now(UTC).isoformat()
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def clear_pending_collect(root: Path, chat_id: ChatId | str) -> None:
+    path = pending_collect_path(root, chat_id)
+    if path.is_file():
+        path.unlink()
+
+
+def claim_collect(
+    settings: Settings,
+    inbound: InboundMessage,
+    pending: PendingCollect,
+) -> bool:
+    path = linq_artifact_dir(
+        settings.call_agent_artifacts_dir, inbound.event_id
+    ) / "collect.json"
+    payload = {
+        "event_id": str(inbound.event_id),
+        "chat_id": str(inbound.chat_id),
+        "message_id": str(inbound.message_id),
+        "sender": str(inbound.sender),
+        "verb": pending.verb,
+        "waiting_for": pending.waiting_for,
+        "pending": pending.to_dict(),
+        "parsed_at": datetime.now(UTC).isoformat(),
+    }
+    return claim_path(path, payload)
 
 
 def claim_kickoff(
@@ -336,10 +535,10 @@ async def run_kickoff(
     result_receipt = session.text(text, kind="result")
     write_call_cross_links(
         session.settings,
-        session.inbound,
-        result,
-        result_receipt,
-        text,
+        inbound=session.inbound,
+        result=result,
+        result_receipt=result_receipt,
+        result_text=text,
     )
     return KickoffReceipt(
         request=request,
@@ -363,85 +562,351 @@ def make_session(
     )
 
 
-def _parse_book(
-    text: str, settings: Settings
-) -> KickoffParsed | KickoffMalformed:
-    matched = _BOOK_RE.fullmatch(text)
-    if matched is None:
-        return KickoffMalformed(
-            verb="book",
-            missing=_book_missing(text),
-            usage=BOOK_USAGE,
-        )
-    caller = _resolve_caller(matched.group("name"), settings)
+def _decide(
+    extracted: _Extracted,
+    settings: Settings,
+    *,
+    verb: Literal["book", "ask"],
+) -> KickoffParsed | KickoffCollecting | KickoffFailed:
+    caller = _resolve_caller(extracted.name, settings)
     if caller is None:
-        return KickoffMalformed(
-            verb="book", missing=("name",), usage=BOOK_USAGE
-        )
+        return KickoffFailed("missing caller name", verb)
     user_id = _resolve_user_id(settings)
     if user_id is None:
-        return KickoffMalformed(
-            verb="book", missing=("user_id",), usage=BOOK_USAGE
+        return KickoffFailed("missing user id", verb)
+    if verb == "ask":
+        return _decide_ask(extracted, settings, caller, user_id)
+    return _decide_book(extracted, settings, caller, user_id)
+
+
+def _decide_book(
+    extracted: _Extracted,
+    settings: Settings,
+    caller: FirstName,
+    user_id: UserId,
+) -> KickoffParsed | KickoffCollecting | KickoffFailed:
+    missing: list[WaitingFor] = []
+    if extracted.party_size is None:
+        missing.append("party")
+    if not extracted.time_text:
+        missing.append("time")
+    if missing:
+        waiting: WaitingFor = (
+            "party_and_time" if missing == ["party", "time"] else missing[0]
+        )
+        return KickoffCollecting(
+            reply=collect_reply_text(waiting),
+            pending=_pending_from_extracted(extracted, "book", waiting),
+            verb="book",
+        )
+    if extracted.to is None:
+        return KickoffCollecting(
+            reply=PHONE_ASK_TEXT,
+            pending=_pending_from_extracted(extracted, "book", "to"),
+            verb="book",
         )
     try:
         request = BookRequest(
             user_id=user_id,
-            to=E164(matched.group("to")),
+            to=extracted.to,
             caller=caller,
             mode=_mode(settings),
-            party_size=int(matched.group("party")),
-            time_text=matched.group("time").strip(),
-            constraints=_optional_text(matched.group("notes")),
+            party_size=extracted.party_size or 0,
+            time_text=extracted.time_text or "",
+            constraints=extracted.constraints,
         )
     except ValueError:
-        return KickoffMalformed(
-            verb="book",
-            missing=_book_missing(text) or ("to", "party", "at"),
-            usage=BOOK_USAGE,
-        )
+        return KickoffFailed("I need a bit more to place the call.", "book")
     return KickoffParsed(request=request, verb="book")
 
 
-def _parse_ask(
-    text: str, settings: Settings
-) -> KickoffParsed | KickoffMalformed:
+def _decide_ask(
+    extracted: _Extracted,
+    settings: Settings,
+    caller: FirstName,
+    user_id: UserId,
+) -> KickoffParsed | KickoffCollecting | KickoffFailed:
+    kind = extracted.question_kind
+    if kind is None:
+        return KickoffCollecting(
+            reply=collect_reply_text("kind"),
+            pending=_pending_from_extracted(extracted, "ask", "kind"),
+            verb="ask",
+        )
+    if kind in {QuestionType.STOCK, QuestionType.AISLE} and not extracted.question_item:
+        return KickoffCollecting(
+            reply=collect_reply_text("item"),
+            pending=_pending_from_extracted(extracted, "ask", "item"),
+            verb="ask",
+        )
+    if extracted.to is None:
+        return KickoffCollecting(
+            reply=PHONE_ASK_TEXT,
+            pending=_pending_from_extracted(extracted, "ask", "to"),
+            verb="ask",
+        )
+    try:
+        request = QuickAskRequest(
+            user_id=user_id,
+            to=extracted.to,
+            question=Question.from_cli(kind, extracted.question_item),
+            caller=caller,
+            mode=_mode(settings),
+        )
+    except ValueError:
+        return KickoffFailed("I need a bit more to place the call.", "ask")
+    return KickoffParsed(request=request, verb="ask")
+
+
+def _pending_from_extracted(
+    extracted: _Extracted,
+    verb: Literal["book", "ask"],
+    waiting_for: WaitingFor,
+) -> PendingCollect:
+    return PendingCollect(
+        verb=verb,
+        waiting_for=waiting_for,
+        to=str(extracted.to) if extracted.to is not None else None,
+        party_size=extracted.party_size,
+        time_text=extracted.time_text,
+        constraints=extracted.constraints,
+        question_kind=(
+            extracted.question_kind.value
+            if extracted.question_kind is not None
+            else None
+        ),
+        question_item=extracted.question_item,
+        name=extracted.name,
+    )
+
+
+def _extract_fields(
+    text: str, *, waiting_for: WaitingFor | None
+) -> _Extracted:
+    cli = _extract_cli(text)
+    if cli is not None:
+        return cli
+    return _Extracted(
+        intent=_intent(text, waiting_for),
+        to=_extract_e164(text),
+        party_size=_extract_party(text, loose=waiting_for in {"party", "party_and_time"}),
+        time_text=_extract_time(text, loose=waiting_for in {"time", "party_and_time"}),
+        constraints=_extract_notes(text),
+        name=_extract_name(text),
+        question_kind=_extract_kind(text),
+        question_item=_extract_item(text),
+    )
+
+
+def _extract_cli(text: str) -> _Extracted | None:
+    book = _BOOK_RE.fullmatch(text)
+    if book is not None:
+        try:
+            to = E164(book.group("to"))
+            party = int(book.group("party"))
+        except ValueError:
+            return None
+        return _Extracted(
+            intent="book",
+            to=to,
+            party_size=party,
+            time_text=book.group("time").strip(),
+            constraints=_optional_text(book.group("notes")),
+            name=_optional_text(book.group("name")),
+            question_kind=None,
+            question_item=None,
+        )
     hours = _ASK_HOURS_RE.fullmatch(text)
     item_match = _ASK_ITEM_RE.fullmatch(text)
     matched = hours or item_match
     if matched is None:
-        return KickoffMalformed(
-            verb="ask",
-            missing=_ask_missing(text),
-            usage=ASK_USAGE,
-        )
-    caller = _resolve_caller(matched.group("name"), settings)
-    if caller is None:
-        return KickoffMalformed(
-            verb="ask", missing=("name",), usage=ASK_USAGE
-        )
-    user_id = _resolve_user_id(settings)
-    if user_id is None:
-        return KickoffMalformed(
-            verb="ask", missing=("user_id",), usage=ASK_USAGE
-        )
-    kind_raw = "hours" if hours is not None else matched.group("kind")
-    item = None if hours is not None else matched.group("item").strip()
+        return None
     try:
-        kind = QuestionType(kind_raw.casefold())
-        request = QuickAskRequest(
-            user_id=user_id,
-            to=E164(matched.group("to")),
-            question=Question.from_cli(kind, item),
-            caller=caller,
-            mode=_mode(settings),
-        )
+        to = E164(matched.group("to"))
+        kind = QuestionType("hours" if hours is not None else matched.group("kind").casefold())
     except ValueError:
-        return KickoffMalformed(
-            verb="ask",
-            missing=_ask_missing(text) or ("to", "kind"),
-            usage=ASK_USAGE,
-        )
-    return KickoffParsed(request=request, verb="ask")
+        return None
+    item = None if hours is not None else matched.group("item").strip()
+    return _Extracted(
+        intent="ask",
+        to=to,
+        party_size=None,
+        time_text=None,
+        constraints=None,
+        name=_optional_text(matched.group("name")),
+        question_kind=kind,
+        question_item=item,
+    )
+
+
+def _intent(
+    text: str, waiting_for: WaitingFor | None
+) -> Literal["book", "ask"] | None:
+    if waiting_for is not None:
+        return None
+    first = text.split(" ", 1)[0].casefold()
+    if first == "book" or _BOOK_INTENT_RE.search(text):
+        return "book"
+    if first == "ask" or _ASK_INTENT_RE.search(text):
+        return "ask"
+    return None
+
+
+def _extract_e164(text: str) -> E164 | None:
+    matched = _E164_RE.search(text)
+    if matched is not None:
+        try:
+            return E164(matched.group(0))
+        except ValueError:
+            pass
+    us = _US_PHONE_RE.search(text)
+    if us is None:
+        return None
+    try:
+        return E164(f"+1{us.group(1)}{us.group(2)}{us.group(3)}")
+    except ValueError:
+        return None
+
+
+def _extract_party(text: str, *, loose: bool) -> int | None:
+    for pattern in (_PARTY_RE, _FOR_PEOPLE_RE):
+        matched = pattern.search(text)
+        if matched is not None:
+            value = _party_value(matched.group(1))
+            if value is not None:
+                return value
+    if not loose:
+        return None
+    bare = _BARE_PARTY_RE.fullmatch(text)
+    if bare is None:
+        return None
+    return _party_value(bare.group(1))
+
+
+def _extract_time(text: str, *, loose: bool) -> str | None:
+    matched = _AT_TIME_RE.search(text)
+    if matched is not None:
+        value = " ".join(matched.group(1).split()).strip(" .,")
+        if value and not _E164_RE.fullmatch(value):
+            return value
+    if not loose:
+        return None
+    stripped = " ".join(text.split()).strip(" .,")
+    if not stripped or _extract_e164(stripped) is not None:
+        return None
+    if _BARE_PARTY_RE.fullmatch(stripped) is not None:
+        return None
+    if re.search(r"\d", stripped) is None:
+        return None
+    return stripped
+
+
+def _extract_name(text: str) -> str | None:
+    matched = _NAME_RE.search(text)
+    if matched is None:
+        return None
+    return _optional_text(matched.group(1))
+
+
+def _extract_notes(text: str) -> str | None:
+    matched = _NOTES_RE.search(text)
+    if matched is None:
+        return None
+    return _optional_text(matched.group(1))
+
+
+def _extract_kind(text: str) -> QuestionType | None:
+    lowered = text.casefold()
+    tokens = set(lowered.split())
+    if "hours" in tokens or "open" in tokens:
+        return QuestionType.HOURS
+    if "stock" in tokens:
+        return QuestionType.STOCK
+    if "aisle" in tokens:
+        return QuestionType.AISLE
+    return None
+
+
+def _extract_item(text: str) -> str | None:
+    matched = _ASK_ITEM_RE.fullmatch(text)
+    if matched is not None:
+        return matched.group("item").strip()
+    item_match = re.search(
+        r"\b(?:stock|aisle)\s+(.+?)(?:\s+name\s+.+)?$",
+        text,
+        re.IGNORECASE,
+    )
+    if item_match is None:
+        return None
+    return _optional_text(item_match.group(1))
+
+
+def _merge(pending: PendingCollect, extracted: _Extracted) -> _Extracted:
+    kind = extracted.question_kind
+    if kind is None and pending.question_kind:
+        try:
+            kind = QuestionType(pending.question_kind)
+        except ValueError:
+            kind = None
+    to = extracted.to
+    if to is None and pending.to:
+        try:
+            to = E164(pending.to)
+        except ValueError:
+            to = None
+    return _Extracted(
+        intent=pending.verb,
+        to=to,
+        party_size=extracted.party_size or pending.party_size,
+        time_text=extracted.time_text or pending.time_text,
+        constraints=extracted.constraints or pending.constraints,
+        name=extracted.name or pending.name,
+        question_kind=kind,
+        question_item=extracted.question_item or pending.question_item,
+    )
+
+
+def _progressed(pending: PendingCollect, extracted: _Extracted) -> bool:
+    waiting = pending.waiting_for
+    if waiting == "to":
+        return extracted.to is not None
+    if waiting == "time":
+        return bool(extracted.time_text)
+    if waiting == "party":
+        return extracted.party_size is not None
+    if waiting == "party_and_time":
+        return extracted.party_size is not None or bool(extracted.time_text)
+    if waiting == "kind":
+        return extracted.question_kind is not None
+    if waiting == "item":
+        return bool(extracted.question_item)
+    return False
+
+
+def _party_value(raw: str) -> int | None:
+    lowered = raw.casefold()
+    if lowered in _PARTY_WORDS:
+        return _PARTY_WORDS[lowered]
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    if value < 1:
+        return None
+    return value
+
+
+def _waiting_for_value(raw: object) -> WaitingFor:
+    if raw in {
+        "party",
+        "time",
+        "party_and_time",
+        "to",
+        "kind",
+        "item",
+    }:
+        return raw  # type: ignore[return-value]
+    return "to"
 
 
 def _resolve_caller(
@@ -474,25 +939,18 @@ def _optional_text(value: str | None) -> str | None:
     return stripped or None
 
 
-def _book_missing(text: str) -> tuple[str, ...]:
-    missing: list[str] = []
-    if re.search(r"\+[1-9]\d{7,14}", text) is None:
-        missing.append("to")
-    if re.search(r"\bparty\s+[1-9]\d*\b", text, re.IGNORECASE) is None:
-        missing.append("party")
-    if re.search(r"\bat\s+\S", text, re.IGNORECASE) is None:
-        missing.append("at")
-    return tuple(missing) or ("to", "party", "at")
+def _optional_str(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
-def _ask_missing(text: str) -> tuple[str, ...]:
-    missing: list[str] = []
-    if re.search(r"\+[1-9]\d{7,14}", text) is None:
-        missing.append("to")
-    lowered = text.casefold()
-    if not any(token in lowered.split() for token in ("hours", "stock", "aisle")):
-        missing.append("kind")
-    elif "stock" in lowered.split() or "aisle" in lowered.split():
-        if _ASK_ITEM_RE.fullmatch(text) is None:
-            missing.append("item")
-    return tuple(missing) or ("to", "kind")
+def _require_artifacts_root(root: Path) -> Path:
+    if not root.exists():
+        raise FileNotFoundError(f"CALL_AGENT_ARTIFACTS_DIR is missing: {root}")
+    if not root.is_dir():
+        raise NotADirectoryError(
+            f"CALL_AGENT_ARTIFACTS_DIR is not a directory: {root}"
+        )
+    return root

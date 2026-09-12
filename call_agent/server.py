@@ -22,15 +22,20 @@ from fastapi.responses import JSONResponse
 from .config import Settings
 from .domain import MediaStartEvent, MediaStopEvent
 from .kickoff import (
-    KickoffMalformed,
+    KickoffCollecting,
+    KickoffFailed,
     KickoffParsed,
+    claim_collect,
     claim_kickoff,
+    clear_pending_collect,
+    failed_reply_text,
+    intake_kickoff,
     kickoff_host_mismatch,
     kickoff_json_path,
+    load_pending_collect,
     make_session,
-    malformed_reply_text,
-    parse_kickoff,
     run_kickoff,
+    save_pending_collect,
     write_call_cross_links,
 )
 from .linq import (
@@ -106,7 +111,15 @@ async def process_linq_webhook(
         raise HTTPException(status_code=500, detail=str(error)) from error
     if str(inbound.sender) == str(from_did):
         return {"ok": True, "ignored": True}
-    parsed = parse_kickoff(inbound_plain_text(inbound), settings)
+    try:
+        pending = load_pending_collect(
+            settings.call_agent_artifacts_dir, inbound.chat_id
+        )
+        parsed = intake_kickoff(
+            inbound_plain_text(inbound), settings, pending=pending
+        )
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
     if parsed is None:
         try:
             receipt = handle_inbound(inbound, settings, port)
@@ -129,10 +142,33 @@ async def process_linq_webhook(
     except OSError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
     session = make_session(inbound, settings, port)
-    if isinstance(parsed, KickoffMalformed):
+    if isinstance(parsed, KickoffCollecting):
+        if not claim_collect(settings, inbound, parsed.pending):
+            return {"ok": True, "duplicate": True}
         try:
+            save_pending_collect(
+                settings.call_agent_artifacts_dir,
+                inbound.chat_id,
+                parsed.pending,
+                inbound=inbound,
+            )
+            receipt = session.text(parsed.reply, kind="ack")
+        except (LinqConfigError, OSError) as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        return {
+            "ok": True,
+            "replied": True,
+            "collecting": True,
+            "chat_id": str(receipt.chat_id),
+            "message_id": str(receipt.message_id),
+        }
+    if isinstance(parsed, KickoffFailed):
+        try:
+            clear_pending_collect(
+                settings.call_agent_artifacts_dir, inbound.chat_id
+            )
             receipt = session.text(
-                malformed_reply_text(parsed), kind="error"
+                failed_reply_text(parsed.reason), kind="error"
             )
         except (LinqConfigError, OSError) as error:
             raise HTTPException(status_code=500, detail=str(error)) from error
@@ -154,6 +190,9 @@ async def process_linq_webhook(
     if mismatch is not None:
         claim_kickoff(settings, inbound, parsed.request)
         try:
+            clear_pending_collect(
+                settings.call_agent_artifacts_dir, inbound.chat_id
+            )
             receipt = session.text(mismatch, kind="error")
         except (LinqConfigError, OSError) as error:
             raise HTTPException(status_code=500, detail=str(error)) from error
@@ -174,6 +213,12 @@ async def process_linq_webhook(
         }
     if not claim_kickoff(settings, inbound, parsed.request):
         return {"ok": True, "duplicate": True}
+    try:
+        clear_pending_collect(
+            settings.call_agent_artifacts_dir, inbound.chat_id
+        )
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
     background_tasks.add_task(run_kickoff, session, parsed.request)
     return JSONResponse(
         status_code=202,

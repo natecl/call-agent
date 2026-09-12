@@ -280,8 +280,8 @@ def verify_linq_call_command(
     to: str = typer.Option("+14155552671", "--to"),
     from_did: str = typer.Option("+15555550100", "--from-did"),
     text: str = typer.Option(
-        "book +14155552671 party 2 at Friday 7pm name Nathan "
-        "notes outdoor if possible",
+        "can you make a reservation with this restaurant at 7:30 "
+        "for a party of two?",
         "--text",
     ),
 ) -> None:

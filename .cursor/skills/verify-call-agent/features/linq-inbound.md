@@ -7,7 +7,7 @@ Closed alpha includes iMessage. L1 testers text Treena through Linq. The public 
 - `linq-register` Builder registers `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook`.
 - `linq-post` `POST /linq/webhook` and `POST /webhooks/linq` forward to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`.
 - `fly-host` Worker `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). The laptop is not the prod FastAPI host.
-- `inbound-reply` iMessage `message.received` is mapped and answered on `POST /chats/{chat_id}/messages` with the same `message.parts` shape as outbound kickoff. Copy is `Received: {inbound text}` for chat that is not a `book`/`ask` kickoff.
+- `inbound-reply` iMessage `message.received` is mapped and answered on `POST /chats/{chat_id}/messages` with the same `message.parts` shape as outbound kickoff. Copy is `Received: {inbound text}` for chat that is not a book/ask collect or kickoff.
 - `inbound-artifacts` writes `inbound.json` (inbound text, ids, timing) and `reply.json` under `CALL_AGENT_ARTIFACTS_DIR/linq/<event_id>/`. Missing artifact dir fails loud.
 - `linq-ping` `GET` on those paths returns `{"ok":true,"provider":"linq"}`.
 - `no-sms` The hook does not send or receive SMS. `message.sent` / `delivered` / `read` / `failed` are ignored.
@@ -29,7 +29,7 @@ Preconditions:
 
 - **Stub hook.** Run `.venv/bin/call-agent verify-webhooks`. Exit code `0`. The `linq_hook` line is `[PASS]`. Stub POST is 501 `missing_app_base_url`. Stub GET ping is 200 `provider:linq`.
 - **Stub reply.** Run `.venv/bin/call-agent verify-message`. Exit code `0`. The `inbound_reply` line is `[PASS]` and names the inbound text.
-- **Stub kickoff.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Seven `[PASS]` lines and `7/7 passed`.
+- **Stub kickoff.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Eight `[PASS]` lines and `8/8 passed`.
 - **Live register URL.** The string `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook` is in `README.md`, `workers/webhooks/README.md`, and `docs/FEATURE_MAP.md`.
 - **Proof.** Save `verify-webhooks` stdout as `verify-webhooks.txt`, `verify-message` stdout as `verify-message.txt`, and `verify-linq-call` stdout as `verify-linq-call.txt`.
 
