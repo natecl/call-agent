@@ -6,7 +6,8 @@
 
 - `verify-book-pass` prints six `[PASS]` lines and `6/6 passed` in stub mode.
 - `verify-book-exit` exits `0` on pass and `1` on any failure.
-- `verify-book-theater` fails `multi_turn_booking` when the stub is one ask and one answer.
+- `verify-book-theater` fails `multi_turn_booking` when the stub is one ask and one answer. Hangup still follows the closing line (`hangup.path` is `trail`).
+- `verify-book-goodbye-hangup` hangs up after `CLOSING_LINE` when the last business turn is `Yes, we can do that` (no booked needle). `clean_hangup` fails because status is `failed`, not because the far party hung up.
 - `verify-book-decline` passes when the restaurant clearly declines.
 - `verify-book-live-gate` refuses `--mode live` unless `QUICK_ASK_LIVE=1` and keys are present.
 - `verify-book-inputs` accepts `--to`, `--name`, `--party`, `--time`, `--notes`, `--from-did`, `--user`, and `--mode`.
@@ -15,7 +16,7 @@
 
 - Run `call-agent verify-book` in a terminal, with or without the input flags.
 - CI runs `call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub`.
-- `pytest tests/test_verify_book.py` calls the same function, including the theater and decline faults.
+- `pytest tests/test_verify_book.py` calls the same function, including the theater (goodbye hangup) and decline faults.
 
 ## Driving it with call-agent
 
@@ -31,7 +32,7 @@ Preconditions:
 ## Gotchas
 
 - The verb makes its own temporary workspace. It never reads artifacts from an earlier run.
-- `multi_turn_booking` fails when the stub emits one ask and one answer. That is the loud fail for a theater path.
-- `clean_hangup` expects `booked` or `declined`, not `answered`.
+- `multi_turn_booking` fails when the stub emits one ask and one answer. That is the loud fail for a theater path. The call still hangs up after goodbye (`hangup.path=trail`, `marks_sent=1`).
+- `clean_hangup` expects `booked` or `declined`, not `answered`. A goodbye without booked or declined needles fails this check with `status=failed` and `hangup_path=trail`. That is the TRE-14 live miss, not `far_party`.
 - `pytest` and the CLI call the same function. A green pytest with a red CLI means the CLI wiring changed.
 - Live book against `+17272701288` needs `QUICK_ASK_LIVE=1`, Telnyx and OpenAI keys, and both `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` set to the same tunnel to the local BOOK process. Fly `PUBLIC_BASE_URL` is not valid for Mac CLI live. This skill never sets them.

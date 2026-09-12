@@ -808,14 +808,21 @@ class ReduceSettings(FrozenModel):
     hangup_drain_timeout_s: float = Field(ge=0)
 
 
-def assess_transcript(
-    transcript: Transcript, question: Question
-) -> Answered | Declined | None:
+def _collapsed_agent_text(transcript: Transcript) -> str:
     agent_text = " ".join(
         turn.text for turn in transcript.turns if turn.speaker is Speaker.AGENT
     )
-    collapsed = " ".join(agent_text.split())
-    if CLOSING_LINE.casefold() not in collapsed.casefold():
+    return " ".join(agent_text.split())
+
+
+def _agent_said_closing(transcript: Transcript) -> bool:
+    return CLOSING_LINE.casefold() in _collapsed_agent_text(transcript).casefold()
+
+
+def assess_transcript(
+    transcript: Transcript, question: Question
+) -> Answered | Declined | None:
+    if not _agent_said_closing(transcript):
         return None
     business_text = transcript.business_text()
     if not business_text.strip():
@@ -835,11 +842,7 @@ def assess_transcript(
 
 
 def assess_book(transcript: Transcript) -> Booked | Declined | None:
-    agent_text = " ".join(
-        turn.text for turn in transcript.turns if turn.speaker is Speaker.AGENT
-    )
-    collapsed = " ".join(agent_text.split())
-    if CLOSING_LINE.casefold() not in collapsed.casefold():
+    if not _agent_said_closing(transcript):
         return None
     business_text = transcript.business_text()
     if not business_text.strip():
@@ -865,6 +868,45 @@ def assess_conversation(
     if isinstance(request, BookRequest):
         return assess_book(transcript)
     return assess_transcript(transcript, request.question)
+
+
+def _should_enter_hangup_drain(
+    call: Call,
+    transcript: Transcript,
+    verdict: Answered | Booked | Declined | None,
+) -> bool:
+    if not isinstance(call.hangup, HangupIdle) or not isinstance(
+        call.dial, DialPlaced
+    ):
+        return False
+    if verdict is not None:
+        return True
+    return isinstance(call.request, BookRequest) and _agent_said_closing(
+        transcript
+    )
+
+
+def _enter_hangup_drain(
+    call: Call, settings: ReduceSettings, updates: dict[str, Any]
+) -> tuple[dict[str, Any], tuple[Effect, ...]]:
+    # The closing line's transcript arrives while GPT-Live is still
+    # streaming that line's audio. Closing the session makes it flush
+    # what is left and confirm with session.closed, which is when the
+    # single playback mark can go out behind the last chunk.
+    effects: tuple[Effect, ...] = (
+        ScheduleEffect(
+            delay_s=settings.hangup_drain_timeout_s,
+            event=HangupDrainTimeoutEvent(),
+        ),
+    )
+    if isinstance(call.live, (LiveStarting, LiveActive)):
+        updates["hangup"] = HangupDraining()
+        updates["live"] = LiveClosing()
+        effects += (CloseLiveEffect(),)
+    else:
+        updates["hangup"] = HangupMarked()
+        effects += (MarkEffect(name=HANGUP_MARK),)
+    return updates, effects
 
 
 def _maybe_open_live(
@@ -1176,34 +1218,16 @@ def reduce(
             update={"conversation": ConversationOpen(transcript=transcript)}
         )
         verdict = assess_conversation(transcript, call.request)
-        if verdict is None:
-            return call, ()
-        updates = {
-            "conversation": ConversationTerminal(
+        updates: dict[str, Any] = {}
+        effects: tuple[Effect, ...] = ()
+        if verdict is not None:
+            updates["conversation"] = ConversationTerminal(
                 transcript=transcript, verdict=verdict
             )
-        }
-        effects: tuple[Effect, ...] = ()
-        if isinstance(call.hangup, HangupIdle) and isinstance(
-            call.dial, DialPlaced
-        ):
-            # The closing line's transcript arrives while GPT-Live is still
-            # streaming that line's audio. Closing the session makes it flush
-            # what is left and confirm with session.closed, which is when the
-            # single playback mark can go out behind the last chunk.
-            effects += (
-                ScheduleEffect(
-                    delay_s=settings.hangup_drain_timeout_s,
-                    event=HangupDrainTimeoutEvent(),
-                ),
-            )
-            if isinstance(call.live, (LiveStarting, LiveActive)):
-                updates["hangup"] = HangupDraining()
-                updates["live"] = LiveClosing()
-                effects += (CloseLiveEffect(),)
-            else:
-                updates["hangup"] = HangupMarked()
-                effects += (MarkEffect(name=HANGUP_MARK),)
+        if _should_enter_hangup_drain(call, transcript, verdict):
+            updates, effects = _enter_hangup_drain(call, settings, updates)
+        if not updates:
+            return call, ()
         return call.model_copy(update=updates), effects
 
     if isinstance(event, LiveClosedEvent):

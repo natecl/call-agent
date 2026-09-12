@@ -21,6 +21,7 @@ def test_feature_map_lists_shipped_book_rows() -> None:
         "| `BookRequest` | shipped |",
         "| `BookResult` | shipped |",
         "| `assess_book` | shipped |",
+        "| `hangup-on-goodbye` | shipped |",
         "| `multi_turn_booking` | shipped |",
         "| `build_book_instructions` | shipped |",
     )

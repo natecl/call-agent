@@ -85,13 +85,38 @@ def test_verify_book_fails_one_shot_theater(
 ) -> None:
     report = verify_book(
         workspace=_workspace(workspace),
-        scenario=StubScenario(one_shot_booking=True),
+        scenario=StubScenario(
+            one_shot_booking=True,
+            canned_answer="Yes, we can do that",
+        ),
     )
 
     assert report.passed is False
     assert report.checks[5].name == "multi_turn_booking"
     assert report.checks[5].passed is False
     assert "agent_turns=" in report.checks[5].detail
+    run_dir = workspace.artifacts_dir / report.call_control_id
+    result = json.loads((run_dir / "result.json").read_text())
+    call_report = json.loads((run_dir / "call_report.json").read_text())
+    hangup = json.loads((run_dir / "hangup.json").read_text())
+    assert result["status"] == "failed"
+    assert call_report["hangup"]["path"] == "trail"
+    assert hangup["call_control_id"] == report.call_control_id
+    assert call_report["counts"]["marks_sent"] == 1
+    transcript = json.loads((run_dir / "transcript.json").read_text())
+    agent_text = " ".join(
+        turn["text"]
+        for turn in transcript["turns"]
+        if turn["speaker"] == "agent"
+    )
+    business_text = " ".join(
+        turn["text"]
+        for turn in transcript["turns"]
+        if turn["speaker"] == "business"
+    )
+    assert "thanks, that's all i needed. goodbye." in agent_text.casefold()
+    assert "yes, we can do that" in business_text.casefold()
+    assert "hangup_path=trail" in report.checks[3].detail
 
 
 def test_verify_book_fails_when_far_party_hangs_up(
