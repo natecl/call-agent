@@ -49,9 +49,9 @@ from .verify_webhooks import (
 )
 
 
-app = typer.Typer(no_args_is_help=True)
-did_app = typer.Typer(no_args_is_help=True)
-linq_app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
+did_app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
+linq_app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
 app.add_typer(did_app, name="did")
 app.add_typer(linq_app, name="linq")
 
