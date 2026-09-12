@@ -11,7 +11,7 @@ Live Worker origin on the current wrangler preview account (Blossom Linen):
 - Telnyx. `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`
 - Health. `https://call-agent-webhooks.blossom-linen.workers.dev/health`
 
-Closed alpha L1 testers text Treena through Linq. Builder can register the Linq URL now. `POST` and `GET /linq/webhook` return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Telnyx always-on stays on `/webhooks/telnyx`.
+Closed alpha L1 testers text Treena through Linq. Builder can register the Linq URL now. `GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. The hook does not send SMS. Telnyx always-on stays on `/webhooks/telnyx`.
 
 Put the Telnyx URL on the Call Control application and on `PUBLIC_WEBHOOK_URL`. The laptop tunnel is interim only. This Worker origin is the prod webhook path.
 
@@ -23,10 +23,11 @@ A wrangler `--temporary` preview can expire unless the account is claimed. Claim
 cd workers/webhooks
 npm install
 npx wrangler secret put TELNYX_PUBLIC_KEY
+npx wrangler secret put APP_BASE_URL
 npx wrangler deploy
 ```
 
-`TELNYX_PUBLIC_KEY` is the Mission Control account public key. Do not put it in `wrangler.jsonc` or git. Optional `UPSTREAM_WEBHOOK_URL` forwards a first-seen Telnyx body to a live FastAPI process. The Worker still returns 2xx if that process is down.
+`TELNYX_PUBLIC_KEY` is the Mission Control account public key. Do not put it in `wrangler.jsonc` or git. `APP_BASE_URL` is the FastAPI origin with no path, for example `https://call-agent.example`. Linq POST appends `/linq/webhook`. Leave it unset in stub tests. Prod POST fails 501 `missing_app_base_url` until you put the secret and deploy. Optional `UPSTREAM_WEBHOOK_URL` forwards a first-seen Telnyx body to a live FastAPI process. The Worker still returns 2xx for Telnyx if that process is down. Linq POST awaits the app and returns 502 `app_unreachable` if the fetch throws. This VM has no Cloudflare credentials. Hostname stays `call-agent-webhooks.blossom-linen.workers.dev`.
 
 Dry-run without an account:
 

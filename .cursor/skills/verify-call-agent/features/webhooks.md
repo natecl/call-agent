@@ -7,7 +7,7 @@ Production Telnyx Call Control posts go to the Cloudflare Worker inbox. Closed a
 - `prod-worker` Telnyx posts to `PUBLIC_WEBHOOK_URL/webhooks/telnyx` on `call-agent-webhooks`.
 - `dev-tunnel` empty `PUBLIC_WEBHOOK_URL` keeps webhook and media on `PUBLIC_BASE_URL`.
 - `media-host` `stream_url` always comes from `PUBLIC_BASE_URL`. The Worker `/media-stream` is 501.
-- `linq-hook` `POST /linq/webhook` and `POST /webhooks/linq` return `implemented: false` and do not send SMS.
+- `linq-hook` `POST /linq/webhook` and `POST /webhooks/linq` forward to `APP_BASE_URL`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. They do not send SMS.
 
 ## How to get to it (user POV)
 
@@ -31,5 +31,5 @@ Preconditions:
 
 - There is no `call-agent-web` map in this repository. Do not invent one. The Worker name is `call-agent-webhooks`.
 - Pointing `PUBLIC_BASE_URL` at the Worker sends media to `/media-stream` and gets 501. Keep media on the tunnel.
-- The Linq 200 is a Worker ACK, not SMS. FastAPI `POST /webhooks/linq` is the process path. Worker to app forward is a follow-up.
+- The Linq POST is a Worker forward to FastAPI, not SMS. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI `POST /linq/webhook` verifies HMAC.
 - The live hostname is `call-agent-webhooks.blossom-linen.workers.dev`. A wrangler temporary preview can expire unless claimed. Claiming keeps that hostname.

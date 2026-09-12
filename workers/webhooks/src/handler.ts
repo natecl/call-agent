@@ -1,3 +1,4 @@
+import { isLinqPath, postLinq } from "./linq.ts";
 import type { Env, Receipt, SeenStore } from "./receipt.ts";
 import { parseTelnyxId, verifyTelnyx } from "./telnyx.ts";
 
@@ -23,6 +24,38 @@ function statusFor(receipt: Receipt): number {
     return 501;
   }
   return 400;
+}
+
+export async function receiveLinq(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method === "GET") {
+    return json(200, { ok: true, provider: "linq" });
+  }
+  if (request.method !== "POST") {
+    return json(404, { ok: false, reason: "not_found" });
+  }
+  const raw = new Uint8Array(await request.arrayBuffer());
+  const result = await postLinq(raw, request.headers, env.APP_BASE_URL);
+  if (result.kind === "missing_app_base_url") {
+    return json(501, { ok: false, reason: "missing_app_base_url" });
+  }
+  if (result.kind === "invalid_app_base_url") {
+    return json(501, { ok: false, reason: "invalid_app_base_url" });
+  }
+  if (result.kind === "app_unreachable") {
+    return json(502, { ok: false, reason: "app_unreachable" });
+  }
+  const text = await result.response.text();
+  try {
+    return json(result.response.status, JSON.parse(text) as unknown);
+  } catch {
+    return new Response(text, {
+      status: result.response.status,
+      headers: { "content-type": "application/json" },
+    });
+  }
 }
 
 export async function receiveTelnyx(
@@ -73,15 +106,8 @@ export function createHandler(env: Env, seen: SeenStore) {
       if (url.pathname === "/media-stream") {
         return json(501, { ok: false, reason: "media_not_terminated_here" });
       }
-      if (
-        (request.method === "POST" || request.method === "GET") &&
-        (url.pathname === "/webhooks/linq" || url.pathname === "/linq/webhook")
-      ) {
-        return json(200, {
-          ok: true,
-          provider: "linq",
-          implemented: false,
-        });
+      if (isLinqPath(url.pathname)) {
+        return receiveLinq(request, active);
       }
       if (request.method === "POST" && url.pathname === "/webhooks/telnyx") {
         const raw = new Uint8Array(await request.arrayBuffer());

@@ -12,7 +12,7 @@ Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inb
 
 `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
 
-`POST` (and `GET`) return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. The Worker ACKs only. FastAPI `POST /webhooks/linq` is the process path. Forward from Worker to app is a follow-up. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC. The Worker does not send SMS. Live processing still needs an always-on FastAPI host with `LINQ_WEBHOOK_SIGNING_SECRET`. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Run the stub verification
 

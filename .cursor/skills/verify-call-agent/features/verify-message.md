@@ -29,5 +29,5 @@ Preconditions:
 ## Gotchas
 
 - This lever never hits `api.linqapp.com`. The closed-alpha outbound prove on the sandbox line (Builder's box) is not this command.
-- The Workers URL is live and the Linq subscription is registered. The Worker is ACK-only. This lever proves HMAC verify + `message.received` map locally with `LINQ_WEBHOOK_SIGNING_SECRET` unset. The box secret is not this command.
+- The Workers URL is live and the Linq subscription is registered. The Worker forwards Linq POST to `APP_BASE_URL`. This lever proves HMAC verify + `message.received` map locally with `LINQ_WEBHOOK_SIGNING_SECRET` unset. The box secret is not this command.
 - SMS inbound is ignored on purpose. Do not treat an ignored SMS fixture as a failed parse of iMessage.

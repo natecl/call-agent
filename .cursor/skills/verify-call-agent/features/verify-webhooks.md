@@ -32,4 +32,4 @@ Preconditions:
 
 - The stub verb does not start wrangler and does not listen on a port. It constructs `createHandler` in the same Node process.
 - `PUBLIC_BASE_URL` is the media host. Pointing it at the Worker makes Telnyx open `/media-stream` there and get 501. Set `PUBLIC_WEBHOOK_URL` for the Worker and keep media on the tunnel.
-- Linq `POST /webhooks/linq` returning 200 with `implemented: false` is the hook. It is not SMS.
+- Linq stub `POST /webhooks/linq` is 501 `missing_app_base_url`. GET ping is 200 `provider:linq`. That is the hook, not SMS. A live Worker that still returns `implemented: false` fails `linq_hook`.
