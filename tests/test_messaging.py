@@ -6,11 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from call_agent.domain import E164
+from call_agent.config import Settings
 from call_agent.linq import (
     LinqConfigError,
     LinqWebhookAuthError,
     LiveLinqHttp,
     StubLinq,
+    kickoff_from_settings,
     parse_inbound,
     serialize_outbound,
     sign_linq_webhook,
@@ -113,6 +115,15 @@ def test_signature_accepts_good_and_rejects_bad() -> None:
 def test_live_constructor_fails_without_token() -> None:
     with pytest.raises(LinqConfigError, match="LINQ_API_TOKEN"):
         LiveLinqHttp("")
+
+
+def test_kickoff_from_settings_requires_from(settings: Settings) -> None:
+    with pytest.raises(LinqConfigError, match="LINQ_FROM_E164"):
+        kickoff_from_settings(settings, E164("+14155552671"), "hello")
+    filled = settings.model_copy(update={"linq_from_e164": "+12138653024"})
+    message = kickoff_from_settings(filled, E164("+17272701288"), "hello")
+    assert message.from_did == "+12138653024"
+    assert serialize_outbound(message)["from"] == "+12138653024"
 
 
 def test_live_send_posts_chats_parts_shape() -> None:

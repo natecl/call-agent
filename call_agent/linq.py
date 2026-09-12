@@ -11,6 +11,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from .config import Settings
+from .domain import E164
 from .messaging import (
     IMESSAGE,
     LINQ_PARTNER_V3,
@@ -22,6 +24,7 @@ from .messaging import (
     OutboundChat,
     SendReceipt,
     TextPart,
+    text_chat,
 )
 
 STUB_CHAT_ID = ChatId("stub-chat-0001")
@@ -304,6 +307,17 @@ class LiveLinqHttp:
 def validate_linq_live_token(api_token: str | None) -> None:
     if not api_token:
         raise LinqConfigError("live Linq requires LINQ_API_TOKEN")
+
+
+def linq_from(settings: Settings) -> E164:
+    raw = settings.linq_from_e164
+    if not raw:
+        raise LinqConfigError("live Linq send requires LINQ_FROM_E164")
+    return E164(raw)
+
+
+def kickoff_from_settings(settings: Settings, to: E164, text: str) -> OutboundChat:
+    return text_chat(linq_from(settings), to, text)
 
 
 def resolve_webhook_url(
