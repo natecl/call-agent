@@ -286,6 +286,32 @@ def test_streaming_failed_webhook_hangs_up_and_fails_the_call(
     }
 
 
+def unknown_call_webhook() -> dict[str, object]:
+    return {
+        "data": {
+            "event_type": "call.initiated",
+            "id": "webhook-unknown-1",
+            "occurred_at": "2026-09-12T00:00:00Z",
+            "record_type": "event",
+            "payload": {
+                "call_control_id": "v3:unknown-call",
+                "call_leg_id": "leg-unknown",
+                "call_session_id": "session-unknown",
+                "connection_id": "connection-1",
+                "client_state": "opaque",
+            },
+        }
+    }
+
+
+def test_unknown_call_webhook_returns_404() -> None:
+    client = TestClient(app)
+    response = client.post("/webhooks/telnyx", json=unknown_call_webhook())
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown call"}
+
+
 def live_settings(
     workspace_settings: Settings, port: int, **overrides: object
 ) -> Settings:
@@ -400,3 +426,20 @@ async def test_live_request_fails_loud_when_public_base_misses_this_process(
 
     with pytest.raises(ValueError, match="did not reach this process"):
         await _run_request(request, live)
+
+
+async def test_unknown_call_webhook_returns_404_on_in_process_listener(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    running = await serve_in_process(live_settings(settings, port))
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://127.0.0.1:{port}/webhooks/telnyx",
+                json=unknown_call_webhook(),
+            )
+        assert response.status_code == 404
+        assert response.json() == {"detail": "unknown call"}
+    finally:
+        await running.stop()

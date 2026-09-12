@@ -59,6 +59,7 @@ def test_feature_maps_record_always_on_versus_tunnel() -> None:
     assert "`POST /webhooks/telnyx` Worker" in feature_map
     assert "local FastAPI tunnel" in feature_map
     assert "`verify-webhooks`" in feature_map
+    assert "unknown-call 404" in feature_map
     index = (
         REPO
         / ".cursor"

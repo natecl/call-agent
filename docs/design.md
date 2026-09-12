@@ -97,4 +97,4 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 
 ## Next implementation step
 
-Live book against `+17272701288` once `QUICK_ASK_LIVE=1`, keys, and a public tunnel to this process are set, and `{PUBLIC_BASE_URL}/health` returns this process's `serve_token`. Cap HOLD REDIAL until that probe is green. Do not dial from CI.
+Live book against `+17272701288` once `QUICK_ASK_LIVE=1`, keys, and a public tunnel to this process are set, and `{PUBLIC_BASE_URL}/health` returns HTTP 200 with this process's `serve_token`. Cap GO on the fail-loud ingress climb. HOLD REDIAL for the live book until that probe is green. Do not dial from CI.

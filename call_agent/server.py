@@ -196,8 +196,9 @@ async def probe_live_ingress(
         f"{health_url(public_base_url)} did not reach this process "
         f"within {timeout_s}s ({last_error}). CLI --live hosts CallHandle "
         "in this process; set PUBLIC_BASE_URL to a tunnel (ngrok, "
-        "cloudflared) to CALL_AGENT_PORT. A Fly origin is a different "
-        "process with no BOOK entry."
+        "cloudflared) to CALL_AGENT_PORT. A printed trycloudflare URL is "
+        "not enough: DNS can lag after the URL is advertised. A Fly "
+        "origin is a different process with no BOOK entry."
     )
 
 
