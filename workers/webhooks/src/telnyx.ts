@@ -15,8 +15,11 @@ export async function verifyTelnyx(
   publicKeyB64: string,
   nowSec: number,
 ): Promise<VerifyResult> {
+  if (!/^-?\d+$/.test(timestamp)) {
+    return { ok: false, reason: "bad_signature" };
+  }
   const stamped = Number(timestamp);
-  if (!Number.isFinite(stamped) || Math.abs(nowSec - stamped) > REPLAY_WINDOW_S) {
+  if (Math.abs(nowSec - stamped) > REPLAY_WINDOW_S) {
     return { ok: false, reason: "stale_timestamp" };
   }
   let signature: Uint8Array;

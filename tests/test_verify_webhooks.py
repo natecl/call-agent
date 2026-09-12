@@ -2,7 +2,7 @@ from pathlib import Path
 
 from call_agent.config import Settings
 from call_agent.runtime import webhook_and_stream_urls
-from call_agent.verify_webhooks import verify_webhooks
+from call_agent.verify_webhooks import VerifyWebhooksInput, verify_webhooks
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -19,6 +19,14 @@ def test_verify_webhooks_stub_passes() -> None:
     ]
     assert all(check.passed for check in report.checks)
     assert "5/5 passed" in report.stdout
+
+
+def test_verify_webhooks_missing_key_fails_signature() -> None:
+    report = verify_webhooks(VerifyWebhooksInput(omit_public_key=True))
+    assert report.passed is False
+    by_name = {check.name: check for check in report.checks}
+    assert by_name["signature"].passed is False
+    assert "5/5 passed" not in report.stdout
 
 
 def test_webhook_url_splits_from_media_origin() -> None:
@@ -73,3 +81,12 @@ def test_feature_maps_record_always_on_versus_tunnel() -> None:
     assert "PUBLIC_WEBHOOK_URL" in webhooks
     assert "call-agent-webhooks" in webhooks
     assert "no `call-agent-web` map" in webhooks
+    linq_url = (
+        "https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook"
+    )
+    assert linq_url in feature_map
+    assert linq_url in webhooks
+    readme = (REPO / "README.md").read_text()
+    worker_readme = (REPO / "workers" / "webhooks" / "README.md").read_text()
+    assert linq_url in readme
+    assert linq_url in worker_readme

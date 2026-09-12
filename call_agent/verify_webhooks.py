@@ -19,6 +19,7 @@ class VerifyWebhooksInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: HttpUrl | None = None
+    omit_public_key: bool = False
 
 
 class VerifyWebhooksCheck(BaseModel):
@@ -67,6 +68,8 @@ def verify_webhooks(
     ]
     if active.url is not None:
         command.extend(["--url", str(active.url).rstrip("/")])
+    if active.omit_public_key:
+        command.append("--missing-key")
     try:
         completed = subprocess.run(
             command,

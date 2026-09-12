@@ -47,9 +47,9 @@ function report(checks) {
   return { lines, passed: passed === checks.length && checks.length === 5 };
 }
 
-async function inProcessChecks() {
+async function inProcessChecks(missingKey = false) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const env = { TELNYX_PUBLIC_KEY: publicRawB64(publicKey) };
+  const env = missingKey ? {} : { TELNYX_PUBLIC_KEY: publicRawB64(publicKey) };
   const handler = createHandler(env, new MemorySeenStore());
   const origin = "https://call-agent-webhooks.verify";
   const fetchH = (path, init) =>
@@ -146,60 +146,119 @@ async function remoteChecks(base) {
   }
 }
 
+const REMOTE_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
+function challengeDetail(path, response, body) {
+  const mitigated = response.headers.get("cf-mitigated");
+  if (mitigated === "challenge") {
+    return `cloudflare_challenge path=${path}`;
+  }
+  if (typeof body.raw === "string" && body.raw.includes("Just a moment")) {
+    return `cloudflare_challenge path=${path}`;
+  }
+  return null;
+}
+
+async function remoteFetch(origin, path, init = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("User-Agent", REMOTE_UA);
+  return fetch(`${origin}${path}`, { ...init, headers });
+}
+
 async function remoteChecksAgainst(origin) {
-  const healthRes = await fetch(`${origin}/health`);
+  const healthRes = await remoteFetch(origin, "/health");
   const healthBody = await readJson(healthRes);
+  const healthChallenge = challengeDetail("/health", healthRes, healthBody);
   const health = {
     name: "health",
     passed: healthRes.status === 200 && healthBody.ok === true,
-    detail: `status=${healthRes.status} url=${origin}/health`,
+    detail:
+      healthChallenge ??
+      `status=${healthRes.status} url=${origin}/health`,
   };
 
-  const unsignedRes = await fetch(`${origin}/webhooks/telnyx`, {
+  const unsignedRes = await remoteFetch(origin, "/webhooks/telnyx", {
     method: "POST",
     body: telnyxBody("webhook-unsigned"),
   });
+  const unsignedBody = await readJson(unsignedRes);
+  const unsignedChallenge = challengeDetail(
+    "/webhooks/telnyx",
+    unsignedRes,
+    unsignedBody,
+  );
   const signature = {
     name: "signature",
     passed: unsignedRes.status === 401,
-    detail:
-      unsignedRes.status === 200
+    detail: unsignedChallenge
+      ? unsignedChallenge
+      : unsignedRes.status === 200
         ? "unsigned POST returned 200; TELNYX_PUBLIC_KEY is unwired"
         : `unsigned=${unsignedRes.status}`,
   };
 
-  const again = await fetch(`${origin}/webhooks/telnyx`, {
+  const again = await remoteFetch(origin, "/webhooks/telnyx", {
     method: "POST",
     body: telnyxBody("webhook-unsigned"),
   });
+  const againBody = await readJson(again);
+  const againChallenge = challengeDetail(
+    "/webhooks/telnyx",
+    again,
+    againBody,
+  );
   const idempotency = {
     name: "idempotency",
     passed: again.status === 401,
-    detail:
-      again.status === 401
+    detail: againChallenge
+      ? againChallenge
+      : again.status === 401
         ? "remote cannot mint a Telnyx signature; unsigned stays 401"
         : `unsigned_retry=${again.status}; expected 401`,
   };
 
-  const linqRes = await fetch(`${origin}/webhooks/linq`, {
+  const linqRes = await remoteFetch(origin, "/webhooks/linq", {
     method: "POST",
     body: "{}",
   });
   const linqBody = await readJson(linqRes);
+  const aliasRes = await remoteFetch(origin, "/linq/webhook", {
+    method: "POST",
+    body: "{}",
+  });
+  const aliasBody = await readJson(aliasRes);
+  const linqChallenge =
+    challengeDetail("/webhooks/linq", linqRes, linqBody) ??
+    challengeDetail("/linq/webhook", aliasRes, aliasBody);
   const linq_hook = {
     name: "linq_hook",
-    passed: linqRes.status === 200 && linqBody.implemented === false,
-    detail: `status=${linqRes.status} implemented=${linqBody.implemented}`,
+    passed:
+      linqRes.status === 200 &&
+      linqBody.implemented === false &&
+      aliasRes.status === 200 &&
+      aliasBody.implemented === false,
+    detail:
+      linqChallenge ??
+      `linq=${linqRes.status} implemented=${linqBody.implemented} ` +
+        `alias=${aliasRes.status}`,
   };
 
-  const mediaRes = await fetch(`${origin}/media-stream`);
+  const mediaRes = await remoteFetch(origin, "/media-stream");
   const mediaBody = await readJson(mediaRes);
+  const mediaChallenge = challengeDetail(
+    "/media-stream",
+    mediaRes,
+    mediaBody,
+  );
   const media_gap = {
     name: "media_gap",
     passed:
       mediaRes.status === 501 &&
       mediaBody.reason === "media_not_terminated_here",
-    detail: `status=${mediaRes.status} reason=${mediaBody.reason}`,
+    detail:
+      mediaChallenge ??
+      `status=${mediaRes.status} reason=${mediaBody.reason}`,
   };
 
   return [health, signature, idempotency, linq_hook, media_gap];
@@ -208,13 +267,14 @@ async function remoteChecksAgainst(origin) {
 const { values } = parseArgs({
   options: {
     url: { type: "string" },
+    "missing-key": { type: "boolean", default: false },
   },
   strict: false,
 });
 
 const checks = values.url
   ? await remoteChecks(values.url)
-  : await inProcessChecks();
+  : await inProcessChecks(Boolean(values["missing-key"]));
 const { lines, passed } = report(checks);
 for (const line of lines) {
   console.log(line);

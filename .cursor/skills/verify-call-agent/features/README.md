@@ -39,5 +39,5 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
 - [Verify quick-ask](./verify-quick-ask.md) covers the five-check lever in stub mode and its exit codes.
-- [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
+- [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.

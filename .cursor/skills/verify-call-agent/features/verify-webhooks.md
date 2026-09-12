@@ -13,7 +13,7 @@
 ## How to get to it (user POV)
 
 - Run `call-agent verify-webhooks` in a terminal.
-- Run `call-agent verify-webhooks --url https://call-agent-webhooks.<SUBDOMAIN>.workers.dev` after deploy.
+- Run `call-agent verify-webhooks --url https://call-agent-webhooks.blossom-linen.workers.dev` against the live Worker.
 - CI runs `npm run verify` in `workers/webhooks` and `call-agent verify-webhooks`.
 - `pytest tests/test_verify_webhooks.py` calls the same function.
 
@@ -25,7 +25,7 @@ Preconditions:
 
 - **CI command.** Run `.venv/bin/call-agent verify-webhooks`. Exit code `0`. Stdout has exactly five lines that start with `[PASS]`, in this order: `health`, `signature`, `idempotency`, `linq_hook`, `media_gap`. The last line is `5/5 passed`.
 - **Broken wiring.** Run `.venv/bin/call-agent verify-webhooks --url http://127.0.0.1:9`. Exit code `1`. Stdout has `[FAIL]` lines. This is the fail-loud path when the Worker is unreachable.
-- **Deployed Worker.** Run `.venv/bin/call-agent verify-webhooks --url https://call-agent-webhooks.<SUBDOMAIN>.workers.dev`. Unsigned `POST /webhooks/telnyx` must be 401. If it is 200, `signature` fails because `TELNYX_PUBLIC_KEY` is unwired. Remote mode cannot mint a real Telnyx account signature. Use stub mode for the signed-accept and duplicate checks.
+- **Deployed Worker.** Run `.venv/bin/call-agent verify-webhooks --url https://call-agent-webhooks.blossom-linen.workers.dev`. Unsigned `POST /webhooks/telnyx` must be 401. If it is 200, `signature` fails because `TELNYX_PUBLIC_KEY` is unwired. A Cloudflare challenge page fails as `cloudflare_challenge`. Remote mode cannot mint a real Telnyx account signature. Use stub mode for the signed-accept and duplicate checks.
 - **Proof.** Save stdout as `verify-webhooks.txt` in the evidence directory.
 
 ## Gotchas

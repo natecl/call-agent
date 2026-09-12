@@ -2,16 +2,20 @@
 
 This Worker is the production HTTPS URL for Telnyx Call Control webhooks. It stays up when the laptop is off. It is not the call owner and it does not terminate media.
 
-## Public URL shape
+## Public URL (register now)
 
-After `npx wrangler deploy`:
+Live Worker origin on the current wrangler preview account (Blossom Linen):
 
-- Telnyx: `https://call-agent-webhooks.<SUBDOMAIN>.workers.dev/webhooks/telnyx`
-- Linq: `https://call-agent-webhooks.<SUBDOMAIN>.workers.dev/webhooks/linq`
-- Linq alias: `https://call-agent-webhooks.<SUBDOMAIN>.workers.dev/linq/webhook`
-- Health: `https://call-agent-webhooks.<SUBDOMAIN>.workers.dev/health`
+- **Linq (register this).** `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
+- Linq alias. `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`
+- Telnyx. `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`
+- Health. `https://call-agent-webhooks.blossom-linen.workers.dev/health`
 
-`<SUBDOMAIN>` is the Cloudflare account workers.dev subdomain printed by the first deploy. Put the Telnyx URL on the Call Control application and on `PUBLIC_WEBHOOK_URL`. Builder can register the Linq URL now. That route returns `implemented: false` and does not send SMS.
+Builder can register the Linq URL now. `POST /linq/webhook` returns `{"ok":true,"provider":"linq","implemented":false}` and does not send SMS.
+
+Put the Telnyx URL on the Call Control application and on `PUBLIC_WEBHOOK_URL`. The laptop tunnel is interim only. This Worker origin is the prod webhook path.
+
+A wrangler `--temporary` preview can expire unless the account is claimed. Claiming keeps this same `*.blossom-linen.workers.dev` hostname. Some datacenter POSTs currently hit a Cloudflare managed challenge before the Worker. Linq's origin may still land. `GET /health` with a normal client UA returns `{"ok":true}`.
 
 ## Deploy
 
@@ -42,13 +46,13 @@ call-agent verify-webhooks
 
 You should see five `[PASS]` lines and `5/5 passed`.
 
-Against a deployed Worker:
+Against the live Worker:
 
 ```bash
-call-agent verify-webhooks --url https://call-agent-webhooks.<SUBDOMAIN>.workers.dev
+call-agent verify-webhooks --url https://call-agent-webhooks.blossom-linen.workers.dev
 ```
 
-Remote proof checks wiring. Unsigned `POST /webhooks/telnyx` must be 401. If it is 200, the public key is missing and the check fails loud. A real Telnyx private key is not on this machine, so remote mode cannot mint a valid account signature. Run the stub verb for the signed-accept and duplicate checks.
+Remote proof checks wiring. Unsigned `POST /webhooks/telnyx` must be 401. If it is 200, the public key is missing and the check fails loud. A real Telnyx private key is not on this machine, so remote mode cannot mint a valid account signature. Run the stub verb for the signed-accept and duplicate checks. A Cloudflare challenge page is a loud fail (`cloudflare_challenge`), not a 200.
 
 ## Media
 

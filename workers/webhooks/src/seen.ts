@@ -13,18 +13,18 @@ export class MemorySeenStore implements SeenStore {
 }
 
 export class CacheSeenStore implements SeenStore {
-  cache: Cache;
-
-  constructor(cache: Cache) {
-    this.cache = cache;
-  }
+  #fallback = new MemorySeenStore();
 
   async claim(id: string): Promise<"first" | "duplicate"> {
+    const cache = resolveCache();
+    if (cache === null) {
+      return this.#fallback.claim(id);
+    }
     const key = new Request(`https://seen.invalid/webhook/${id}`);
-    if (await this.cache.match(key)) {
+    if (await cache.match(key)) {
       return "duplicate";
     }
-    await this.cache.put(
+    await cache.put(
       key,
       new Response("1", { headers: { "Cache-Control": "max-age=86400" } }),
     );
@@ -32,15 +32,17 @@ export class CacheSeenStore implements SeenStore {
   }
 }
 
-const memory = new MemorySeenStore();
-
-export function makeSeen(): SeenStore {
+function resolveCache(): Cache | null {
   try {
     if (typeof caches !== "undefined" && "default" in caches) {
-      return new CacheSeenStore(caches.default);
+      return caches.default;
     }
   } catch {
     // Node and wrangler local have no caches.default. Isolate memory is enough for Telnyx retries.
   }
-  return memory;
+  return null;
+}
+
+export function makeSeen(): SeenStore {
+  return new CacheSeenStore();
 }

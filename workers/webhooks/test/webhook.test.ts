@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import { createHandler } from "../src/handler.ts";
-import { MemorySeenStore } from "../src/seen.ts";
+import { CacheSeenStore, MemorySeenStore } from "../src/seen.ts";
 import { parseTelnyxId, verifyTelnyx } from "../src/telnyx.ts";
 
 function publicRawB64(publicKey: ReturnType<typeof generateKeyPairSync>["publicKey"]) {
@@ -69,6 +69,32 @@ test("verifyTelnyx rejects a stale timestamp", async () => {
   assert.deepEqual(result, { ok: false, reason: "stale_timestamp" });
 });
 
+test("GET /health returns 200 {ok:true}", async () => {
+  const handler = createHandler({}, new MemorySeenStore());
+  const response = await handler.fetch(
+    new Request("https://example.test/health"),
+    {},
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+});
+
+test("POST /webhooks/telnyx without TELNYX_PUBLIC_KEY is 401 missing_public_key", async () => {
+  const handler = createHandler({}, new MemorySeenStore());
+  const response = await handler.fetch(
+    new Request("https://example.test/webhooks/telnyx", {
+      method: "POST",
+      body: body("evt-missing-key"),
+    }),
+    {},
+  );
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    reason: "missing_public_key",
+  });
+});
+
 test("createHandler verifies, claims, and fails media loud", async () => {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const env = { TELNYX_PUBLIC_KEY: publicRawB64(publicKey) };
@@ -88,7 +114,11 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     env,
   );
   assert.equal(first.status, 200);
-  assert.equal((await first.json()).duplicate, false);
+  assert.deepEqual(await first.json(), {
+    ok: true,
+    duplicate: false,
+    id: "evt-3",
+  });
 
   const second = await handler.fetch(
     new Request(`${origin}/webhooks/telnyx`, {
@@ -102,7 +132,11 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     env,
   );
   assert.equal(second.status, 200);
-  assert.equal((await second.json()).duplicate, true);
+  assert.deepEqual(await second.json(), {
+    ok: true,
+    duplicate: true,
+    id: "evt-3",
+  });
 
   const unsigned = await handler.fetch(
     new Request(`${origin}/webhooks/telnyx`, {
@@ -112,6 +146,10 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     env,
   );
   assert.equal(unsigned.status, 401);
+  assert.deepEqual(await unsigned.json(), {
+    ok: false,
+    reason: "bad_signature",
+  });
 
   const linq = await handler.fetch(
     new Request(`${origin}/webhooks/linq`, { method: "POST", body: "{}" }),
@@ -128,5 +166,14 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     env,
   );
   assert.equal(media.status, 501);
-  assert.equal((await media.json()).reason, "media_not_terminated_here");
+  assert.deepEqual(await media.json(), {
+    ok: false,
+    reason: "media_not_terminated_here",
+  });
+});
+
+test("CacheSeenStore falls back to memory when caches.default is missing", async () => {
+  const store = new CacheSeenStore();
+  assert.equal(await store.claim("same"), "first");
+  assert.equal(await store.claim("same"), "duplicate");
 });

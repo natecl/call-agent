@@ -6,6 +6,14 @@ The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call 
 
 Day 1 ships quick-ask only. Booking, hold queues, packaging, and iMessage are out of scope.
 
+## Public webhook URL (Linq, register now)
+
+The always-on Worker is live. Builder can register this Linq webhook now. No Nathan click.
+
+`https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
+
+`POST` returns `{"ok":true,"provider":"linq","implemented":false}` and does not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx uses `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+
 ## Run the stub verification
 
 Stub mode fakes the three network boundaries (Telnyx HTTP, Telnyx media WebSocket, OpenAI GPT-Live WebSocket) with raw JSON fixtures that go through the same parsers live mode uses. It needs no keys and opens no sockets. CI runs it on every push.
@@ -55,7 +63,7 @@ Start with `call_report.json`. It names the call (`call_control_id`, `run_id`, `
 Live mode places a real call. It is gated so that no test or CI run can reach the network by accident.
 
 1. Copy `.env.example` to `.env` and fill in `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, and `OPENAI_API_KEY`. Keep `.env` out of git.
-2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx opens the media socket at that host on `/media-stream`. For local-only webhook tests you can leave `PUBLIC_WEBHOOK_URL` empty so Telnyx also posts to `PUBLIC_BASE_URL/webhooks/telnyx`. Production webhooks use the always-on Worker. Deploy `workers/webhooks` with wrangler, then set `PUBLIC_WEBHOOK_URL` and the Telnyx Call Control application webhook to `https://call-agent-webhooks.<SUBDOMAIN>.workers.dev/webhooks/telnyx`. Linq registers `https://call-agent-webhooks.<SUBDOMAIN>.workers.dev/webhooks/linq` (alias `/linq/webhook`). The Worker does not terminate media. A request to `/media-stream` on the Worker returns 501. See [workers/webhooks/README.md](workers/webhooks/README.md).
+2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx opens the media socket at that host on `/media-stream`. For local-only webhook tests you can leave `PUBLIC_WEBHOOK_URL` empty so Telnyx also posts to `PUBLIC_BASE_URL/webhooks/telnyx`. Production webhooks use the always-on Worker at `https://call-agent-webhooks.blossom-linen.workers.dev`. Set `PUBLIC_WEBHOOK_URL` and the Telnyx Call Control application webhook to `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Linq registers `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` (alias `/webhooks/linq`). The Worker does not terminate media. A request to `/media-stream` on the Worker returns 501. See [workers/webhooks/README.md](workers/webhooks/README.md).
 3. Set `QUICK_ASK_LIVE=1`.
 4. Provision a real number once with `call-agent did provision --user default --live`. The Numbers API orders a voice-capable US number and records it in the ledger. Without `--live` the verb records a stub number.
 5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends.
@@ -71,12 +79,12 @@ call-agent verify-webhooks
 You should see five `[PASS]` lines and `5/5 passed`. Against a deployed Worker:
 
 ```bash
-call-agent verify-webhooks --url https://call-agent-webhooks.<SUBDOMAIN>.workers.dev
+call-agent verify-webhooks --url https://call-agent-webhooks.blossom-linen.workers.dev
 ```
 
 Unsigned Telnyx POSTs must be 401. If they are 200, signature verification is unwired and the lever fails.
 
-The live path is written to the recipe but has not been exercised against Telnyx or OpenAI from this repository. The things it needs that this repository cannot supply are the Telnyx keys, the OpenAI key with GPT-Live access, a public media `wss://` host, and a Cloudflare account for the first `wrangler deploy`.
+The live path is written to the recipe but has not been exercised against Telnyx or OpenAI from this repository. The things it needs that this repository cannot supply are the Telnyx keys, the OpenAI key with GPT-Live access, and a public media `wss://` host. The always-on webhook Worker is already at `https://call-agent-webhooks.blossom-linen.workers.dev`.
 
 ## Model routing for agents
 

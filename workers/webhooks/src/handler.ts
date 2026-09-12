@@ -62,9 +62,10 @@ export function createHandler(env: Env, seen: SeenStore) {
   return {
     async fetch(
       request: Request,
-      _env: Env = env,
+      requestEnv: Env = env,
       ctx?: { waitUntil(promise: Promise<unknown>): void },
     ): Promise<Response> {
+      const active = requestEnv;
       const url = new URL(request.url);
       if (url.pathname === "/health" && request.method === "GET") {
         return json(200, { ok: true });
@@ -88,12 +89,12 @@ export function createHandler(env: Env, seen: SeenStore) {
           raw,
           request.headers.get("telnyx-timestamp") ?? "",
           request.headers.get("telnyx-signature-ed25519") ?? "",
-          env,
+          active,
           seen,
           Math.floor(Date.now() / 1000),
         );
         if (receipt.kind === "accepted") {
-          const upstream = env.UPSTREAM_WEBHOOK_URL?.trim();
+          const upstream = active.UPSTREAM_WEBHOOK_URL?.trim();
           if (upstream && ctx) {
             const headers = new Headers(request.headers);
             ctx.waitUntil(
