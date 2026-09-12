@@ -250,6 +250,8 @@ class _UnboundTelnyxMedia:
 
 @dataclass(slots=True)
 class Ports:
+    """Network adapters for one call. Mid-call user chat is not a port yet."""
+
     telnyx_http: TelnyxHttp
     telnyx_media: TelnyxMedia
     gpt_live: GptLive
@@ -536,7 +538,7 @@ def validate_live(settings: Settings) -> None:
 def assert_live_dial_origins(settings: Settings) -> None:
     if not (settings.public_webhook_url or "").strip():
         raise ValueError(
-            "CLI --live requires PUBLIC_WEBHOOK_URL set to the same tunnel "
+            "live dial requires PUBLIC_WEBHOOK_URL set to the same host "
             "as PUBLIC_BASE_URL. Process env overrides .env, so a leftover "
             "PUBLIC_WEBHOOK_URL can send webhooks to a stale host while "
             "media follows PUBLIC_BASE_URL."
@@ -546,10 +548,10 @@ def assert_live_dial_origins(settings: Settings) -> None:
     stream_host = normalized_public_host(stream_url)
     if webhook_host != stream_host:
         raise ValueError(
-            "CLI --live webhook host "
+            "live dial webhook host "
             f"{webhook_host} != stream host {stream_host}. "
             "Set PUBLIC_BASE_URL and PUBLIC_WEBHOOK_URL to the same "
-            "tunnel. Process env overrides .env, so a stale "
+            "origin. Process env overrides .env, so a stale "
             "PUBLIC_WEBHOOK_URL can diverge from PUBLIC_BASE_URL "
             "(Fly media + old tunnel webhook)."
         )

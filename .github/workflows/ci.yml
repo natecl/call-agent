@@ -23,6 +23,7 @@ jobs:
       - run: call-agent verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub
       - run: call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub
       - run: call-agent verify-message
+      - run: call-agent verify-linq-call
       - run: call-agent verify-persistence
       - uses: actions/setup-node@v4
         with:

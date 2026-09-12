@@ -3,28 +3,46 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 import httpx
 import uvicorn
 import websockets
 from fastapi import (
+    BackgroundTasks,
     FastAPI,
     HTTPException,
     Request,
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import JSONResponse
 
 from .config import Settings
 from .domain import MediaStartEvent, MediaStopEvent
+from .kickoff import (
+    KickoffMalformed,
+    KickoffParsed,
+    claim_kickoff,
+    kickoff_host_mismatch,
+    kickoff_json_path,
+    make_session,
+    malformed_reply_text,
+    parse_kickoff,
+    run_kickoff,
+    write_call_cross_links,
+)
 from .linq import (
     LinqConfigError,
     LinqWebhookAuthError,
     handle_inbound,
     messaging_port,
+    reply_from_did,
     verify_linq_signature,
+    write_inbound_artifact,
 )
+from .messaging import inbound_plain_text
 from .runtime import BOOK
 from .telnyx import LiveTelnyxMedia, parse_media_frame, parse_webhook
 
@@ -63,7 +81,9 @@ async def telnyx_webhook(request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
-async def process_linq_webhook(request: Request) -> dict[str, bool | str]:
+async def process_linq_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, bool | str] | JSONResponse:
     body = await request.body()
     settings = Settings()
     if not settings.linq_webhook_signing_secret:
@@ -81,21 +101,102 @@ async def process_linq_webhook(request: Request) -> dict[str, bool | str]:
     if inbound is None:
         return {"ok": True, "ignored": True}
     try:
-        receipt = handle_inbound(inbound, settings, port)
-    except (LinqConfigError, OSError) as error:
+        from_did = reply_from_did(settings)
+    except LinqConfigError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
-    if receipt is None:
+    if str(inbound.sender) == str(from_did):
         return {"ok": True, "ignored": True}
-    return {
-        "ok": True,
-        "replied": True,
-        "chat_id": str(receipt.chat_id),
-        "message_id": str(receipt.message_id),
-    }
+    parsed = parse_kickoff(inbound_plain_text(inbound), settings)
+    if parsed is None:
+        try:
+            receipt = handle_inbound(inbound, settings, port)
+        except (LinqConfigError, OSError) as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        if receipt is None:
+            return {"ok": True, "ignored": True}
+        return {
+            "ok": True,
+            "replied": True,
+            "chat_id": str(receipt.chat_id),
+            "message_id": str(receipt.message_id),
+        }
+    try:
+        write_inbound_artifact(
+            settings.call_agent_artifacts_dir,
+            inbound,
+            received_at=datetime.now(UTC),
+        )
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    session = make_session(inbound, settings, port)
+    if isinstance(parsed, KickoffMalformed):
+        try:
+            receipt = session.text(
+                malformed_reply_text(parsed), kind="error"
+            )
+        except (LinqConfigError, OSError) as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        return {
+            "ok": True,
+            "replied": True,
+            "parse_error": True,
+            "chat_id": str(receipt.chat_id),
+            "message_id": str(receipt.message_id),
+        }
+    assert isinstance(parsed, KickoffParsed)
+    if kickoff_json_path(
+        settings.call_agent_artifacts_dir, str(inbound.event_id)
+    ).exists():
+        return {"ok": True, "duplicate": True}
+    mismatch = kickoff_host_mismatch(
+        settings, request.headers.get("host")
+    )
+    if mismatch is not None:
+        claim_kickoff(settings, inbound, parsed.request)
+        try:
+            receipt = session.text(mismatch, kind="error")
+        except (LinqConfigError, OSError) as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        write_call_cross_links(
+            settings,
+            inbound,
+            None,
+            receipt,
+            mismatch,
+            error=mismatch,
+        )
+        return {
+            "ok": True,
+            "placed": False,
+            "reason": mismatch,
+            "chat_id": str(receipt.chat_id),
+            "message_id": str(receipt.message_id),
+        }
+    if not claim_kickoff(settings, inbound, parsed.request):
+        return {"ok": True, "duplicate": True}
+    background_tasks.add_task(run_kickoff, session, parsed.request)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "ok": True,
+            "kicked_off": True,
+            "event_id": str(inbound.event_id),
+        },
+    )
 
 
-app.add_api_route("/webhooks/linq", process_linq_webhook, methods=["POST"])
-app.add_api_route("/linq/webhook", process_linq_webhook, methods=["POST"])
+app.add_api_route(
+    "/webhooks/linq",
+    process_linq_webhook,
+    methods=["POST"],
+    response_model=None,
+)
+app.add_api_route(
+    "/linq/webhook",
+    process_linq_webhook,
+    methods=["POST"],
+    response_model=None,
+)
 
 
 @app.websocket("/media-stream")

@@ -31,6 +31,7 @@ from call_agent.messaging import (
     text_chat,
 )
 from call_agent.server import app
+from call_agent.verify_linq_call import BOOK_KICKOFF_TEXT, kickoff_inbound_bytes
 from call_agent.verify_message import (
     INBOUND_CHAT_ID,
     INBOUND_EVENT_ID,
@@ -280,6 +281,9 @@ def _webhook_env(
     monkeypatch.setenv("LINQ_FROM_E164", "+15555550100")
     monkeypatch.delenv("LINQ_API_TOKEN", raising=False)
     monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(artifacts))
+    monkeypatch.setenv(
+        "CALL_AGENT_DB_PATH", str(artifacts.parent / "ledger.sqlite3")
+    )
 
 
 def test_linq_webhook_route_verifies_signature(
@@ -442,3 +446,123 @@ def test_verify_message_passes() -> None:
         "imessage_only",
     ]
     assert all(check.passed for check in report.checks)
+
+
+def test_linq_webhook_kickoff_returns_202_and_cross_links(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts)
+    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
+    monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
+    event_id = "kickoff-route-book"
+    body = kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook", content=body, headers=_signed_headers(body)
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+    call_link = json.loads((linq_dir / "call.json").read_text())
+    linq_link = json.loads(
+        (artifacts / "stub-call-0001" / "linq.json").read_text()
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "ok": True,
+        "kicked_off": True,
+        "event_id": event_id,
+    }
+    assert [row["kind"] for row in replies] == ["ack", "result"]
+    assert replies[1]["text"].startswith("Booked:")
+    assert call_link["call_control_id"] == "stub-call-0001"
+    assert linq_link["event_id"] == event_id
+    assert linq_link["chat_id"] == INBOUND_CHAT_ID
+
+
+def test_linq_webhook_kickoff_duplicate_does_not_redial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts)
+    monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
+    event_id = "kickoff-route-dup"
+    body = kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, event_id)
+    headers = _signed_headers(body)
+    with TestClient(app) as client:
+        first = client.post("/linq/webhook", content=body, headers=headers)
+        second = client.post("/linq/webhook", content=body, headers=headers)
+
+    assert first.status_code == 202
+    assert second.status_code == 200
+    assert second.json() == {"ok": True, "duplicate": True}
+    assert (artifacts / "stub-call-0001" / "dial.json").is_file()
+    assert list((artifacts / "stub-call-0001").glob("dial.json")) == [
+        artifacts / "stub-call-0001" / "dial.json"
+    ]
+
+
+def test_linq_webhook_malformed_kickoff_helps_and_does_not_dial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts)
+    event_id = "kickoff-route-bad"
+    body = kickoff_inbound_bytes("book +14155552671 party two", event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook", content=body, headers=_signed_headers(body)
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+
+    assert response.status_code == 200
+    assert response.json()["parse_error"] is True
+    assert replies[0]["kind"] == "error"
+    assert "Couldn't parse that." in replies[0]["text"]
+    assert not (linq_dir / "kickoff.json").exists()
+    assert not (artifacts / "stub-call-0001").exists()
+
+
+def test_linq_webhook_live_host_guard_does_not_dial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts)
+    monkeypatch.setenv("QUICK_ASK_LIVE", "1")
+    monkeypatch.setenv(
+        "PUBLIC_BASE_URL", "https://hidden-beacon-080.fly.dev"
+    )
+    monkeypatch.setenv(
+        "PUBLIC_WEBHOOK_URL", "https://hidden-beacon-080.fly.dev"
+    )
+    event_id = "kickoff-route-host"
+    body = kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook",
+            content=body,
+            headers=_signed_headers(body),
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+
+    assert response.status_code == 200
+    assert response.json()["placed"] is False
+    assert "Call not placed:" in response.json()["reason"]
+    assert "hidden-beacon-080.fly.dev" in response.json()["reason"]
+    assert replies[0]["kind"] == "error"
+    assert not (artifacts / "stub-call-0001").exists()

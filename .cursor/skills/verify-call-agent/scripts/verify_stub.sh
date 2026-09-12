@@ -32,6 +32,7 @@ run "$CLI" --help | grep -q "verify-book" || { echo "verify-book verb missing fr
 run "$CLI" --help | grep -q "verify-message" || { echo "verify-message verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-webhooks" || { echo "verify-webhooks verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-persistence" || { echo "verify-persistence verb missing from --help"; exit 1; }
+run "$CLI" --help | grep -q "verify-linq-call" || { echo "verify-linq-call verb missing from --help"; exit 1; }
 
 step "did provision twice returns the same DID"
 FIRST="$(run "$CLI" did provision --user default | tail -n1)"
@@ -78,6 +79,10 @@ grep -q "6/6 passed" "$EVIDENCE/verify-book.txt"
 step "verify-message stub checklist"
 run "$CLI" verify-message | tee "$EVIDENCE/verify-message.txt" >/dev/null
 grep -q "6/6 passed" "$EVIDENCE/verify-message.txt"
+
+step "verify-linq-call stub checklist"
+run "$CLI" verify-linq-call | tee "$EVIDENCE/verify-linq-call.txt" >/dev/null
+grep -q "7/7 passed" "$EVIDENCE/verify-linq-call.txt"
 
 step "linq register-webhook fails loud without token"
 set +e

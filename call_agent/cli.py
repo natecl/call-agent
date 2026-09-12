@@ -36,6 +36,11 @@ from .verify import (
     verify_book,
     verify_quick_ask,
 )
+from .verify_linq_call import (
+    LinqCallVerifyInput,
+    format_linq_call_report,
+    verify_linq_call,
+)
 from .verify_message import (
     MessageVerifyInput,
     format_message_report,
@@ -266,6 +271,32 @@ def verify_message_command(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
     typer.echo(format_message_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("verify-linq-call")
+def verify_linq_call_command(
+    to: str = typer.Option("+14155552671", "--to"),
+    from_did: str = typer.Option("+15555550100", "--from-did"),
+    text: str = typer.Option(
+        "book +14155552671 party 2 at Friday 7pm name Nathan "
+        "notes outdoor if possible",
+        "--text",
+    ),
+) -> None:
+    try:
+        report = verify_linq_call(
+            LinqCallVerifyInput(
+                from_did=E164(from_did),
+                to=E164(to),
+                text=text,
+            )
+        )
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(format_linq_call_report(report))
     if not report.passed:
         raise typer.Exit(code=1)
 

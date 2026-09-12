@@ -56,6 +56,29 @@ def test_feature_map_keeps_book_with_the_other_levers() -> None:
 def test_verify_feature_index_lists_book_recipes() -> None:
     assert "(./book.md)" in RECIPES
     assert "(./verify-book.md)" in RECIPES
+    assert "(./linq-to-call.md)" in RECIPES
+    assert "(./verify-linq-call.md)" in RECIPES
+
+
+def test_feature_map_lists_linq_to_call_rows() -> None:
+    required_rows = (
+        "| `linq-to-call` | shipped |",
+        "| `linq-to-call --live` | gated |",
+        "| `parse_kickoff` | shipped |",
+        "| `kickoff result reply` | shipped |",
+        "| `linq ↔ call cross-link` | shipped |",
+        "| `kickoff dedupe` | shipped |",
+        "| `verify-linq-call` | shipped |",
+        "| mid-call chat | not shipped |",
+    )
+
+    missing = [row for row in required_rows if row not in INVENTORY]
+
+    assert missing == []
+    linq_to_call_at = _heading_index(INVENTORY, "linq-to-call")
+    verify_book_at = _heading_index(INVENTORY, "verify-book")
+    verify_call_agent_at = _heading_index(INVENTORY, "verify-call-agent")
+    assert verify_book_at < linq_to_call_at < verify_call_agent_at
 
 
 def test_fly_toml_keeps_always_on_machines_and_feature_map_names_the_host() -> None:
@@ -91,7 +114,13 @@ def test_book_feature_recipes_use_the_entry_contract() -> None:
         "## Gotchas",
     )
 
-    for name in ("book.md", "verify-book.md", "gpt-live-prompt.md"):
+    for name in (
+        "book.md",
+        "verify-book.md",
+        "gpt-live-prompt.md",
+        "linq-to-call.md",
+        "verify-linq-call.md",
+    ):
         text = (features / name).read_text()
         positions = [text.find(section) for section in required]
         assert all(index != -1 for index in positions), name
