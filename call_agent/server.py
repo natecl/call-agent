@@ -22,6 +22,11 @@ from .telnyx import LiveTelnyxMedia, parse_media_frame, parse_webhook
 app = FastAPI()
 
 
+@app.get("/health")
+async def health() -> dict[str, bool]:
+    return {"ok": True}
+
+
 @app.post("/webhooks/telnyx")
 async def telnyx_webhook(request: Request) -> dict[str, bool]:
     event = parse_webhook(await request.body())

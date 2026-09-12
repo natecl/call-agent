@@ -37,6 +37,13 @@ from call_agent.server import app
 CALL_CONTROL_ID = CallControlId("v3:abc")
 
 
+def test_health_returns_ok() -> None:
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
 @pytest.fixture
 def answered_handle(settings: Settings) -> Iterator[CallHandle]:
     request = QuickAskRequest(
