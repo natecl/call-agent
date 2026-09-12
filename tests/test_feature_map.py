@@ -66,6 +66,7 @@ def test_feature_map_lists_linq_to_call_rows() -> None:
         "| `linq-to-call --live` | gated |",
         "| `parse_kickoff` | shipped |",
         "| `pre-call collect` | shipped |",
+        "| `pre-call confirm` | shipped |",
         "| `kickoff result reply` | shipped |",
         "| `linq ↔ call cross-link` | shipped |",
         "| `kickoff dedupe` | shipped |",

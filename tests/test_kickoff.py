@@ -16,6 +16,8 @@ from call_agent.domain import (
     UserId,
 )
 from call_agent.kickoff import (
+    CONFIRM_ASK_TEXT,
+    DIAL_NOW_TEXT,
     PHONE_ASK_TEXT,
     TIME_ASK_TEXT,
     KickoffCollecting,
@@ -38,6 +40,7 @@ from call_agent.kickoff import (
 from call_agent.linq import StubLinq, parse_inbound
 from call_agent.messaging import IMESSAGE
 from call_agent.verify_linq_call import (
+    APPROVE_FOLLOWUP_TEXT,
     ASK_KICKOFF_TEXT,
     NATURAL_BOOK_TEXT,
     ONESHOT_BOOK_TEXT,
@@ -78,13 +81,36 @@ def test_parse_natural_book_asks_only_for_phone(tmp_path: Path) -> None:
     assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
 
 
-def test_phone_followup_completes_book_request(tmp_path: Path) -> None:
+def test_phone_followup_asks_to_confirm(tmp_path: Path) -> None:
     settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
     first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
     assert isinstance(first, KickoffCollecting)
 
     parsed = intake_kickoff(
         PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.reply == CONFIRM_ASK_TEXT
+    assert parsed.reply == (
+        'Okay, I\'m going to call this number. Do you confirm? Reply "approve"'
+    )
+    assert parsed.pending.waiting_for == "confirm"
+    assert parsed.pending.to == "+14155552671"
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+
+
+def test_approve_after_phone_completes_book_request(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    phone = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(phone, KickoffCollecting)
+
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=phone.pending
     )
 
     assert isinstance(parsed, KickoffParsed)
@@ -98,27 +124,45 @@ def test_phone_followup_completes_book_request(tmp_path: Path) -> None:
     )
 
 
-def test_parse_complete_oneshot_still_dials(tmp_path: Path) -> None:
+def test_confirm_accepts_yes_and_i_confirm(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    phone = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(phone, KickoffCollecting)
+
+    yes = intake_kickoff("yes", settings, pending=phone.pending)
+    i_confirm = intake_kickoff("I confirm", settings, pending=phone.pending)
+
+    assert isinstance(yes, KickoffParsed)
+    assert isinstance(i_confirm, KickoffParsed)
+    assert yes.request.to == E164("+14155552671")
+    assert i_confirm.request.to == E164("+14155552671")
+
+
+def test_first_message_never_dials(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     parsed = parse_kickoff(ONESHOT_BOOK_TEXT, settings)
 
-    assert isinstance(parsed, KickoffParsed)
-    assert parsed.verb == "book"
-    assert parsed.request == BookRequest(
-        user_id=UserId("default"),
-        to=E164("+14155552671"),
-        caller=FirstName("Nathan"),
-        mode=Mode.STUB,
-        party_size=2,
-        time_text="Friday 7pm",
-        constraints="outdoor if possible",
-    )
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "confirm"
+    assert parsed.reply == CONFIRM_ASK_TEXT
+    assert not isinstance(parsed, KickoffParsed)
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
 
 
 def test_parse_quick_ask_hours(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    parsed = parse_kickoff(ASK_KICKOFF_TEXT, settings)
+    first = parse_kickoff(ASK_KICKOFF_TEXT, settings)
 
+    assert isinstance(first, KickoffCollecting)
+    assert first.pending.waiting_for == "confirm"
+    assert first.pending.question_kind == "hours"
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
     assert isinstance(parsed, KickoffParsed)
     assert parsed.request == QuickAskRequest(
         user_id=UserId("default"),
@@ -131,10 +175,14 @@ def test_parse_quick_ask_hours(tmp_path: Path) -> None:
 
 def test_parse_ask_stock_item(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    parsed = parse_kickoff(
+    first = parse_kickoff(
         "ask +14155552671 stock oat milk name Nathan", settings
     )
 
+    assert isinstance(first, KickoffCollecting)
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
     assert isinstance(parsed, KickoffParsed)
     assert isinstance(parsed.request, QuickAskRequest)
     assert parsed.request.question.kind is QuestionType.STOCK
@@ -143,10 +191,14 @@ def test_parse_ask_stock_item(tmp_path: Path) -> None:
 
 def test_parse_uses_kickoff_caller_when_name_omitted(tmp_path: Path) -> None:
     settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
-    parsed = parse_kickoff(
+    first = parse_kickoff(
         "book +14155552671 party 2 at Friday 7pm", settings
     )
 
+    assert isinstance(first, KickoffCollecting)
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
     assert isinstance(parsed, KickoffParsed)
     assert parsed.request.caller == FirstName("Nathan")
 
@@ -198,10 +250,15 @@ def test_time_then_phone_collect_order(tmp_path: Path) -> None:
     third = intake_kickoff(
         PHONE_FOLLOWUP_TEXT, settings, pending=second.pending
     )
-    assert isinstance(third, KickoffParsed)
-    assert isinstance(third.request, BookRequest)
-    assert third.request.party_size == 2
-    assert third.request.time_text == "7:30"
+    assert isinstance(third, KickoffCollecting)
+    assert third.pending.waiting_for == "confirm"
+    fourth = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=third.pending
+    )
+    assert isinstance(fourth, KickoffParsed)
+    assert isinstance(fourth.request, BookRequest)
+    assert fourth.request.party_size == 2
+    assert fourth.request.time_text == "7:30"
 
 
 def test_bad_phone_followup_fails_loud(tmp_path: Path) -> None:
@@ -215,14 +272,36 @@ def test_bad_phone_followup_fails_loud(tmp_path: Path) -> None:
     assert failed_reply_text(parsed.reason).startswith("Call failed:")
 
 
+def test_bad_confirm_followup_fails_loud(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    phone = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(phone, KickoffCollecting)
+    parsed = intake_kickoff("nope", settings, pending=phone.pending)
+
+    assert isinstance(parsed, KickoffFailed)
+    assert "confirm" in parsed.reason
+    assert failed_reply_text(parsed.reason).startswith("Call failed:")
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+
+
 def test_us_phone_followup_normalizes_to_e164(tmp_path: Path) -> None:
     settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
     first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
     assert isinstance(first, KickoffCollecting)
     parsed = intake_kickoff("415-555-2671", settings, pending=first.pending)
 
-    assert isinstance(parsed, KickoffParsed)
-    assert parsed.request.to == E164("+14155552671")
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "confirm"
+    assert parsed.pending.to == "+14155552671"
+    approved = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=parsed.pending
+    )
+    assert isinstance(approved, KickoffParsed)
+    assert approved.request.to == E164("+14155552671")
 
 
 def test_parse_non_kickoff_is_none(tmp_path: Path) -> None:
@@ -310,12 +389,9 @@ def test_kickoff_ack_text() -> None:
         caller=FirstName("Nathan"),
         mode=Mode.STUB,
     )
-    assert kickoff_ack_text(book) == (
-        "Calling +14155552671 to book a table for 2 at Friday 7pm."
-    )
-    assert kickoff_ack_text(ask) == (
-        "Calling +14155552671 to ask: What are your hours today?"
-    )
+    assert kickoff_ack_text(book) == DIAL_NOW_TEXT
+    assert kickoff_ack_text(ask) == DIAL_NOW_TEXT
+    assert kickoff_ack_text(book) == "Okay, I'm going to call them now."
 
 
 def test_kickoff_host_mismatch_skips_stub() -> None:
@@ -349,8 +425,12 @@ async def test_run_kickoff_cross_links_and_replies(tmp_path: Path) -> None:
     assert inbound is not None
     first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
     assert isinstance(first, KickoffCollecting)
-    parsed = intake_kickoff(
+    phone = intake_kickoff(
         PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(phone, KickoffCollecting)
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=phone.pending
     )
     assert isinstance(parsed, KickoffParsed)
     port = StubLinq()
@@ -455,8 +535,12 @@ async def test_run_kickoff_uses_session_text(tmp_path: Path) -> None:
     assert inbound is not None
     first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
     assert isinstance(first, KickoffCollecting)
-    parsed = intake_kickoff(
+    phone = intake_kickoff(
         PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(phone, KickoffCollecting)
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=phone.pending
     )
     assert isinstance(parsed, KickoffParsed)
     port = _RecordingPort()
@@ -470,7 +554,7 @@ async def test_run_kickoff_uses_session_text(tmp_path: Path) -> None:
     await run_kickoff(session, parsed.request)
 
     assert len(port.texts) == 2
-    assert port.texts[0].startswith("Calling +14155552671")
+    assert port.texts[0] == DIAL_NOW_TEXT
     assert port.texts[1].startswith("Booked:")
 
 
@@ -481,6 +565,7 @@ def test_verify_linq_call_passes() -> None:
     assert [check.name for check in report.checks] == [
         "parse_book",
         "collect_phone",
+        "confirm_before_dial",
         "parse_quick_ask",
         "parse_fail_loud",
         "kickoff_reply",

@@ -20,6 +20,8 @@ from .domain import (
     UserId,
 )
 from .kickoff import (
+    CONFIRM_ASK_TEXT,
+    DIAL_NOW_TEXT,
     PHONE_ASK_TEXT,
     KickoffCollecting,
     KickoffFailed,
@@ -51,6 +53,7 @@ ONESHOT_BOOK_TEXT = (
 ASK_KICKOFF_TEXT = "ask +14155552671 hours name Nathan"
 BAD_FOLLOWUP_TEXT = "nope"
 PHONE_FOLLOWUP_TEXT = "+14155552671"
+APPROVE_FOLLOWUP_TEXT = "approve"
 BOOK_EVENT_ID = "kickoff-book-0001"
 BAD_EVENT_ID = "kickoff-bad-0001"
 STUB_FROM = E164("+15555550100")
@@ -67,6 +70,7 @@ class LinqCallVerifyInput(BaseModel):
 CheckName = Literal[
     "parse_book",
     "collect_phone",
+    "confirm_before_dial",
     "parse_quick_ask",
     "parse_fail_loud",
     "kickoff_reply",
@@ -89,6 +93,7 @@ class LinqCallVerifyReport(BaseModel):
 
     passed: bool
     checks: tuple[
+        LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
@@ -169,35 +174,99 @@ def verify_linq_call(
         ),
     )
 
+    expected_book = BookRequest(
+        user_id=UserId("default"),
+        to=active.to,
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="7:30",
+    )
     phone_parsed = None
     phone_ok = False
     if isinstance(book_parsed, KickoffCollecting):
         phone_parsed = intake_kickoff(
             str(active.to), settings, pending=book_parsed.pending
         )
-        expected_book = BookRequest(
-            user_id=UserId("default"),
-            to=active.to,
-            caller=FirstName("Nathan"),
-            mode=Mode.STUB,
-            party_size=2,
-            time_text="7:30",
-        )
         phone_ok = (
-            isinstance(phone_parsed, KickoffParsed)
+            isinstance(phone_parsed, KickoffCollecting)
             and phone_parsed.verb == "book"
-            and phone_parsed.request == expected_book
+            and phone_parsed.reply == CONFIRM_ASK_TEXT
+            and phone_parsed.pending.waiting_for == "confirm"
+            and phone_parsed.pending.to == str(active.to)
+            and phone_parsed.pending.party_size == 2
+            and phone_parsed.pending.time_text == "7:30"
+            and not (artifacts / "stub-call-0001").exists()
         )
     phone_check = LinqCallVerifyCheck(
         name="collect_phone",
         passed=phone_ok,
         detail=(
             f"kind={type(phone_parsed).__name__} "
-            f"to={getattr(getattr(phone_parsed, 'request', None), 'to', None)}"
+            f"waiting={getattr(getattr(phone_parsed, 'pending', None), 'waiting_for', None)} "
+            f"to={getattr(getattr(phone_parsed, 'pending', None), 'to', None)}"
         ),
     )
 
-    ask_parsed = parse_kickoff(ASK_KICKOFF_TEXT, settings)
+    confirm_parsed = None
+    confirm_ok = False
+    confirm_detail = "confirm gate did not run"
+    try:
+        oneshot = parse_kickoff(ONESHOT_BOOK_TEXT, settings)
+        if isinstance(oneshot, KickoffParsed):
+            raise ValueError("first message one-shot dialed")
+        if (
+            not isinstance(phone_parsed, KickoffCollecting)
+            or phone_parsed.pending.waiting_for != "confirm"
+        ):
+            raise ValueError("phone follow-up did not wait for confirm")
+        if (artifacts / "stub-call-0001").exists():
+            raise ValueError("dial happened before confirm")
+        bad_confirm = intake_kickoff(
+            BAD_FOLLOWUP_TEXT, settings, pending=phone_parsed.pending
+        )
+        if not isinstance(bad_confirm, KickoffFailed):
+            raise ValueError("non-affirmative confirm did not fail")
+        confirm_parsed = intake_kickoff(
+            APPROVE_FOLLOWUP_TEXT, settings, pending=phone_parsed.pending
+        )
+        yes_parsed = intake_kickoff(
+            "yes", settings, pending=phone_parsed.pending
+        )
+        i_confirm_parsed = intake_kickoff(
+            "I confirm", settings, pending=phone_parsed.pending
+        )
+        confirm_ok = (
+            isinstance(oneshot, KickoffCollecting)
+            and oneshot.pending.waiting_for == "confirm"
+            and oneshot.reply == CONFIRM_ASK_TEXT
+            and not isinstance(oneshot, KickoffParsed)
+            and failed_reply_text(bad_confirm.reason).startswith("Call failed:")
+            and isinstance(confirm_parsed, KickoffParsed)
+            and confirm_parsed.verb == "book"
+            and confirm_parsed.request == expected_book
+            and isinstance(yes_parsed, KickoffParsed)
+            and yes_parsed.request == expected_book
+            and isinstance(i_confirm_parsed, KickoffParsed)
+            and i_confirm_parsed.request == expected_book
+            and not (artifacts / "stub-call-0001").exists()
+        )
+        confirm_detail = (
+            f"oneshot={type(oneshot).__name__} "
+            f"waiting={getattr(getattr(oneshot, 'pending', None), 'waiting_for', None)} "
+            f"approve={type(confirm_parsed).__name__} "
+            f"dial_before={ (artifacts / 'stub-call-0001').exists() }"
+        )
+    except (OSError, ValueError, TypeError) as error:
+        confirm_ok = False
+        confirm_detail = str(error)
+    confirm_check = LinqCallVerifyCheck(
+        name="confirm_before_dial",
+        passed=confirm_ok,
+        detail=confirm_detail,
+    )
+
+    ask_first = parse_kickoff(ASK_KICKOFF_TEXT, settings)
     expected_ask = QuickAskRequest(
         user_id=UserId("default"),
         to=active.to,
@@ -205,15 +274,32 @@ def verify_linq_call(
         caller=FirstName("Nathan"),
         mode=Mode.STUB,
     )
+    ask_parsed = None
     ask_ok = (
-        isinstance(ask_parsed, KickoffParsed)
-        and ask_parsed.verb == "ask"
-        and ask_parsed.request == expected_ask
+        isinstance(ask_first, KickoffCollecting)
+        and ask_first.verb == "ask"
+        and ask_first.reply == CONFIRM_ASK_TEXT
+        and ask_first.pending.waiting_for == "confirm"
+        and ask_first.pending.question_kind == "hours"
+        and ask_first.pending.to == str(active.to)
+        and not isinstance(ask_first, KickoffParsed)
+        and not (artifacts / "stub-call-0001").exists()
     )
+    if ask_ok and isinstance(ask_first, KickoffCollecting):
+        ask_parsed = intake_kickoff(
+            APPROVE_FOLLOWUP_TEXT, settings, pending=ask_first.pending
+        )
+        ask_ok = (
+            isinstance(ask_parsed, KickoffParsed)
+            and ask_parsed.verb == "ask"
+            and ask_parsed.request == expected_ask
+        )
     ask_check = LinqCallVerifyCheck(
         name="parse_quick_ask",
         passed=ask_ok,
         detail=(
+            f"first={type(ask_first).__name__} "
+            f"waiting={getattr(getattr(ask_first, 'pending', None), 'waiting_for', None)} "
             f"verb={getattr(ask_parsed, 'verb', None)} "
             f"kind={getattr(getattr(getattr(ask_parsed, 'request', None), 'question', None), 'kind', None)}"
         ),
@@ -261,7 +347,9 @@ def verify_linq_call(
 
     inbound = parse_inbound(
         kickoff_inbound_bytes(
-            str(active.to), BOOK_EVENT_ID, message_id="kickoff-msg-phone"
+            APPROVE_FOLLOWUP_TEXT,
+            BOOK_EVENT_ID,
+            message_id="kickoff-msg-approve",
         )
     )
     reply_ok = False
@@ -273,8 +361,8 @@ def verify_linq_call(
     link_detail = "cross-link did not run"
     host_detail = "dial did not run"
     try:
-        if inbound is None or not isinstance(phone_parsed, KickoffParsed):
-            raise ValueError("phone follow-up did not parse")
+        if inbound is None or not isinstance(confirm_parsed, KickoffParsed):
+            raise ValueError("confirm follow-up did not parse")
         port = StubLinq()
         session = KickoffSession(
             inbound=inbound,
@@ -282,7 +370,7 @@ def verify_linq_call(
             port=port,
             settings=settings,
         )
-        receipt = asyncio.run(run_kickoff(session, phone_parsed.request))
+        receipt = asyncio.run(run_kickoff(session, confirm_parsed.request))
         rows = _read_jsonl(
             artifacts / "linq" / BOOK_EVENT_ID / "replies.jsonl"
         )
@@ -302,6 +390,7 @@ def verify_linq_call(
             )
             and "SMS" not in json.dumps(port.sent)
             and ack_row.get("kind") == "ack"
+            and ack_row.get("text") == DIAL_NOW_TEXT
             and result_row.get("kind") == "result"
             and str(result_row.get("text", "")).startswith("Booked:")
             and ack_row.get("chat_id") == INBOUND_CHAT_ID
@@ -369,6 +458,7 @@ def verify_linq_call(
     checks = (
         book_check,
         phone_check,
+        confirm_check,
         ask_check,
         fail_check,
         LinqCallVerifyCheck(
@@ -399,7 +489,7 @@ def format_linq_call_report(report: LinqCallVerifyReport) -> str:
         for check in report.checks
     ]
     passed = sum(check.passed for check in report.checks)
-    lines.append(f"{passed}/8 passed")
+    lines.append(f"{passed}/9 passed")
     return "\n".join(lines)
 
 

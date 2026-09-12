@@ -111,6 +111,10 @@ async def process_linq_webhook(
         raise HTTPException(status_code=500, detail=str(error)) from error
     if str(inbound.sender) == str(from_did):
         return {"ok": True, "ignored": True}
+    if kickoff_json_path(
+        settings.call_agent_artifacts_dir, str(inbound.event_id)
+    ).exists():
+        return {"ok": True, "duplicate": True}
     try:
         pending = load_pending_collect(
             settings.call_agent_artifacts_dir, inbound.chat_id

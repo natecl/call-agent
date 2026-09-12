@@ -31,8 +31,14 @@ from call_agent.messaging import (
     text_chat,
 )
 from call_agent.server import app
-from call_agent.kickoff import PHONE_ASK_TEXT, pending_collect_path
+from call_agent.kickoff import (
+    CONFIRM_ASK_TEXT,
+    DIAL_NOW_TEXT,
+    PHONE_ASK_TEXT,
+    pending_collect_path,
+)
 from call_agent.verify_linq_call import (
+    APPROVE_FOLLOWUP_TEXT,
     NATURAL_BOOK_TEXT,
     ONESHOT_BOOK_TEXT,
     PHONE_FOLLOWUP_TEXT,
@@ -461,14 +467,41 @@ def test_linq_webhook_kickoff_returns_202_and_cross_links(
     _webhook_env(monkeypatch, artifacts)
     monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
-    event_id = "kickoff-route-book"
-    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
+    collect_id = "kickoff-route-book-collect"
+    phone_id = "kickoff-route-book-phone"
+    approve_id = "kickoff-route-book"
+    collect_body = kickoff_inbound_bytes(
+        NATURAL_BOOK_TEXT, collect_id, message_id="msg-collect"
+    )
+    phone_body = kickoff_inbound_bytes(
+        PHONE_FOLLOWUP_TEXT, phone_id, message_id="msg-phone"
+    )
+    approve_body = kickoff_inbound_bytes(
+        APPROVE_FOLLOWUP_TEXT, approve_id, message_id="msg-approve"
+    )
     with TestClient(app) as client:
+        collect = client.post(
+            "/linq/webhook",
+            content=collect_body,
+            headers=_signed_headers(collect_body, msg_id="collect-1"),
+        )
+        phone = client.post(
+            "/linq/webhook",
+            content=phone_body,
+            headers=_signed_headers(phone_body, msg_id="phone-1"),
+        )
+        assert collect.status_code == 200
+        assert collect.json()["collecting"] is True
+        assert phone.status_code == 200
+        assert phone.json()["collecting"] is True
+        assert not (artifacts / "stub-call-0001").exists()
         response = client.post(
-            "/linq/webhook", content=body, headers=_signed_headers(body)
+            "/linq/webhook",
+            content=approve_body,
+            headers=_signed_headers(approve_body, msg_id="approve-1"),
         )
 
-    linq_dir = artifacts / "linq" / event_id
+    linq_dir = artifacts / "linq" / approve_id
     replies = [
         json.loads(line)
         for line in (linq_dir / "replies.jsonl").read_text().splitlines()
@@ -482,13 +515,40 @@ def test_linq_webhook_kickoff_returns_202_and_cross_links(
     assert response.json() == {
         "ok": True,
         "kicked_off": True,
-        "event_id": event_id,
+        "event_id": approve_id,
     }
     assert [row["kind"] for row in replies] == ["ack", "result"]
+    assert replies[0]["text"] == DIAL_NOW_TEXT
     assert replies[1]["text"].startswith("Booked:")
     assert call_link["call_control_id"] == "stub-call-0001"
-    assert linq_link["event_id"] == event_id
+    assert linq_link["event_id"] == approve_id
     assert linq_link["chat_id"] == INBOUND_CHAT_ID
+
+
+def test_linq_webhook_first_message_never_dials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts)
+    event_id = "kickoff-route-oneshot"
+    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook", content=body, headers=_signed_headers(body)
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+
+    assert response.status_code == 200
+    assert response.json()["collecting"] is True
+    assert replies[0]["text"] == CONFIRM_ASK_TEXT
+    assert not (linq_dir / "kickoff.json").exists()
+    assert not (artifacts / "stub-call-0001").exists()
+    assert pending_collect_path(artifacts, INBOUND_CHAT_ID).is_file()
 
 
 def test_linq_webhook_kickoff_duplicate_does_not_redial(
@@ -496,13 +556,39 @@ def test_linq_webhook_kickoff_duplicate_does_not_redial(
 ) -> None:
     artifacts = tmp_path / "artifacts"
     _webhook_env(monkeypatch, artifacts)
+    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
+    collect_body = kickoff_inbound_bytes(
+        NATURAL_BOOK_TEXT, "kickoff-dup-collect", message_id="msg-dup-collect"
+    )
+    phone_body = kickoff_inbound_bytes(
+        PHONE_FOLLOWUP_TEXT, "kickoff-dup-phone", message_id="msg-dup-phone"
+    )
     event_id = "kickoff-route-dup"
-    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
-    headers = _signed_headers(body)
+    approve_body = kickoff_inbound_bytes(
+        APPROVE_FOLLOWUP_TEXT, event_id, message_id="msg-dup-approve"
+    )
+    headers = _signed_headers(approve_body, msg_id="approve-dup")
     with TestClient(app) as client:
-        first = client.post("/linq/webhook", content=body, headers=headers)
-        second = client.post("/linq/webhook", content=body, headers=headers)
+        collect = client.post(
+            "/linq/webhook",
+            content=collect_body,
+            headers=_signed_headers(collect_body, msg_id="dup-collect"),
+        )
+        phone = client.post(
+            "/linq/webhook",
+            content=phone_body,
+            headers=_signed_headers(phone_body, msg_id="dup-phone"),
+        )
+        assert collect.status_code == 200
+        assert phone.status_code == 200
+        assert not (artifacts / "stub-call-0001").exists()
+        first = client.post(
+            "/linq/webhook", content=approve_body, headers=headers
+        )
+        second = client.post(
+            "/linq/webhook", content=approve_body, headers=headers
+        )
 
     assert first.status_code == 202
     assert second.status_code == 200
@@ -524,11 +610,15 @@ def test_linq_webhook_two_step_collects_then_dials(
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
     collect_id = "kickoff-route-collect"
     phone_id = "kickoff-route-phone"
+    approve_id = "kickoff-route-approve"
     collect_body = kickoff_inbound_bytes(
         NATURAL_BOOK_TEXT, collect_id, message_id="msg-collect"
     )
     phone_body = kickoff_inbound_bytes(
         PHONE_FOLLOWUP_TEXT, phone_id, message_id="msg-phone"
+    )
+    approve_body = kickoff_inbound_bytes(
+        APPROVE_FOLLOWUP_TEXT, approve_id, message_id="msg-approve"
     )
     with TestClient(app) as client:
         collect = client.post(
@@ -555,26 +645,47 @@ def test_linq_webhook_two_step_collects_then_dials(
         assert not (collect_dir / "kickoff.json").exists()
         assert pending_collect_path(artifacts, INBOUND_CHAT_ID).is_file()
 
-        dial = client.post(
+        phone = client.post(
             "/linq/webhook",
             content=phone_body,
             headers=_signed_headers(phone_body, msg_id="phone-1"),
         )
+        assert phone.status_code == 200
+        assert phone.json()["collecting"] is True
+        assert not (artifacts / "stub-call-0001").exists()
+        phone_dir = artifacts / "linq" / phone_id
+        phone_replies = [
+            json.loads(line)
+            for line in (phone_dir / "replies.jsonl").read_text().splitlines()
+        ]
+        assert phone_replies[0]["text"] == CONFIRM_ASK_TEXT
+        assert not (phone_dir / "kickoff.json").exists()
+        pending = json.loads(
+            pending_collect_path(artifacts, INBOUND_CHAT_ID).read_text()
+        )
+        assert pending["waiting_for"] == "confirm"
 
-    phone_dir = artifacts / "linq" / phone_id
+        dial = client.post(
+            "/linq/webhook",
+            content=approve_body,
+            headers=_signed_headers(approve_body, msg_id="approve-1"),
+        )
+
+    approve_dir = artifacts / "linq" / approve_id
     replies = [
         json.loads(line)
-        for line in (phone_dir / "replies.jsonl").read_text().splitlines()
+        for line in (approve_dir / "replies.jsonl").read_text().splitlines()
     ]
-    call_link = json.loads((phone_dir / "call.json").read_text())
+    call_link = json.loads((approve_dir / "call.json").read_text())
 
     assert dial.status_code == 202
     assert dial.json() == {
         "ok": True,
         "kicked_off": True,
-        "event_id": phone_id,
+        "event_id": approve_id,
     }
     assert [row["kind"] for row in replies] == ["ack", "result"]
+    assert replies[0]["text"] == DIAL_NOW_TEXT
     assert replies[1]["text"].startswith("Booked:")
     assert call_link["call_control_id"] == "stub-call-0001"
     assert not pending_collect_path(artifacts, INBOUND_CHAT_ID).exists()
@@ -633,13 +744,37 @@ def test_linq_webhook_live_host_guard_does_not_dial(
     monkeypatch.setenv(
         "PUBLIC_WEBHOOK_URL", "https://hidden-beacon-080.fly.dev"
     )
+    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
+    collect_id = "kickoff-route-host-collect"
+    phone_id = "kickoff-route-host-phone"
     event_id = "kickoff-route-host"
-    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
+    collect_body = kickoff_inbound_bytes(
+        NATURAL_BOOK_TEXT, collect_id, message_id="msg-host-collect"
+    )
+    phone_body = kickoff_inbound_bytes(
+        PHONE_FOLLOWUP_TEXT, phone_id, message_id="msg-host-phone"
+    )
+    approve_body = kickoff_inbound_bytes(
+        APPROVE_FOLLOWUP_TEXT, event_id, message_id="msg-host-approve"
+    )
     with TestClient(app) as client:
+        collect = client.post(
+            "/linq/webhook",
+            content=collect_body,
+            headers=_signed_headers(collect_body, msg_id="host-collect"),
+        )
+        phone = client.post(
+            "/linq/webhook",
+            content=phone_body,
+            headers=_signed_headers(phone_body, msg_id="host-phone"),
+        )
+        assert collect.status_code == 200
+        assert phone.status_code == 200
+        assert not (artifacts / "stub-call-0001").exists()
         response = client.post(
             "/linq/webhook",
-            content=body,
-            headers=_signed_headers(body),
+            content=approve_body,
+            headers=_signed_headers(approve_body, msg_id="host-approve"),
         )
 
     linq_dir = artifacts / "linq" / event_id
