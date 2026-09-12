@@ -45,11 +45,13 @@ def test_verify_feature_index_lists_book_recipes() -> None:
 
 def test_fly_toml_keeps_always_on_machines_and_feature_map_names_the_host() -> None:
     fly = (REPO / "fly.toml").read_text()
+    assert 'app = "hidden-beacon-080"' in fly
     assert 'auto_stop_machines = "off"' in fly
     assert "min_machines_running = 1" in fly
     assert "always-on Fly host" in INVENTORY
     assert "APP_BASE_URL" in INVENTORY
-    assert "https://<app>.fly.dev" in INVENTORY
+    assert "https://hidden-beacon-080.fly.dev" in INVENTORY
+    assert "https://<app>.fly.dev" not in INVENTORY
 
 
 def test_book_feature_recipes_use_the_entry_contract() -> None:

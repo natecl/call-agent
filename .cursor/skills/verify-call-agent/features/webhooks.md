@@ -1,6 +1,6 @@
 # Always-on webhooks versus local tunnel
 
-Production Telnyx Call Control posts go to the Cloudflare Worker inbox. Closed alpha iMessage inbound uses the same Worker at `POST /linq/webhook`. The Worker secret `APP_BASE_URL` is the always-on Fly FastAPI origin `https://<app>.fly.dev` (no path). The laptop is not the prod FastAPI host. The laptop tunnel is the local-dev path and the media host. `verify-webhooks` is the lever for the Worker. This file is the map of the two paths. Update it when the Worker routes, the env split, or the Linq hook change. There is no `call-agent-web` map in this repository.
+Production Telnyx Call Control posts go to the Cloudflare Worker inbox. Closed alpha iMessage inbound uses the same Worker at `POST /linq/webhook`. The Worker secret `APP_BASE_URL` is the always-on Fly FastAPI origin `https://hidden-beacon-080.fly.dev` (no path). The laptop is not the prod FastAPI host. The laptop tunnel is the local-dev path and the media host. `verify-webhooks` is the lever for the Worker. This file is the map of the two paths. Update it when the Worker routes, the env split, or the Linq hook change. There is no `call-agent-web` map in this repository.
 
 ## Sub-features
 
@@ -8,13 +8,13 @@ Production Telnyx Call Control posts go to the Cloudflare Worker inbox. Closed a
 - `dev-tunnel` empty `PUBLIC_WEBHOOK_URL` keeps webhook and media on `PUBLIC_BASE_URL`.
 - `media-host` `stream_url` always comes from `PUBLIC_BASE_URL`. The Worker `/media-stream` is 501.
 - `linq-hook` `POST /linq/webhook` and `POST /webhooks/linq` forward to `APP_BASE_URL`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. They do not send SMS.
-- `fly-host` Worker `APP_BASE_URL` is the always-on Fly origin `https://<app>.fly.dev` (no path). The laptop is not the prod FastAPI host.
+- `fly-host` Worker `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). The laptop is not the prod FastAPI host.
 
 ## How to get to it (user POV)
 
 - The live Linq register URL is `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`.
 - Set the Telnyx Call Control webhook and `PUBLIC_WEBHOOK_URL` to `https://call-agent-webhooks.blossom-linen.workers.dev`.
-- Set Worker secret `APP_BASE_URL` to the always-on Fly origin `https://<app>.fly.dev` (no path). The laptop is not the prod host.
+- Set Worker secret `APP_BASE_URL` to the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). The laptop is not the prod host.
 - Leave `PUBLIC_WEBHOOK_URL` empty and set `PUBLIC_BASE_URL` to a tunnel for laptop-only webhook tests.
 - Run `call-agent verify-webhooks` to prove the Worker inbox. The recipe is [verify-webhooks.md](./verify-webhooks.md).
 
@@ -33,5 +33,5 @@ Preconditions:
 
 - There is no `call-agent-web` map in this repository. Do not invent one. The Worker name is `call-agent-webhooks`.
 - Pointing `PUBLIC_BASE_URL` at the Worker sends media to `/media-stream` and gets 501. Keep media on the tunnel.
-- The Linq POST is a Worker forward to FastAPI, not SMS. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI `POST /linq/webhook` verifies HMAC. Prod `APP_BASE_URL` is `https://<app>.fly.dev` (no path).
+- The Linq POST is a Worker forward to FastAPI, not SMS. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI `POST /linq/webhook` verifies HMAC. Prod `APP_BASE_URL` is `https://hidden-beacon-080.fly.dev` (no path).
 - The live hostname is `call-agent-webhooks.blossom-linen.workers.dev`. A wrangler temporary preview can expire unless claimed. Claiming keeps that hostname.

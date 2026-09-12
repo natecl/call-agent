@@ -12,13 +12,11 @@ Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inb
 
 `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
 
-`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC. The Worker does not send SMS. Prod FastAPI is the always-on Fly host. Set Worker `APP_BASE_URL` to `https://<app>.fly.dev` (no path) after deploy. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC. The Worker does not send SMS. Prod FastAPI is the always-on Fly app `hidden-beacon-080`. Set Worker `APP_BASE_URL` to `https://hidden-beacon-080.fly.dev` (no path). Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Deploy FastAPI on Fly Machines
 
-Fly Machines run always-on uvicorn. `fly.toml` sets `auto_stop_machines = "off"` and `min_machines_running = 1`. The laptop is not the prod FastAPI host. This tree does not record a live hostname. Worker `APP_BASE_URL` is the Fly origin with no path, `https://<app>.fly.dev`.
-
-The `app` value in `fly.toml` is a placeholder (`call-agent`). If Builder already created the Fly app, keep that name and run `fly deploy`. Do not `fly launch` a second app. This VM has no Fly token.
+Fly Machines run always-on uvicorn. `fly.toml` pins `app = "hidden-beacon-080"` and sets `auto_stop_machines = "off"` and `min_machines_running = 1`. The live origin is `https://hidden-beacon-080.fly.dev` (no path). The laptop is not the prod FastAPI host. Worker `APP_BASE_URL` is that origin. Do not `fly launch` a second app. This VM has no Fly token.
 
 ```bash
 fly secrets set LINQ_WEBHOOK_SIGNING_SECRET=...
@@ -27,15 +25,6 @@ fly deploy
 
 `LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. Set `LINQ_API_TOKEN` on this process only if it will live-send or register. HMAC inbound does not need it.
 
-If no Fly app exists yet:
-
-```bash
-fly auth login
-fly launch --no-deploy
-```
-
-Then set the secret and run `fly deploy` as above.
-
 Then point the Worker at the Fly origin (no path) and deploy the Worker:
 
 ```bash
@@ -43,7 +32,7 @@ cd workers/webhooks
 npx wrangler secret put APP_BASE_URL
 ```
 
-The value is `https://<app>.fly.dev`. Then:
+The value is `https://hidden-beacon-080.fly.dev`. Then:
 
 ```bash
 npx wrangler deploy
