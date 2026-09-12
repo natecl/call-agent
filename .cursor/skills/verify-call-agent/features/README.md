@@ -37,6 +37,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 ## Features
 
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
+- [Accounts](./accounts.md) covers `users` row seed (`account upsert` / `get` / `list`) and the signed Fly sync contract.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
 - [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, `speak_first` append frames, Realtime reject, and no tool-delegation.
 - [Verify quick-ask](./verify-quick-ask.md) covers the five-check lever in stub mode and its exit codes.
@@ -46,7 +47,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path at `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook`, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
 - [Linq inbound (closed alpha)](./linq-inbound.md) covers the iMessage L1 ingress hook. SMS stays off.
 - [Linq to call (closed alpha)](./linq-to-call.md) covers iMessage natural collect + confirm-before-dial → Fly `run_call` → result on the same chat.
-- [Verify linq-to-call](./verify-linq-call.md) covers the nine-check stub lever for that path.
+- [Verify linq-to-call](./verify-linq-call.md) covers the eleven-check stub lever for that path.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.
 - [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, and the misconfig exit.
 - [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. The privacy page stays not shipped.

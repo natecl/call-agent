@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from .accounts import AccountWrite, UserRecord, open_accounts
 from .config import Settings
 from .domain import (
     BookRequest,
@@ -22,7 +23,10 @@ from .domain import (
 from .kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
+    NO_ACCOUNT_TEXT,
+    NO_NAME_TEXT,
     PHONE_ASK_TEXT,
+    KickoffBlocked,
     KickoffCollecting,
     KickoffFailed,
     KickoffParsed,
@@ -73,6 +77,8 @@ CheckName = Literal[
     "confirm_before_dial",
     "parse_quick_ask",
     "parse_fail_loud",
+    "account_lookup",
+    "account_gate",
     "kickoff_reply",
     "call_ran",
     "cross_link",
@@ -93,6 +99,8 @@ class LinqCallVerifyReport(BaseModel):
 
     passed: bool
     checks: tuple[
+        LinqCallVerifyCheck,
+        LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
@@ -143,7 +151,6 @@ def verify_linq_call(
         _env_file=None,
         linq_api_token=None,
         linq_from_e164=str(active.from_did),
-        linq_kickoff_caller="Nathan",
         call_agent_db_path=root / "ledger.sqlite3",
         call_agent_artifacts_dir=artifacts,
         hangup_trailing_silence_s=0,
@@ -151,8 +158,15 @@ def verify_linq_call(
         quick_ask_live=False,
         retain_call_artifacts=True,
     )
+    nathan = open_accounts(settings).upsert(
+        AccountWrite(
+            phone=E164(INBOUND_SENDER),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+        )
+    ).record
 
-    book_parsed = intake_kickoff(active.text, settings)
+    book_parsed = intake_kickoff(active.text, settings, account=nathan)
     collect_ok = (
         isinstance(book_parsed, KickoffCollecting)
         and book_parsed.verb == "book"
@@ -186,7 +200,7 @@ def verify_linq_call(
     phone_ok = False
     if isinstance(book_parsed, KickoffCollecting):
         phone_parsed = intake_kickoff(
-            str(active.to), settings, pending=book_parsed.pending
+            str(active.to), settings, pending=book_parsed.pending, account=nathan
         )
         phone_ok = (
             isinstance(phone_parsed, KickoffCollecting)
@@ -212,7 +226,7 @@ def verify_linq_call(
     confirm_ok = False
     confirm_detail = "confirm gate did not run"
     try:
-        oneshot = parse_kickoff(ONESHOT_BOOK_TEXT, settings)
+        oneshot = parse_kickoff(ONESHOT_BOOK_TEXT, settings, account=nathan)
         if isinstance(oneshot, KickoffParsed):
             raise ValueError("first message one-shot dialed")
         if (
@@ -223,18 +237,24 @@ def verify_linq_call(
         if (artifacts / "stub-call-0001").exists():
             raise ValueError("dial happened before confirm")
         bad_confirm = intake_kickoff(
-            BAD_FOLLOWUP_TEXT, settings, pending=phone_parsed.pending
+            BAD_FOLLOWUP_TEXT,
+            settings,
+            pending=phone_parsed.pending,
+            account=nathan,
         )
         if not isinstance(bad_confirm, KickoffFailed):
             raise ValueError("non-affirmative confirm did not fail")
         confirm_parsed = intake_kickoff(
-            APPROVE_FOLLOWUP_TEXT, settings, pending=phone_parsed.pending
+            APPROVE_FOLLOWUP_TEXT,
+            settings,
+            pending=phone_parsed.pending,
+            account=nathan,
         )
         yes_parsed = intake_kickoff(
-            "yes", settings, pending=phone_parsed.pending
+            "yes", settings, pending=phone_parsed.pending, account=nathan
         )
         i_confirm_parsed = intake_kickoff(
-            "I confirm", settings, pending=phone_parsed.pending
+            "I confirm", settings, pending=phone_parsed.pending, account=nathan
         )
         confirm_ok = (
             isinstance(oneshot, KickoffCollecting)
@@ -266,7 +286,7 @@ def verify_linq_call(
         detail=confirm_detail,
     )
 
-    ask_first = parse_kickoff(ASK_KICKOFF_TEXT, settings)
+    ask_first = parse_kickoff(ASK_KICKOFF_TEXT, settings, account=nathan)
     expected_ask = QuickAskRequest(
         user_id=UserId("default"),
         to=active.to,
@@ -287,7 +307,10 @@ def verify_linq_call(
     )
     if ask_ok and isinstance(ask_first, KickoffCollecting):
         ask_parsed = intake_kickoff(
-            APPROVE_FOLLOWUP_TEXT, settings, pending=ask_first.pending
+            APPROVE_FOLLOWUP_TEXT,
+            settings,
+            pending=ask_first.pending,
+            account=nathan,
         )
         ask_ok = (
             isinstance(ask_parsed, KickoffParsed)
@@ -311,7 +334,10 @@ def verify_linq_call(
         if not isinstance(book_parsed, KickoffCollecting):
             raise ValueError("expected first text to collect the phone")
         fail_parsed = intake_kickoff(
-            BAD_FOLLOWUP_TEXT, settings, pending=book_parsed.pending
+            BAD_FOLLOWUP_TEXT,
+            settings,
+            pending=book_parsed.pending,
+            account=nathan,
         )
         fail_inbound = parse_inbound(
             kickoff_inbound_bytes(BAD_FOLLOWUP_TEXT, BAD_EVENT_ID)
@@ -345,6 +371,35 @@ def verify_linq_call(
         detail=fail_detail,
     )
 
+    unnamed = UserRecord(
+        user_id=UserId("noname"),
+        phone=E164("+15555550199"),
+        first_name=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    no_account = intake_kickoff(active.text, settings, account=None)
+    no_name = intake_kickoff(active.text, settings, account=unnamed)
+    gate_ok = (
+        isinstance(no_account, KickoffBlocked)
+        and no_account.reply == NO_ACCOUNT_TEXT
+        and not no_account.reply.startswith("Call failed:")
+        and isinstance(no_name, KickoffBlocked)
+        and no_name.reply == NO_NAME_TEXT
+        and not no_name.reply.startswith("Call failed:")
+        and "missing caller name" not in no_account.reply
+        and "missing caller name" not in no_name.reply
+        and not (artifacts / "stub-call-0001").exists()
+    )
+    gate_check = LinqCallVerifyCheck(
+        name="account_gate",
+        passed=gate_ok,
+        detail=(
+            f"none={type(no_account).__name__} "
+            f"unnamed={type(no_name).__name__}"
+        ),
+    )
+
     inbound = parse_inbound(
         kickoff_inbound_bytes(
             APPROVE_FOLLOWUP_TEXT,
@@ -356,10 +411,12 @@ def verify_linq_call(
     call_ok = False
     link_ok = False
     host_ok = False
+    lookup_ok = False
     reply_detail = "kickoff did not run"
     call_detail = "call did not run"
     link_detail = "cross-link did not run"
     host_detail = "dial did not run"
+    lookup_detail = "account lookup did not run"
     try:
         if inbound is None or not isinstance(confirm_parsed, KickoffParsed):
             raise ValueError("confirm follow-up did not parse")
@@ -445,6 +502,25 @@ def verify_linq_call(
         host_detail = (
             f"webhook_host={webhook_host} stream_host={stream_host}"
         )
+
+        kickoff_payload = _read_json(
+            artifacts / "linq" / BOOK_EVENT_ID / "kickoff.json"
+        )
+        account_blob = kickoff_payload.get("account") or {}
+        lookup_ok = (
+            isinstance(confirm_parsed, KickoffParsed)
+            and confirm_parsed.request.caller == FirstName("Nathan")
+            and confirm_parsed.request.user_id == UserId("default")
+            and account_blob.get("user_id") == str(nathan.user_id)
+            and account_blob.get("phone") == INBOUND_SENDER
+            and "first_name" not in account_blob
+            and "name" not in account_blob
+        )
+        lookup_detail = (
+            f"caller={confirm_parsed.request.caller} "
+            f"did_user={confirm_parsed.request.user_id} "
+            f"account_user={account_blob.get('user_id')}"
+        )
     except (OSError, ValueError, TypeError, KeyError, IndexError) as error:
         if not reply_ok:
             reply_detail = str(error)
@@ -452,8 +528,10 @@ def verify_linq_call(
             call_detail = str(error)
         elif not link_ok:
             link_detail = str(error)
-        else:
+        elif not host_ok:
             host_detail = str(error)
+        else:
+            lookup_detail = str(error)
 
     checks = (
         book_check,
@@ -461,6 +539,10 @@ def verify_linq_call(
         confirm_check,
         ask_check,
         fail_check,
+        LinqCallVerifyCheck(
+            name="account_lookup", passed=lookup_ok, detail=lookup_detail
+        ),
+        gate_check,
         LinqCallVerifyCheck(
             name="kickoff_reply", passed=reply_ok, detail=reply_detail
         ),
@@ -489,7 +571,7 @@ def format_linq_call_report(report: LinqCallVerifyReport) -> str:
         for check in report.checks
     ]
     passed = sum(check.passed for check in report.checks)
-    lines.append(f"{passed}/9 passed")
+    lines.append(f"{passed}/11 passed")
     return "\n".join(lines)
 
 

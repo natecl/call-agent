@@ -43,6 +43,7 @@ def test_verify_persistence_unset_passes_with_sqlite_local(
     assert [check.name for check in report.checks] == [
         "config",
         "ledger_roundtrip",
+        "account_roundtrip",
         "artifact_put_get",
     ]
     assert all(check.passed for check in report.checks)
@@ -127,8 +128,8 @@ def test_cli_verify_persistence_unset_exits_zero(
     )
 
     assert result.exit_code == 0
-    assert "3/3 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 3
+    assert "4/4 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 4
     assert "sqlite ledger + local artifacts" in result.stdout
 
 

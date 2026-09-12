@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from .accounts import UserRecord, lookup_account
 from .config import Settings
 from .domain import (
     BookRequest,
@@ -49,21 +50,29 @@ CONFIRM_ASK_TEXT = (
     'Okay, I\'m going to call this number. Do you confirm? Reply "approve"'
 )
 DIAL_NOW_TEXT = "Okay, I'm going to call them now."
+NO_ACCOUNT_TEXT = (
+    "I don't have an account for this number yet. "
+    "Set one up in your account settings, then text me again."
+)
+NO_NAME_TEXT = (
+    "I need your name for the call. "
+    "Add it in your account settings, then text me again."
+)
 
 _BOOK_RE = re.compile(
     r"^book\s+(?P<to>\+[1-9]\d{7,14})\s+party\s+(?P<party>\d+)\s+at\s+"
-    r"(?P<time>.+?)(?:\s+name\s+(?P<name>.+?))?"
+    r"(?P<time>.+?)(?:\s+name\s+[A-Za-z][A-Za-z' -]{0,31})?"
     r"(?:\s+notes\s+(?P<notes>.+))?$",
     re.IGNORECASE,
 )
 _ASK_HOURS_RE = re.compile(
     r"^ask\s+(?P<to>\+[1-9]\d{7,14})\s+hours"
-    r"(?:\s+name\s+(?P<name>.+))?$",
+    r"(?:\s+name\s+[A-Za-z][A-Za-z' -]{0,31})?$",
     re.IGNORECASE,
 )
 _ASK_ITEM_RE = re.compile(
     r"^ask\s+(?P<to>\+[1-9]\d{7,14})\s+(?P<kind>stock|aisle)\s+"
-    r"(?P<item>.+?)(?:\s+name\s+(?P<name>.+))?$",
+    r"(?P<item>.+?)(?:\s+name\s+[A-Za-z][A-Za-z' -]{0,31})?$",
     re.IGNORECASE,
 )
 _E164_RE = re.compile(r"\+[1-9]\d{7,14}")
@@ -102,10 +111,6 @@ _AT_TIME_RE = re.compile(
     r"|\s+name\b|\s+notes\b|$)",
     re.IGNORECASE,
 )
-_NAME_RE = re.compile(
-    r"\bname\s+([A-Za-z][A-Za-z' -]{0,31})(?=\s+notes\b|$)",
-    re.IGNORECASE,
-)
 _NOTES_RE = re.compile(r"\bnotes\s+(.+)$", re.IGNORECASE)
 _BOOK_INTENT_RE = re.compile(
     r"\b(reservations?|reserve|book(?:ing)?s?|table|party)\b",
@@ -142,7 +147,6 @@ class PendingCollect:
     constraints: str | None = None
     question_kind: str | None = None
     question_item: str | None = None
-    name: str | None = None
 
     def to_dict(self) -> dict[str, str | int | None]:
         return asdict(self)
@@ -159,7 +163,6 @@ class PendingCollect:
             constraints=_optional_str(raw.get("constraints")),
             question_kind=_optional_str(raw.get("question_kind")),
             question_item=_optional_str(raw.get("question_item")),
-            name=_optional_str(raw.get("name")),
         )
 
 
@@ -173,6 +176,12 @@ class KickoffCollecting:
 @dataclass(frozen=True, slots=True)
 class KickoffFailed:
     reason: str
+    verb: Literal["book", "ask"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KickoffBlocked:
+    reply: str
     verb: Literal["book", "ask"] | None = None
 
 
@@ -234,7 +243,6 @@ class _Extracted:
     party_size: int | None
     time_text: str | None
     constraints: str | None
-    name: str | None
     question_kind: QuestionType | None
     question_item: str | None
 
@@ -263,16 +271,21 @@ def parse_kickoff(
     text: str,
     settings: Settings,
     sender: str | None = None,
-) -> KickoffParsed | KickoffCollecting | KickoffFailed | None:
-    del sender
-    return intake_kickoff(text, settings)
+    *,
+    account: UserRecord | None = None,
+) -> KickoffParsed | KickoffCollecting | KickoffFailed | KickoffBlocked | None:
+    if account is None and sender is not None:
+        account = lookup_account(settings, sender)
+    return intake_kickoff(text, settings, account=account)
 
 
 def intake_kickoff(
     text: str,
     settings: Settings,
     pending: PendingCollect | None = None,
-) -> KickoffParsed | KickoffCollecting | KickoffFailed | None:
+    *,
+    account: UserRecord | None = None,
+) -> KickoffParsed | KickoffCollecting | KickoffFailed | KickoffBlocked | None:
     normalized = " ".join(text.split())
     if not normalized:
         if pending is None:
@@ -284,7 +297,7 @@ def intake_kickoff(
     if pending is None:
         if extracted.intent is None:
             return None
-        return _decide(extracted, settings, verb=extracted.intent)
+        return _decide(extracted, settings, verb=extracted.intent, account=account)
     if pending.waiting_for == "confirm":
         if not _is_confirm_affirmative(normalized):
             return KickoffFailed(
@@ -293,7 +306,7 @@ def intake_kickoff(
             )
         merged = _merge(pending, extracted)
         return _decide(
-            merged, settings, verb=pending.verb, confirmed=True
+            merged, settings, verb=pending.verb, confirmed=True, account=account
         )
     if not _progressed(pending, extracted):
         return KickoffFailed(
@@ -303,7 +316,7 @@ def intake_kickoff(
             pending.verb,
         )
     merged = _merge(pending, extracted)
-    return _decide(merged, settings, verb=pending.verb)
+    return _decide(merged, settings, verb=pending.verb, account=account)
 
 
 def kickoff_ack_text(request: BookRequest | QuickAskRequest) -> str:
@@ -422,6 +435,7 @@ def claim_kickoff(
     path = linq_artifact_dir(
         settings.call_agent_artifacts_dir, inbound.event_id
     ) / "kickoff.json"
+    account = lookup_account(settings, inbound.sender)
     payload = {
         "event_id": str(inbound.event_id),
         "chat_id": str(inbound.chat_id),
@@ -430,6 +444,16 @@ def claim_kickoff(
         "verb": verb,
         "request": request.model_dump(mode="json"),
         "mode": request.mode.value,
+        "account": (
+            {
+                "user_id": str(account.user_id),
+                "phone": str(account.phone),
+                "minutes_included": account.minutes_included,
+                "minutes_used": account.minutes_used,
+            }
+            if account is not None
+            else None
+        ),
         "parsed_at": datetime.now(UTC).isoformat(),
     }
     return claim_path(path, payload)
@@ -586,19 +610,22 @@ def _decide(
     *,
     verb: Literal["book", "ask"],
     confirmed: bool = False,
-) -> KickoffParsed | KickoffCollecting | KickoffFailed:
-    caller = _resolve_caller(extracted.name, settings)
-    if caller is None:
-        return KickoffFailed("missing caller name", verb)
+    account: UserRecord | None = None,
+) -> KickoffParsed | KickoffCollecting | KickoffFailed | KickoffBlocked:
+    blocked = _account_gate(account)
+    if blocked is not None:
+        return KickoffBlocked(blocked, verb)
+    assert account is not None
+    caller = FirstName(account.first_name or "")
     user_id = _resolve_user_id(settings)
     if user_id is None:
         return KickoffFailed("missing user id", verb)
     if verb == "ask":
         return _decide_ask(
-            extracted, settings, caller, user_id, confirmed=confirmed
+            extracted, settings, caller, user_id, account, confirmed=confirmed
         )
     return _decide_book(
-        extracted, settings, caller, user_id, confirmed=confirmed
+        extracted, settings, caller, user_id, account, confirmed=confirmed
     )
 
 
@@ -607,6 +634,7 @@ def _decide_book(
     settings: Settings,
     caller: FirstName,
     user_id: UserId,
+    account: UserRecord,
     *,
     confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
@@ -645,6 +673,9 @@ def _decide_book(
             party_size=extracted.party_size or 0,
             time_text=extracted.time_text or "",
             constraints=extracted.constraints,
+            retain_call_artifacts=(
+                True if account.retain_call_artifacts else None
+            ),
         )
     except ValueError:
         return KickoffFailed("I need a bit more to place the call.", "book")
@@ -656,6 +687,7 @@ def _decide_ask(
     settings: Settings,
     caller: FirstName,
     user_id: UserId,
+    account: UserRecord,
     *,
     confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
@@ -691,6 +723,9 @@ def _decide_ask(
             question=Question.from_cli(kind, extracted.question_item),
             caller=caller,
             mode=_mode(settings),
+            retain_call_artifacts=(
+                True if account.retain_call_artifacts else None
+            ),
         )
     except ValueError:
         return KickoffFailed("I need a bit more to place the call.", "ask")
@@ -715,7 +750,6 @@ def _pending_from_extracted(
             else None
         ),
         question_item=extracted.question_item,
-        name=extracted.name,
     )
 
 
@@ -730,11 +764,10 @@ def _extract_fields(
         to=_extract_e164(text),
         party_size=_extract_party(text, loose=waiting_for in {"party", "party_and_time"}),
         time_text=_extract_time(text, loose=waiting_for in {"time", "party_and_time"}),
-        constraints=_extract_notes(text),
-        name=_extract_name(text),
-        question_kind=_extract_kind(text),
-        question_item=_extract_item(text),
-    )
+            constraints=_extract_notes(text),
+            question_kind=_extract_kind(text),
+            question_item=_extract_item(text),
+        )
 
 
 def _extract_cli(text: str) -> _Extracted | None:
@@ -751,7 +784,6 @@ def _extract_cli(text: str) -> _Extracted | None:
             party_size=party,
             time_text=book.group("time").strip(),
             constraints=_optional_text(book.group("notes")),
-            name=_optional_text(book.group("name")),
             question_kind=None,
             question_item=None,
         )
@@ -772,7 +804,6 @@ def _extract_cli(text: str) -> _Extracted | None:
         party_size=None,
         time_text=None,
         constraints=None,
-        name=_optional_text(matched.group("name")),
         question_kind=kind,
         question_item=item,
     )
@@ -840,13 +871,6 @@ def _extract_time(text: str, *, loose: bool) -> str | None:
     return stripped
 
 
-def _extract_name(text: str) -> str | None:
-    matched = _NAME_RE.search(text)
-    if matched is None:
-        return None
-    return _optional_text(matched.group(1))
-
-
 def _extract_notes(text: str) -> str | None:
     matched = _NOTES_RE.search(text)
     if matched is None:
@@ -899,7 +923,6 @@ def _merge(pending: PendingCollect, extracted: _Extracted) -> _Extracted:
         party_size=extracted.party_size or pending.party_size,
         time_text=extracted.time_text or pending.time_text,
         constraints=extracted.constraints or pending.constraints,
-        name=extracted.name or pending.name,
         question_kind=kind,
         question_item=extracted.question_item or pending.question_item,
     )
@@ -953,16 +976,17 @@ def _waiting_for_value(raw: object) -> WaitingFor:
     return "to"
 
 
-def _resolve_caller(
-    name: str | None, settings: Settings
-) -> FirstName | None:
-    raw = (name or settings.linq_kickoff_caller or "").strip()
+def _account_gate(account: UserRecord | None) -> str | None:
+    if account is None:
+        return NO_ACCOUNT_TEXT
+    raw = (account.first_name or "").strip()
     if not raw:
-        return None
+        return NO_NAME_TEXT
     try:
-        return FirstName(raw)
+        FirstName(raw)
     except ValueError:
-        return None
+        return NO_NAME_TEXT
+    return None
 
 
 def _resolve_user_id(settings: Settings) -> UserId | None:

@@ -34,12 +34,18 @@ run "$CLI" --help | grep -q "verify-message" || { echo "verify-message verb miss
 run "$CLI" --help | grep -q "verify-webhooks" || { echo "verify-webhooks verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-persistence" || { echo "verify-persistence verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-linq-call" || { echo "verify-linq-call verb missing from --help"; exit 1; }
+run "$CLI" --help | grep -q "account" || { echo "account verb missing from --help"; exit 1; }
 
 step "did provision twice returns the same DID"
 FIRST="$(run "$CLI" did provision --user default | tail -n1)"
 SECOND="$(run "$CLI" did provision --user default | tail -n1)"
 [ "$FIRST" = "$SECOND" ] || { echo "provision is not idempotent: $FIRST vs $SECOND"; exit 1; }
 run "$CLI" did list
+
+step "account upsert then get and list"
+run "$CLI" account upsert --phone +14155552671 --name Nathan --user acctnathan
+run "$CLI" account get --phone +14155552671
+run "$CLI" account list
 
 step "quick-ask stub writes a result then wipes artifacts"
 RESULT_JSON="$(run "$CLI" quick-ask --to +14155552671 --ask hours --name Nathan | tail -n1)"
@@ -109,7 +115,7 @@ grep -q "6/6 passed" "$EVIDENCE/verify-message.txt"
 
 step "verify-linq-call stub checklist"
 run "$CLI" verify-linq-call | tee "$EVIDENCE/verify-linq-call.txt" >/dev/null
-grep -q "9/9 passed" "$EVIDENCE/verify-linq-call.txt"
+grep -q "11/11 passed" "$EVIDENCE/verify-linq-call.txt"
 
 step "linq register-webhook fails loud without token"
 set +e
@@ -124,7 +130,7 @@ grep -q "5/5 passed" "$EVIDENCE/verify-webhooks.txt"
 
 step "verify-persistence stub checklist"
 run "$CLI" verify-persistence | tee "$EVIDENCE/verify-persistence.txt" >/dev/null
-grep -q "3/3 passed" "$EVIDENCE/verify-persistence.txt"
+grep -q "4/4 passed" "$EVIDENCE/verify-persistence.txt"
 grep -q "sqlite ledger + local artifacts" "$EVIDENCE/verify-persistence.txt"
 
 step "verify-persistence rejects partial R2"

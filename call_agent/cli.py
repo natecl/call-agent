@@ -5,6 +5,11 @@ import json
 
 import typer
 
+from .accounts import (
+    AccountConflict,
+    AccountWrite,
+    open_accounts,
+)
 from .config import Settings
 from .domain import (
     BookRequest,
@@ -56,8 +61,10 @@ from .verify_webhooks import (
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
 did_app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
+account_app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
 linq_app = typer.Typer(no_args_is_help=True, rich_markup_mode=None)
 app.add_typer(did_app, name="did")
+app.add_typer(account_app, name="account")
 app.add_typer(linq_app, name="linq")
 
 LIVE_GATE_MESSAGE = (
@@ -117,6 +124,75 @@ def did_list() -> None:
             f"{record.user_id:<10} "
             f"{str(record.did or ''):<16} "
             f"{record.status}"
+        )
+
+
+@account_app.command("upsert")
+def account_upsert(
+    phone: str = typer.Option(..., "--phone"),
+    name: str | None = typer.Option(None, "--name"),
+    retain: bool = typer.Option(False, "--retain"),
+    minutes: int = typer.Option(0, "--minutes"),
+    user: str | None = typer.Option(None, "--user"),
+    plan: str | None = typer.Option(None, "--plan"),
+) -> None:
+    settings = Settings()
+    try:
+        write = AccountWrite(
+            phone=E164(phone),
+            first_name=name,
+            user_id=UserId(user) if user is not None else None,
+            plan=plan,
+            minutes_included=minutes,
+            retain_call_artifacts=retain,
+        )
+        result = open_accounts(settings).upsert(write)
+    except (ValueError, PersistenceConfigError) as error:
+        if isinstance(error, PersistenceConfigError):
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+        if isinstance(error, AccountConflict):
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1) from error
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(json.dumps(result.record.model_dump(mode="json"), sort_keys=True))
+
+
+@account_app.command("get")
+def account_get(
+    phone: str = typer.Option(..., "--phone"),
+) -> None:
+    settings = Settings()
+    try:
+        parsed = E164(phone)
+        record = open_accounts(settings).get_by_phone(parsed)
+    except PersistenceConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint="--phone") from error
+    if record is None:
+        typer.echo(f"no account for {phone}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(record.model_dump(mode="json"), sort_keys=True))
+
+
+@account_app.command("list")
+def account_list() -> None:
+    settings = Settings()
+    try:
+        records = open_accounts(settings).list()
+    except PersistenceConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"{'USER':<16} {'PHONE':<16} {'NAME':<12} MINUTES RETAIN")
+    for record in records:
+        typer.echo(
+            f"{str(record.user_id):<16} "
+            f"{str(record.phone):<16} "
+            f"{(record.first_name or '-'):<12} "
+            f"{record.minutes_included:<7} "
+            f"{'on' if record.retain_call_artifacts else 'off'}"
         )
 
 
