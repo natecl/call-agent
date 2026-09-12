@@ -36,3 +36,4 @@ Preconditions:
 - `from` in `dial.json` is the user's ledger number. A dirty ledger shows a different number than `+15555550100`.
 - A one-shot stub is a broken book path. `verify-book` fails `multi_turn_booking` on that stub.
 - The later live target is `+17272701288`. This skill never dials it.
+- CLI `book --live` hosts CallHandle in this process. Set both `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` to the same tunnel to `CALL_AGENT_PORT` on the laptop for `stream_url` and per-call `webhook_url`. Process env overrides `.env`. The Call Control application webhook can stay on the Worker. Fly `https://hidden-beacon-080.fly.dev` is a different process with no BOOK entry and is not valid for Mac CLI live. The verb fails before dial if webhook host != stream host after wss/https normalize, or if `{PUBLIC_BASE_URL}/health` is not HTTP 200 with this process's `serve_token`. A printed trycloudflare URL is not enough.

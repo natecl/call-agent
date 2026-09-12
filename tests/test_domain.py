@@ -51,6 +51,8 @@ from call_agent.domain import (
     Speaker,
     StreamId,
     TelnyxAnswered,
+    TelnyxRinging,
+    TimeoutEvent,
     Transcript,
     Turn,
     UserId,
@@ -60,6 +62,7 @@ from call_agent.domain import (
     build_book_instructions,
     build_instructions,
     reduce,
+    timeout_failure_reason,
 )
 from call_agent.telnyx import parse_media_frame
 
@@ -659,3 +662,52 @@ def test_book_result_is_discriminated_and_confirmation_is_nonempty() -> None:
             party_size=0,
             time_text="Friday 7pm",
         )
+
+
+def test_timeout_after_dial_without_webhooks_or_media_flags_delivery(
+    reduce_settings: ReduceSettings,
+) -> None:
+    event = TimeoutEvent(
+        webhook_host="specs-publicity-singing-money.trycloudflare.com",
+        stream_host="specs-publicity-singing-money.trycloudflare.com",
+    )
+    call, effects = reduce(make_call(), event, reduce_settings)
+    result = effects[-1].result
+    reason = timeout_failure_reason(make_call(), event)
+
+    assert "webhook/media delivery miss" in result.reason
+    assert "specs-publicity-singing-money.trycloudflare.com" in result.reason
+    assert "GPT-Live" in result.reason
+    assert "speak_first" in result.reason
+    assert result.status == "failed"
+    assert call.finished is True
+    assert reason == result.reason
+
+
+def test_timeout_after_ringing_without_media_flags_media_delivery(
+    reduce_settings: ReduceSettings,
+) -> None:
+    event = TimeoutEvent(
+        webhook_host="tunnel.example.test",
+        stream_host="tunnel.example.test",
+    )
+    ringing = make_call().model_copy(update={"telnyx": TelnyxRinging()})
+    _, effects = reduce(ringing, event, reduce_settings)
+
+    assert "media delivery miss" in effects[-1].result.reason
+    assert "webhook/media delivery miss" not in effects[-1].result.reason
+
+
+def test_timeout_during_active_call_stays_generic(
+    reduce_settings: ReduceSettings,
+) -> None:
+    _, effects = reduce(
+        speaking_call(),
+        TimeoutEvent(
+            webhook_host="tunnel.example.test",
+            stream_host="tunnel.example.test",
+        ),
+        reduce_settings,
+    )
+
+    assert effects[-1].result.reason == "event timeout"

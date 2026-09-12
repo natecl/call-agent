@@ -13,7 +13,7 @@ Live Worker origin:
 
 Closed alpha L1 testers text Treena through Linq. Builder can register the Linq URL now. `GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. The hook does not send SMS. Telnyx always-on stays on `/webhooks/telnyx`.
 
-Put the Telnyx URL on the Call Control application and on `PUBLIC_WEBHOOK_URL`. The laptop tunnel is interim only. This Worker origin is the prod webhook path.
+Put the Telnyx URL on the Call Control application `webhook_event_url`. That application URL is live at `https://call-agent-webhooks.usetreena.workers.dev/webhooks/telnyx`. CLI `--live` still needs a laptop tunnel for per-call `webhook_url` and `stream_url`; set both `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` to that same tunnel so those hit the local BOOK process. Process env overrides `.env`. The Worker does not terminate media (`/media-stream` is 501). The Worker origin is the laptop-off inbox, not the Mac CLI live media host.
 
 A wrangler `--temporary` preview can expire unless the account is claimed. Claiming keeps this same `*.usetreena.workers.dev` hostname. Some datacenter POSTs currently hit a Cloudflare managed challenge before the Worker. Linq's origin may still land. `GET /health` with a normal client UA returns `{"ok":true}`.
 
@@ -57,4 +57,4 @@ Remote proof checks wiring. Unsigned `POST /webhooks/telnyx` must be 401. If it 
 
 ## Media
 
-`GET` or `POST /media-stream` returns 501 `media_not_terminated_here`. Telnyx still needs a reachable `wss://` host. Keep `PUBLIC_BASE_URL` on the laptop tunnel or a future always-on media host. Do not point media at this Worker.
+`GET` or `POST /media-stream` returns 501 `media_not_terminated_here`. Telnyx still needs a reachable `wss://` host. Keep `PUBLIC_BASE_URL` on the laptop tunnel or a future always-on media host. Do not point media at this Worker. CLI `book --live` / `quick-ask --live` cannot use Fly `PUBLIC_BASE_URL`; that host is a different process with no BOOK entry.

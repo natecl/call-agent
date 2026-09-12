@@ -2,7 +2,10 @@ import asyncio
 import base64
 import json
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from call_agent.config import Settings
 from call_agent.domain import (
@@ -13,6 +16,7 @@ from call_agent.domain import (
     Codec,
     ConversationOpen,
     DialPlaced,
+    DialPlacedEvent,
     DialSpec,
     E164,
     FirstName,
@@ -33,7 +37,15 @@ from call_agent.domain import (
     UserId,
 )
 from call_agent.gpt_live import StubGptLive
-from call_agent.runtime import CallHandle, Ports, RunDir, run_quick_ask
+from call_agent.runtime import (
+    CallHandle,
+    Ports,
+    RunDir,
+    assert_live_dial_origins,
+    normalized_public_host,
+    public_url_host,
+    run_quick_ask,
+)
 from call_agent.telnyx import StubTelnyxHttp, parse_media_frame
 
 AUDIO = base64.b64encode(bytes(640)).decode()
@@ -279,3 +291,213 @@ async def test_dial_uses_worker_webhook_and_tunnel_media(
         "https://call-agent-webhooks.example.workers.dev/webhooks/telnyx"
     )
     assert dial["stream_url"] == "wss://tunnel.example.test/media-stream"
+
+
+def test_public_url_host_strips_path_and_keeps_port() -> None:
+    assert public_url_host(
+        "https://specs-publicity-singing-money.trycloudflare.com/webhooks/telnyx"
+    ) == "specs-publicity-singing-money.trycloudflare.com"
+    assert public_url_host("wss://tunnel.example.test:8443/media-stream") == (
+        "tunnel.example.test:8443"
+    )
+
+
+class DialOnlyTelnyx:
+    def __init__(self) -> None:
+        self.hung_up = None
+
+    def dial(self, spec: DialSpec) -> DialPlacedEvent:
+        return DialPlacedEvent(
+            call_control_id="v3:timeout",
+            call_leg_id="leg-1",
+            call_session_id="session-1",
+        )
+
+    def hangup(self, call_control_id: str) -> None:
+        self.hung_up = call_control_id
+
+
+class SilentGptLive:
+    async def start(self, spec: object) -> None:
+        return None
+
+    async def speak_first(self, line: str) -> None:
+        return None
+
+    async def append_audio(self, payload_b64: str) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_timeout_after_dial_journals_delivery_hosts(
+    settings: Settings,
+) -> None:
+    timed = Settings(
+        _env_file=None,
+        call_agent_db_path=settings.call_agent_db_path,
+        call_agent_artifacts_dir=settings.call_agent_artifacts_dir,
+        event_timeout_s=0.05,
+    )
+    request = QuickAskRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        question=Question.from_cli(QuestionType.HOURS, None),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+    )
+    call = Call(
+        run_id=RunId("run-timeout"),
+        request=request,
+        from_did=E164("+15555550100"),
+    )
+    queue: asyncio.Queue[CallEvent] = asyncio.Queue()
+    telnyx = DialOnlyTelnyx()
+    handle = CallHandle(
+        call=call,
+        queue=queue,
+        ports=Ports(
+            telnyx_http=telnyx,
+            telnyx_media=HeldMarks(queue.put_nowait),
+            gpt_live=SilentGptLive(),
+        ),
+        run_dir=RunDir(timed.call_agent_artifacts_dir, "run-timeout"),
+        settings=timed,
+        dial_spec=DialSpec(
+            connection_id="connection-1",
+            to=request.to,
+            from_did=call.from_did,
+            stream_url="wss://specs-publicity-singing-money.trycloudflare.com/media-stream",
+            webhook_url="https://specs-publicity-singing-money.trycloudflare.com/webhooks/telnyx",
+            codec=Codec.L16,
+            client_state=ClientState(
+                run_id=call.run_id, user_id=request.user_id
+            ),
+        ),
+    )
+
+    result = await handle.run()
+    rows = [
+        json.loads(line)
+        for line in (handle.run_dir.path / "events.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    timeout_row = next(row for row in rows if row.get("kind") == "timeout")
+
+    assert result.status == "failed"
+    assert "webhook/media delivery miss" in result.reason
+    assert "specs-publicity-singing-money.trycloudflare.com" in result.reason
+    assert timeout_row["webhook_host"] == (
+        "specs-publicity-singing-money.trycloudflare.com"
+    )
+    assert timeout_row["stream_host"] == (
+        "specs-publicity-singing-money.trycloudflare.com"
+    )
+    assert telnyx.hung_up == "v3:timeout"
+
+
+def test_normalized_public_host_strips_default_https_and_wss_ports() -> None:
+    assert (
+        normalized_public_host(
+            "https://tunnel.example.test/webhooks/telnyx"
+        )
+        == "tunnel.example.test"
+    )
+    assert (
+        normalized_public_host("wss://tunnel.example.test:443/media-stream")
+        == "tunnel.example.test"
+    )
+    assert (
+        normalized_public_host("HTTPS://Tunnel.Example.Test")
+        == "tunnel.example.test"
+    )
+    assert (
+        normalized_public_host("wss://tunnel.example.test:8443/media-stream")
+        == "tunnel.example.test:8443"
+    )
+
+
+def test_assert_live_dial_origins_requires_webhook_url() -> None:
+    with pytest.raises(ValueError, match="PUBLIC_WEBHOOK_URL"):
+        assert_live_dial_origins(
+            Settings(
+                _env_file=None,
+                public_base_url="https://tunnel.example.test",
+            )
+        )
+    with pytest.raises(ValueError, match="PUBLIC_WEBHOOK_URL"):
+        assert_live_dial_origins(
+            Settings(
+                _env_file=None,
+                public_base_url="https://tunnel.example.test",
+                public_webhook_url="  ",
+            )
+        )
+
+
+def test_assert_live_dial_origins_rejects_fly_media_and_stale_tunnel() -> None:
+    with pytest.raises(ValueError, match="webhook host"):
+        assert_live_dial_origins(
+            Settings(
+                _env_file=None,
+                public_base_url="https://hidden-beacon-080.fly.dev",
+                public_webhook_url="https://stale-tunnel.trycloudflare.com",
+            )
+        )
+
+
+def test_assert_live_dial_origins_accepts_https_and_wss_same_host() -> None:
+    assert_live_dial_origins(
+        Settings(
+            _env_file=None,
+            public_base_url="https://tunnel.example.test",
+            public_webhook_url="https://tunnel.example.test:443",
+        )
+    )
+
+
+def test_settings_process_env_overrides_dotenv_webhook_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_WEBHOOK_URL", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "PUBLIC_BASE_URL=https://tunnel.trycloudflare.com\n"
+        "PUBLIC_WEBHOOK_URL=https://tunnel.trycloudflare.com\n"
+    )
+    monkeypatch.setenv(
+        "PUBLIC_WEBHOOK_URL", "https://hidden-beacon-080.fly.dev"
+    )
+    settings = Settings(_env_file=env_file)
+    assert settings.public_base_url == "https://tunnel.trycloudflare.com"
+    assert settings.public_webhook_url == "https://hidden-beacon-080.fly.dev"
+    with pytest.raises(ValueError, match="webhook host"):
+        assert_live_dial_origins(settings)
+
+
+async def test_run_call_live_fails_when_webhook_host_diverges(
+    settings: Settings,
+) -> None:
+    split = Settings(
+        _env_file=None,
+        call_agent_db_path=settings.call_agent_db_path,
+        call_agent_artifacts_dir=settings.call_agent_artifacts_dir,
+        quick_ask_live=True,
+        telnyx_api_key="test-key",
+        telnyx_connection_id="connection-1",
+        openai_api_key="test-openai",
+        public_base_url="https://hidden-beacon-080.fly.dev",
+        public_webhook_url="https://stale-tunnel.trycloudflare.com",
+    )
+    request = QuickAskRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        question=Question.from_cli(QuestionType.HOURS, None),
+        caller=FirstName("Nathan"),
+        mode=Mode.LIVE,
+    )
+    with pytest.raises(ValueError, match="webhook host"):
+        await run_quick_ask(request, split)

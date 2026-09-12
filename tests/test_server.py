@@ -1,14 +1,18 @@
 import asyncio
 import base64
 import json
+import socket
 import struct
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from call_agent.cli import _run_request
 from call_agent.config import Settings
 from call_agent.domain import (
+    BookRequest,
     Call,
     CallControlId,
     CallEvent,
@@ -32,9 +36,27 @@ from call_agent.domain import (
     WebhookEvent,
 )
 from call_agent.runtime import BOOK, CallHandle, RunDir, build_ports
-from call_agent.server import app
+from call_agent.server import (
+    app,
+    probe_live_ingress,
+    serve_in_process,
+    set_serve_token,
+)
 
 CALL_CONTROL_ID = CallControlId("v3:abc")
+
+
+def unused_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@pytest.fixture(autouse=True)
+def reset_serve_token() -> Iterator[None]:
+    set_serve_token(None)
+    yield
+    set_serve_token(None)
 
 
 def test_health_returns_ok() -> None:
@@ -262,3 +284,203 @@ def test_streaming_failed_webhook_hangs_up_and_fails_the_call(
         "audio_ref": "v3:abc/audio/inbound.wav",
         "reason": "Telnyx media streaming failed: connection_failed",
     }
+
+
+def unknown_call_webhook() -> dict[str, object]:
+    return {
+        "data": {
+            "event_type": "call.initiated",
+            "id": "webhook-unknown-1",
+            "occurred_at": "2026-09-12T00:00:00Z",
+            "record_type": "event",
+            "payload": {
+                "call_control_id": "v3:unknown-call",
+                "call_leg_id": "leg-unknown",
+                "call_session_id": "session-unknown",
+                "connection_id": "connection-1",
+                "client_state": "opaque",
+            },
+        }
+    }
+
+
+def test_unknown_call_webhook_returns_404() -> None:
+    client = TestClient(app)
+    response = client.post("/webhooks/telnyx", json=unknown_call_webhook())
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "unknown call"}
+
+
+def live_settings(
+    workspace_settings: Settings, port: int, **overrides: object
+) -> Settings:
+    public_base = f"http://127.0.0.1:{port}"
+    values: dict[str, object] = {
+        "call_agent_db_path": workspace_settings.call_agent_db_path,
+        "call_agent_artifacts_dir": workspace_settings.call_agent_artifacts_dir,
+        "port": port,
+        "quick_ask_live": True,
+        "telnyx_api_key": "test-key",
+        "telnyx_connection_id": "connection-1",
+        "openai_api_key": "test-openai",
+        "public_base_url": public_base,
+        "public_webhook_url": public_base,
+        "live_ingress_timeout_s": 0.4,
+    }
+    values.update(overrides)
+    if "public_webhook_url" not in overrides:
+        values["public_webhook_url"] = values["public_base_url"]
+    return Settings(_env_file=None).model_copy(update=values)
+
+
+async def test_serve_in_process_returns_only_after_health_accepts(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    running = await serve_in_process(live_settings(settings, port))
+    try:
+        assert running.server.started is True
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"http://127.0.0.1:{port}/health")
+        payload = response.json()
+        assert response.status_code == 200
+        assert payload["ok"] is True
+        assert payload["serve_token"] == running.serve_token
+    finally:
+        await running.stop()
+    assert TestClient(app).get("/health").json() == {"ok": True}
+
+
+async def test_probe_live_ingress_accepts_this_process_health_and_media(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    public_base = f"http://127.0.0.1:{port}"
+    running = await serve_in_process(live_settings(settings, port))
+    try:
+        await probe_live_ingress(
+            public_base,
+            running.serve_token,
+            timeout_s=2.0,
+        )
+    finally:
+        await running.stop()
+
+
+async def test_probe_live_ingress_rejects_ok_health_from_another_process(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    running = await serve_in_process(live_settings(settings, port))
+    try:
+        with pytest.raises(ValueError, match="serve_token does not match"):
+            await probe_live_ingress(
+                f"http://127.0.0.1:{port}",
+                "not-this-process",
+                timeout_s=0.4,
+            )
+    finally:
+        await running.stop()
+
+
+async def test_probe_live_ingress_retries_until_health_returns_token() -> None:
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            return httpx.Response(503, json={"ok": False})
+        return httpx.Response(
+            200, json={"ok": True, "serve_token": "settled-token"}
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await probe_live_ingress(
+            "https://tunnel.example.test",
+            "settled-token",
+            timeout_s=2.0,
+            client=client,
+            probe_websocket=False,
+        )
+    finally:
+        await client.aclose()
+    assert attempts["n"] == 3
+
+
+def _live_book_request() -> BookRequest:
+    return BookRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.LIVE,
+        party_size=2,
+        time_text="Friday 7pm",
+    )
+
+
+def _port_is_closed(port: int) -> bool:
+    with socket.socket() as sock:
+        sock.settimeout(0.2)
+        try:
+            sock.connect(("127.0.0.1", port))
+        except OSError:
+            return True
+    return False
+
+
+async def test_live_request_fails_loud_when_public_base_misses_this_process(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    live = live_settings(
+        settings,
+        port,
+        public_base_url="http://127.0.0.1:9",
+        live_ingress_timeout_s=0.3,
+    )
+    with pytest.raises(ValueError, match="did not reach this process"):
+        await _run_request(_live_book_request(), live)
+
+
+async def test_live_request_fails_loud_when_webhook_host_diverges(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    live = live_settings(
+        settings,
+        port,
+        public_base_url="https://hidden-beacon-080.fly.dev",
+        public_webhook_url="https://stale-tunnel.trycloudflare.com",
+    )
+    with pytest.raises(ValueError, match="webhook host"):
+        await _run_request(_live_book_request(), live)
+    assert _port_is_closed(port)
+
+
+async def test_live_request_fails_loud_when_webhook_url_unset(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    live = live_settings(settings, port, public_webhook_url=None)
+    with pytest.raises(ValueError, match="PUBLIC_WEBHOOK_URL"):
+        await _run_request(_live_book_request(), live)
+    assert _port_is_closed(port)
+
+
+async def test_unknown_call_webhook_returns_404_on_in_process_listener(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    running = await serve_in_process(live_settings(settings, port))
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://127.0.0.1:{port}/webhooks/telnyx",
+                json=unknown_call_webhook(),
+            )
+        assert response.status_code == 404
+        assert response.json() == {"detail": "unknown call"}
+    finally:
+        await running.stop()

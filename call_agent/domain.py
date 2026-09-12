@@ -704,6 +704,8 @@ class LiveErrorEvent(FrozenModel):
 
 class TimeoutEvent(FrozenModel):
     kind: Literal["timeout"] = "timeout"
+    webhook_host: str | None = None
+    stream_host: str | None = None
 
 
 class HangupTrailElapsedEvent(FrozenModel):
@@ -976,6 +978,38 @@ def _hang_up(call: Call, via: HangupVia) -> tuple[Call, tuple[Effect, ...]]:
     )
 
 
+def timeout_failure_reason(call: Call, event: TimeoutEvent) -> str:
+    webhook_host = event.webhook_host or "unknown"
+    stream_host = event.stream_host or "unknown"
+    hosts = f"webhook_host={webhook_host}, stream_host={stream_host}"
+    if (
+        isinstance(call.dial, DialPlaced)
+        and isinstance(call.telnyx, TelnyxAwaiting)
+        and isinstance(call.media, MediaAwaiting)
+        and isinstance(call.live, LiveDormant)
+    ):
+        return (
+            "event timeout: Telnyx placed the dial but never delivered "
+            f"webhooks or media to this process ({hosts}). "
+            "This is a webhook/media delivery miss, not GPT-Live, "
+            "speak_first, or 8 kHz audio. CLI --live hosts CallHandle "
+            "in this process; PUBLIC_BASE_URL must be a tunnel to it. "
+            "A Fly origin is a different process with no BOOK entry."
+        )
+    if (
+        isinstance(call.dial, DialPlaced)
+        and isinstance(call.media, MediaAwaiting)
+        and isinstance(call.live, LiveDormant)
+    ):
+        return (
+            "event timeout: Telnyx webhooks reached this process but media "
+            f"never started ({hosts}). Telnyx did not open /media-stream "
+            "at that host. This is a media delivery miss, not GPT-Live "
+            "or speak_first."
+        )
+    return "event timeout"
+
+
 def _fail(
     call: Call, reason: str
 ) -> tuple[Call, tuple[Effect, ...]]:
@@ -1183,6 +1217,6 @@ def reduce(
         return _fail(call, event.message)
 
     if isinstance(event, TimeoutEvent):
-        return _fail(call, "event timeout")
+        return _fail(call, timeout_failure_reason(call, event))
 
     return call, ()
