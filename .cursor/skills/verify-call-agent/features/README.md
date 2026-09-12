@@ -8,7 +8,7 @@ Read this index before driving, then use the matching feature file as the recipe
 
 - The package is installed in `.venv` (`.venv/bin/pip install -e ".[dev]"`).
 - `CALL_AGENT_DB_PATH` and `CALL_AGENT_ARTIFACTS_DIR` point under `/tmp/verify-call-agent-$RUN_ID/` so concurrent runs share nothing.
-- `QUICK_ASK_LIVE` is `0` or unset, and `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `OPENAI_API_KEY`, and `PUBLIC_BASE_URL` are unset.
+- `QUICK_ASK_LIVE` is `0` or unset, and `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `OPENAI_API_KEY`, `PUBLIC_BASE_URL`, `LINQ_API_TOKEN`, `LINQ_WEBHOOK_SIGNING_SECRET`, `LINQ_WEBHOOK_URL`, and `PUBLIC_WEBHOOK_URL` are unset.
 - No ledger row exists yet for `--user default`.
 
 ## Driving conventions
@@ -39,6 +39,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
 - [Verify quick-ask](./verify-quick-ask.md) covers the five-check lever in stub mode and its exit codes.
+- [Verify message](./verify-message.md) covers the MessagingPort + Linq V3 stub lever and the register-webhook gate.
 - [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
 - [Linq inbound (closed alpha)](./linq-inbound.md) covers the iMessage L1 ingress hook. SMS stays off.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.

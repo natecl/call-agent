@@ -6,7 +6,7 @@ This file lists what `main` implements today. It is not a plan. It is a standing
 
 `shipped` means stub-proven on main. CI or pytest exercises it.
 
-`gated` means live adapters and `--live` or `--mode live` exist in code. Live mode needs `QUICK_ASK_LIVE=1` plus keys listed in `.env.example`. `README.md` states the live path has not been exercised against Telnyx or OpenAI from this repository.
+`gated` means a live adapter or live CLI verb exists in code and refuses to run without its keys. Telnyx live needs `QUICK_ASK_LIVE=1` plus the Telnyx and OpenAI keys in `.env.example`. Linq live send and `linq register-webhook` need `LINQ_API_TOKEN`. Register also needs `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL`. `README.md` states the Telnyx live path has not been exercised from this repository.
 
 `not shipped` means placeholder, phase 2, or out of scope. The function may exist and raise.
 
@@ -55,19 +55,20 @@ CLI verb `verify-quick-ask` calls `verify_quick_ask`.
 
 ## verify-call-agent
 
-The Cursor skill drives the CLI verbs in stub mode and never sets live keys.
+The Cursor skill drives the stub CLI verbs and never sets live keys.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `webhooks`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `verify-message`, `webhooks`, `linq-inbound`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
 | `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
-| `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
+| `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ACK ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
 | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the five stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
-| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
+| `.cursor/skills/verify-call-agent/features/verify-message.md` | shipped | Covers the five MessagingPort checks and the register-webhook gate. | `.cursor/skills/verify-call-agent/features/verify-message.md` |
+| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-message`, `verify-webhooks`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
 
 ## Always-on webhooks
 
@@ -92,11 +93,30 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 | --- | --- | --- | --- |
 | live Telnyx and OpenAI | gated | Defines `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive` for `--live` and `--mode live`. | `call_agent/telnyx.py` `LiveTelnyxHttp` `LiveTelnyxMedia`. `call_agent/gpt_live.py` `LiveGptLive`. `README.md` |
 
+## MessagingPort and Linq
+
+This section is the inventory for the current MessagingPort implementation. Update it when the port, adapter, verifier, or webhook path changes.
+
+Telnyx owns PSTN calls. Linq Partner API V3 owns the closed-alpha iMessage kickoff thread. SMS stays off.
+
+Closed-alpha testers text Treena on this Linq path. The sending line is the sandbox DID (`LINQ_FROM_E164`; sandbox has used `+12138653024`). That is not a public landing claim and not a blue-bubble marketing claim. Outbound `message.parts` text from `+12138653024` to `+17272701288` landed on Builder's box; that prove is outside this repository. The Workers inbound URL is live and the Linq subscription is registered. The Worker route is ACK-only (`implemented:false`); this repo owns HMAC verify and `message.received` mapping.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `MessagingPort` | shipped | Protocol `send` / `receive` over chat `parts`, not an SMS body. | `call_agent/messaging.py` `MessagingPort` `OutboundChat` `InboundMessage`. `tests/test_messaging.py` `test_stub_send_and_receive_round_trip` |
+| Linq V3 outbound stub | shipped | `StubLinq.send` records `POST /chats` with `preferred_service: iMessage` and `message.parts` text. | `call_agent/linq.py` `serialize_outbound` `StubLinq`. `tests/test_messaging.py` `test_text_chat_is_parts_not_sms_body`. `call_agent/verify_message.py` `stub_send` |
+| Linq V3 live send | gated | Closed-alpha outbound on the sandbox line. `LiveLinqHttp` posts the same JSON and fails loud without `LINQ_API_TOKEN`. `kickoff_from_settings` fails loud without `LINQ_FROM_E164`. This repository has not live-sent. Builder-box prove used `+12138653024` → `+17272701288`. | `call_agent/linq.py` `LiveLinqHttp` `linq_from` `kickoff_from_settings`. `tests/test_messaging.py` `test_live_constructor_fails_without_token` `test_kickoff_from_settings_requires_from` `test_live_send_posts_chats_parts_shape`. `docs/linq.md` |
+| Linq V3 inbound | shipped | L1 path: `POST /webhooks/linq` and `POST /linq/webhook` verify Standard Webhooks on raw bytes using `LINQ_WEBHOOK_SIGNING_SECRET` and map `message.received` into `InboundMessage`. Missing secret or bad signature is 401. `message.sent` / `delivered` / `read` / `failed` and SMS are ignored. Worker edge is ACK-only; this process owns the map. | `call_agent/linq.py` `parse_inbound` `verify_linq_signature`. `call_agent/server.py` `process_linq_webhook`. `tests/test_messaging.py` `test_signature_accepts_good_and_rejects_bad` `test_linq_webhook_route_verifies_signature` `test_linq_webhook_route_fails_without_secret` `test_receive_ignores_sms_and_non_message_events` |
+| `verify-message` | shipped | Five stub checks: send shape, inbound map, signature, live token gate, iMessage-only. CI runs the CLI verb. | `call_agent/verify_message.py` `verify_message`. `call_agent/cli.py` `verify_message_command`. `.github/workflows/ci.yml`. `tests/test_cli.py` `test_verify_message_stub_exits_zero`. `.cursor/skills/verify-call-agent/features/verify-message.md` |
+| `linq register-webhook` | gated | Closed-alpha subscription `4c1ad6c6-d674-4fa2-b63a-ca947f2d9b7c` is already registered. The verb still `POST /webhook-subscriptions` when `LINQ_API_TOKEN` and `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL` are set, and prints `signing_secret` to store as `LINQ_WEBHOOK_SIGNING_SECRET`. Fails loud if token or URL is missing. | `call_agent/cli.py` `linq_register_webhook`. `tests/test_cli.py` `test_linq_register_webhook_fails_without_token` `test_linq_register_webhook_fails_without_url` |
+| always-on Linq webhook URL | shipped | Registered Workers target `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook?version=2026-02-03`. Subscription `4c1ad6c6-d674-4fa2-b63a-ca947f2d9b7c` listens for `message.received`, `message.sent`, `message.delivered`, `message.read`, `message.failed`. Worker ACK-only. Signing secret is `LINQ_WEBHOOK_SIGNING_SECRET` on Builder's box, not in this VM. | `docs/linq.md` |
+| SMS | not shipped | No SMS adapter. Outbound pins iMessage. Inbound SMS events are ignored. | `call_agent/linq.py` `serialize_outbound` `parse_inbound`. `tests/test_messaging.py` `test_receive_ignores_sms_and_non_message_events` |
+
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Prod webhook ingress is the Worker inbox. `verify-webhooks` is the lever.
+`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever.
 
-`README.md` states "Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook. Booking, hold queues, packaging, and SMS are out of scope."
+`README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook.
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
 
@@ -107,6 +127,6 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 | `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
 | hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
-| iMessage processing | not shipped | Closed alpha inbound is the Linq hook only. No MessagingPort, no iMessage send, no transcript of the text. | `README.md`. `workers/webhooks/src/handler.ts` |
+| Worker→app Linq forward | not shipped | Worker ACKs `POST /linq/webhook`. FastAPI `process_linq_webhook` is the process path. No bridge yet. | `workers/webhooks/src/handler.ts`. `call_agent/server.py` `process_linq_webhook` |
 | Linq SMS | not shipped | Worker exposes `POST /linq/webhook` with `implemented: false`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |

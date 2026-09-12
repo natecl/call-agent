@@ -14,6 +14,7 @@ from fastapi import (
 
 from .config import Settings
 from .domain import MediaStartEvent, MediaStopEvent
+from .linq import LinqWebhookAuthError, parse_inbound, verify_linq_signature
 from .runtime import BOOK
 from .telnyx import LiveTelnyxMedia, parse_media_frame, parse_webhook
 
@@ -30,6 +31,29 @@ async def telnyx_webhook(request: Request) -> dict[str, bool]:
         raise HTTPException(status_code=404, detail="unknown call") from error
     handle.submit(event)
     return {"ok": True}
+
+
+async def process_linq_webhook(request: Request) -> dict[str, bool]:
+    body = await request.body()
+    settings = Settings()
+    if not settings.linq_webhook_signing_secret:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        verify_linq_signature(
+            settings.linq_webhook_signing_secret,
+            body,
+            request.headers,
+        )
+    except LinqWebhookAuthError as error:
+        raise HTTPException(status_code=401, detail="unauthorized") from error
+    inbound = parse_inbound(body)
+    if inbound is None:
+        return {"ok": True, "ignored": True}
+    return {"ok": True}
+
+
+app.add_api_route("/webhooks/linq", process_linq_webhook, methods=["POST"])
+app.add_api_route("/linq/webhook", process_linq_webhook, methods=["POST"])
 
 
 @app.websocket("/media-stream")

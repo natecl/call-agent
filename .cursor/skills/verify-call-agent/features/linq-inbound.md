@@ -28,7 +28,7 @@ Preconditions:
 
 ## Gotchas
 
-- SMS is off. A 200 with `implemented: false` is the alpha ingress, not a message processor.
+- SMS is off. A 200 with `implemented: false` is the Worker ACK, not a message processor. FastAPI `POST /webhooks/linq` is the process path. Worker to app forward is a follow-up.
 - There is no `call-agent-web` map in this repository. The Worker name is `call-agent-webhooks`.
 - Pointing `PUBLIC_BASE_URL` at the Worker sends Telnyx media to `/media-stream` and gets 501.
 - A wrangler preview edge may challenge some datacenter POSTs. The register URL stays the Worker hostname.

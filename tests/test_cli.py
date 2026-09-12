@@ -164,6 +164,46 @@ def test_did_provision_twice_prints_same_did(
     assert second.stdout == first.stdout
 
 
+def test_verify_message_stub_exits_zero(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-message"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 0
+    assert "5/5 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 5
+    assert "[PASS] stub_send" in result.stdout
+    assert "[PASS] inbound_map" in result.stdout
+
+
+def test_linq_register_webhook_fails_without_token(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        ["linq", "register-webhook"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "LINQ_API_TOKEN" in result.output
+
+
+def test_linq_register_webhook_fails_without_url(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        ["linq", "register-webhook"],
+        env=environment(tmp_path) | {"LINQ_API_TOKEN": "token-from-env"},
+    )
+
+    assert result.exit_code == 2
+    assert "LINQ_WEBHOOK_URL" in result.output
+
+
 def test_verify_webhooks_stub_exits_zero(tmp_path: Path) -> None:
     result = runner.invoke(
         app,

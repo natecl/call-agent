@@ -4,7 +4,7 @@ A phone agent that calls a business on your behalf, asks one quick question, and
 
 The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a SQLite ledger of numbers. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
 
-Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook. Booking, hold queues, packaging, and SMS are out of scope.
+Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook and the `MessagingPort` process path. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, packaging, and SMS are out of scope. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
 
 ## Public webhook URL (Linq, register now)
 
@@ -12,7 +12,7 @@ Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inb
 
 `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
 
-`POST` (and `GET`) return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+`POST` (and `GET`) return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. The Worker ACKs only. FastAPI `POST /webhooks/linq` is the process path. Forward from Worker to app is a follow-up. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Run the stub verification
 
@@ -38,6 +38,14 @@ To run the test suite:
 ```bash
 pytest -q
 ```
+
+Stub messaging (no Linq token, no public URL):
+
+```bash
+call-agent verify-message
+```
+
+You should see five `[PASS]` lines and `5/5 passed`. The checks are stub send shape, inbound `message.received` mapping, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
 
 ## Use the CLI in stub mode
 

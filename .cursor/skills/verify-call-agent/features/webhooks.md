@@ -31,5 +31,5 @@ Preconditions:
 
 - There is no `call-agent-web` map in this repository. Do not invent one. The Worker name is `call-agent-webhooks`.
 - Pointing `PUBLIC_BASE_URL` at the Worker sends media to `/media-stream` and gets 501. Keep media on the tunnel.
-- The Linq 200 is a hook, not SMS.
+- The Linq 200 is a Worker ACK, not SMS. FastAPI `POST /webhooks/linq` is the process path. Worker to app forward is a follow-up.
 - The live hostname is `call-agent-webhooks.blossom-linen.workers.dev`. A wrangler temporary preview can expire unless claimed. Claiming keeps that hostname.
