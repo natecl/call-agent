@@ -6,7 +6,7 @@ This file lists what `main` implements today. It is not a plan. How to run the C
 
 `shipped` means stub-proven on main. CI or pytest exercises it.
 
-`gated` means live adapters and `--live` or `--mode live` exist in code. Live mode needs `QUICK_ASK_LIVE=1` plus keys listed in `.env.example`. `README.md` states the live path has not been exercised against Telnyx or OpenAI from this repository.
+`gated` means a live adapter or live CLI verb exists in code and refuses to run without its keys. Telnyx live needs `QUICK_ASK_LIVE=1` plus the Telnyx and OpenAI keys in `.env.example`. Linq live send and `linq register-webhook` need `LINQ_API_TOKEN`. Register also needs `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL`. `README.md` states the Telnyx live path has not been exercised from this repository.
 
 `not shipped` means placeholder, phase 2, or out of scope. The function may exist and raise.
 
@@ -77,16 +77,21 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 
 ## MessagingPort and Linq
 
-Telnyx owns PSTN calls. Linq Partner API V3 owns the peer iMessage kickoff thread. SMS stays off. Sandbox outbound `message.parts` text from `+12138653024` to `+17272701288` was confirmed on Builder's box. That is sandbox prove only, not product-live.
+This section is the inventory for the current MessagingPort implementation. Update it when the port, adapter, verifier, or webhook path changes.
+
+Telnyx owns PSTN calls. Linq Partner API V3 owns the peer iMessage kickoff thread. SMS stays off.
+
+Sandbox outbound `message.parts` text from `+12138653024` to `+17272701288` landed on Builder's box. That prove is outside this repository. It is sandbox only, not product-live and not always-on inbound.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `MessagingPort` | shipped | Protocol `send` / `receive` over chat `parts`, not an SMS body. | `call_agent/messaging.py` `MessagingPort` `OutboundChat` `InboundMessage`. `tests/test_messaging.py` `test_stub_send_and_receive_round_trip` |
-| Linq V3 outbound | shipped | Stub records `POST /chats` with `preferred_service: iMessage`. `LiveLinqHttp` sends the same JSON and fails loud without `LINQ_API_TOKEN`. | `call_agent/linq.py` `serialize_outbound` `StubLinq` `LiveLinqHttp`. `tests/test_messaging.py` `test_text_chat_is_parts_not_sms_body` `test_live_constructor_fails_without_token` `test_live_send_posts_chats_parts_shape` |
+| Linq V3 outbound stub | shipped | `StubLinq.send` records `POST /chats` with `preferred_service: iMessage` and `message.parts` text. | `call_agent/linq.py` `serialize_outbound` `StubLinq`. `tests/test_messaging.py` `test_text_chat_is_parts_not_sms_body`. `call_agent/verify_message.py` `stub_send` |
+| Linq V3 live send | gated | `LiveLinqHttp` posts the same JSON and fails loud without `LINQ_API_TOKEN`. This repository has not live-sent. Sandbox prove was on Builder's box. | `call_agent/linq.py` `LiveLinqHttp`. `tests/test_messaging.py` `test_live_constructor_fails_without_token` `test_live_send_posts_chats_parts_shape`. `docs/linq.md` |
 | Linq V3 inbound skeleton | shipped | Parses `message.received` (2026-02-03 and 2025-01-01), verifies Standard Webhooks signatures, ignores SMS. Stub-testable with no public URL. | `call_agent/linq.py` `parse_inbound` `verify_linq_signature`. `call_agent/server.py` `/webhooks/linq`. `tests/test_messaging.py` `test_signature_accepts_good_and_rejects_bad` `test_linq_webhook_route_verifies_signature` |
-| `verify-message` | shipped | Five stub checks: send shape, inbound map, signature, live token gate, iMessage-only. | `call_agent/verify_message.py` `verify_message`. `call_agent/cli.py` `verify_message_command`. `tests/test_cli.py` `test_verify_message_stub_exits_zero`. `.cursor/skills/verify-call-agent/features/verify-message.md` |
+| `verify-message` | shipped | Five stub checks: send shape, inbound map, signature, live token gate, iMessage-only. CI runs the CLI verb. | `call_agent/verify_message.py` `verify_message`. `call_agent/cli.py` `verify_message_command`. `.github/workflows/ci.yml`. `tests/test_cli.py` `test_verify_message_stub_exits_zero`. `.cursor/skills/verify-call-agent/features/verify-message.md` |
 | `linq register-webhook` | gated | `POST /webhook-subscriptions` after `LINQ_API_TOKEN` and `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL` are set. Fails loud if either is missing. | `call_agent/cli.py` `linq_register_webhook`. `tests/test_cli.py` `test_linq_register_webhook_fails_without_token` `test_linq_register_webhook_fails_without_url` |
-| always-on Linq webhook URL | not shipped | Public HTTPS URL comes from the parallel Cloudflare Workers track. Until it lands, poll `GET /api/partner/v3/chats/{chatId}/messages`. A temp tunnel is interim only. | `docs/linq.md` |
+| always-on Linq webhook URL | not shipped | No public HTTPS URL is wired in this tree. That URL comes from the Cloudflare Workers track. Until it lands, poll `GET /api/partner/v3/chats/{chatId}/messages`. A temp tunnel is interim only. | `docs/linq.md` |
 | SMS | not shipped | No SMS adapter. Outbound pins iMessage. Inbound SMS events are ignored. | `call_agent/linq.py` `serialize_outbound` `parse_inbound`. `tests/test_messaging.py` `test_receive_ignores_sms_and_non_message_events` |
 
 ## Design
