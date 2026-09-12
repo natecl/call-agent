@@ -315,6 +315,7 @@ def test_unknown_call_webhook_returns_404() -> None:
 def live_settings(
     workspace_settings: Settings, port: int, **overrides: object
 ) -> Settings:
+    public_base = f"http://127.0.0.1:{port}"
     values: dict[str, object] = {
         "call_agent_db_path": workspace_settings.call_agent_db_path,
         "call_agent_artifacts_dir": workspace_settings.call_agent_artifacts_dir,
@@ -323,10 +324,13 @@ def live_settings(
         "telnyx_api_key": "test-key",
         "telnyx_connection_id": "connection-1",
         "openai_api_key": "test-openai",
-        "public_base_url": f"http://127.0.0.1:{port}",
+        "public_base_url": public_base,
+        "public_webhook_url": public_base,
         "live_ingress_timeout_s": 0.4,
     }
     values.update(overrides)
+    if "public_webhook_url" not in overrides:
+        values["public_webhook_url"] = values["public_base_url"]
     return Settings(_env_file=None).model_copy(update=values)
 
 
@@ -405,6 +409,27 @@ async def test_probe_live_ingress_retries_until_health_returns_token() -> None:
     assert attempts["n"] == 3
 
 
+def _live_book_request() -> BookRequest:
+    return BookRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.LIVE,
+        party_size=2,
+        time_text="Friday 7pm",
+    )
+
+
+def _port_is_closed(port: int) -> bool:
+    with socket.socket() as sock:
+        sock.settimeout(0.2)
+        try:
+            sock.connect(("127.0.0.1", port))
+        except OSError:
+            return True
+    return False
+
+
 async def test_live_request_fails_loud_when_public_base_misses_this_process(
     settings: Settings,
 ) -> None:
@@ -415,17 +440,33 @@ async def test_live_request_fails_loud_when_public_base_misses_this_process(
         public_base_url="http://127.0.0.1:9",
         live_ingress_timeout_s=0.3,
     )
-    request = BookRequest(
-        user_id=UserId("user-1"),
-        to=E164("+14155552671"),
-        caller=FirstName("Nathan"),
-        mode=Mode.LIVE,
-        party_size=2,
-        time_text="Friday 7pm",
-    )
-
     with pytest.raises(ValueError, match="did not reach this process"):
-        await _run_request(request, live)
+        await _run_request(_live_book_request(), live)
+
+
+async def test_live_request_fails_loud_when_webhook_host_diverges(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    live = live_settings(
+        settings,
+        port,
+        public_base_url="https://hidden-beacon-080.fly.dev",
+        public_webhook_url="https://stale-tunnel.trycloudflare.com",
+    )
+    with pytest.raises(ValueError, match="webhook host"):
+        await _run_request(_live_book_request(), live)
+    assert _port_is_closed(port)
+
+
+async def test_live_request_fails_loud_when_webhook_url_unset(
+    settings: Settings,
+) -> None:
+    port = unused_port()
+    live = live_settings(settings, port, public_webhook_url=None)
+    with pytest.raises(ValueError, match="PUBLIC_WEBHOOK_URL"):
+        await _run_request(_live_book_request(), live)
+    assert _port_is_closed(port)
 
 
 async def test_unknown_call_webhook_returns_404_on_in_process_listener(

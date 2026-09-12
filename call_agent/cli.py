@@ -26,7 +26,7 @@ from .linq import (
     validate_linq_live_token,
 )
 from .persistence import PersistenceConfigError
-from .runtime import run_call, validate_live
+from .runtime import assert_live_dial_origins, run_call, validate_live
 from .server import probe_live_ingress, serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
 from .verify import (
@@ -340,6 +340,7 @@ async def _run_request(
     if request.mode is Mode.STUB:
         return await run_call(request, settings)
     validate_live(settings)
+    assert_live_dial_origins(settings)
     running = await serve_in_process(settings)
     try:
         await probe_live_ingress(

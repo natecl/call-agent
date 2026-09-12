@@ -485,6 +485,22 @@ def public_url_host(url: str) -> str:
     return host
 
 
+def normalized_public_host(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").casefold()
+    if not host:
+        return (parsed.netloc or url).casefold()
+    scheme = (parsed.scheme or "").casefold()
+    port = parsed.port
+    if port is None:
+        return host
+    if scheme in {"https", "wss"} and port == 443:
+        return host
+    if scheme in {"http", "ws"} and port == 80:
+        return host
+    return f"{host}:{port}"
+
+
 def webhook_and_stream_urls(settings: Settings) -> tuple[str, str]:
     media_base = settings.public_base_url.rstrip("/")
     webhook_base = (
@@ -517,6 +533,28 @@ def validate_live(settings: Settings) -> None:
         )
 
 
+def assert_live_dial_origins(settings: Settings) -> None:
+    if not (settings.public_webhook_url or "").strip():
+        raise ValueError(
+            "CLI --live requires PUBLIC_WEBHOOK_URL set to the same tunnel "
+            "as PUBLIC_BASE_URL. Process env overrides .env, so a leftover "
+            "PUBLIC_WEBHOOK_URL can send webhooks to a stale host while "
+            "media follows PUBLIC_BASE_URL."
+        )
+    webhook_url, stream_url = webhook_and_stream_urls(settings)
+    webhook_host = normalized_public_host(webhook_url)
+    stream_host = normalized_public_host(stream_url)
+    if webhook_host != stream_host:
+        raise ValueError(
+            "CLI --live webhook host "
+            f"{webhook_host} != stream host {stream_host}. "
+            "Set PUBLIC_BASE_URL and PUBLIC_WEBHOOK_URL to the same "
+            "tunnel. Process env overrides .env, so a stale "
+            "PUBLIC_WEBHOOK_URL can diverge from PUBLIC_BASE_URL "
+            "(Fly media + old tunnel webhook)."
+        )
+
+
 async def run_call(
     request: QuickAskRequest | BookRequest,
     settings: Settings,
@@ -525,6 +563,7 @@ async def run_call(
 ) -> CallResult:
     if request.mode is Mode.LIVE:
         validate_live(settings)
+        assert_live_dial_origins(settings)
     settings.ledger_config()
     artifact_store = open_artifact_store(settings)
     run_id = RunId(str(uuid.uuid4()))
