@@ -364,6 +364,7 @@ async def test_dial_uses_worker_webhook_and_tunnel_media(
         public_webhook_url=(
             "https://call-agent-webhooks.example.workers.dev"
         ),
+        retain_call_artifacts=True,
     )
     request = QuickAskRequest(
         user_id=UserId("user-1"),

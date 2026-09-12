@@ -59,11 +59,11 @@ To drive one feature by hand, use its file under `features/`. The commands there
 The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `artifacts/` directory is gitignored):
 
 - `transcript.txt`. Every command, its stdout and stderr, in order.
-- `quick-ask-result.json`. The JSON line `quick-ask` printed.
-- `quick-ask-artifacts/<call_control_id>/`. The call's `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/`, `hangup.json`, and `result.json`, copied from the scratch artifacts dir.
+- `quick-ask-result.json`. The JSON line `quick-ask` printed. Default wipe is proven there: `transcript_ref` and `audio_ref` do not exist after hangup.
+- `quick-ask-artifacts/<call_control_id>/`. A retain (`RETAIN_CALL_ARTIFACTS=1`) run's `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/`, `hangup.json`, and `result.json`, copied from the scratch artifacts dir.
 - `verify-quick-ask.txt`. The five-line checklist and `5/5 passed`.
-- `book-result.json`. The JSON line `book` printed.
-- `book-artifacts/<call_control_id>/`. The booking call's artifacts, copied from the scratch artifacts dir.
+- `book-result.json`. The JSON line `book` printed. Default wipe is proven the same way.
+- `book-artifacts/<call_control_id>/`. A retain run's booking artifacts, copied from the scratch artifacts dir.
 - `verify-book.txt`. The six-line checklist and `6/6 passed`.
 - `verify-message.txt`. The six-line MessagingPort checklist and `6/6 passed`.
 - `verify-linq-call.txt`. The seven-line linq-to-call checklist and `7/7 passed`.

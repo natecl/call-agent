@@ -130,6 +130,7 @@ def verify_linq_call(
         hangup_trailing_silence_s=0,
         public_base_url="https://stub.invalid",
         quick_ask_live=False,
+        retain_call_artifacts=True,
     )
 
     book_parsed = parse_kickoff(active.text, settings)

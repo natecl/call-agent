@@ -100,6 +100,30 @@ def test_quick_ask_stub_prints_answered_result(
         "transcript_ref": "stub-call-0001/transcript.json",
         "audio_ref": "stub-call-0001/audio/inbound.wav",
     }
+    run_dir = tmp_path / "artifacts" / payload["call_control_id"]
+    assert run_dir.is_dir()
+    assert not (tmp_path / "artifacts" / payload["transcript_ref"]).is_file()
+    assert not (tmp_path / "artifacts" / payload["audio_ref"]).is_file()
+
+
+def test_quick_ask_retains_artifacts_when_opted_in(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "quick-ask",
+            "--to",
+            "+14155552671",
+            "--ask",
+            "hours",
+            "--name",
+            "Nathan",
+        ],
+        env=environment(tmp_path) | {"RETAIN_CALL_ARTIFACTS": "1"},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "answered"
     assert (
         tmp_path / "artifacts" / payload["transcript_ref"]
     ).is_file()
@@ -171,7 +195,7 @@ def test_book_stub_prints_booked_result(tmp_path: Path) -> None:
     assert payload["status"] == "booked"
     assert "booked" in payload["confirmation_text"].casefold()
     assert payload["call_control_id"] == "stub-call-0001"
-    assert (
+    assert not (
         tmp_path / "artifacts" / payload["transcript_ref"]
     ).is_file()
 

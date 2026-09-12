@@ -7,7 +7,7 @@
 - `ask-hours` asks for opening hours.
 - `ask-stock` asks whether an item is in stock and requires `--item`.
 - `ask-aisle` asks which aisle an item is in and requires `--item`.
-- `ask-artifacts` writes the per-call directory that `transcript_ref` and `audio_ref` point into.
+- `ask-artifacts` writes the per-call directory during the call. After hangup those files are deleted unless `RETAIN_CALL_ARTIFACTS=1`.
 - `ask-live-gate` refuses `--live` unless `QUICK_ASK_LIVE=1` and keys are present.
 
 ## How to get to it (user POV)
@@ -27,7 +27,8 @@ Preconditions:
 - **Stock.** Run `.venv/bin/call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nathan`. Exit code `0`. `answer_text` is `Yes, we have that in stock.`
 - **Aisle.** Run `.venv/bin/call-agent quick-ask --to +14155552671 --ask aisle --item "oat milk" --name Nathan`. Exit code `0`. `answer_text` is `That's in aisle 7.`
 - **Missing item.** Run `.venv/bin/call-agent quick-ask --to +14155552671 --ask stock --name Nathan`. Exit code `2` and stderr names `--item`.
-- **Artifacts.** Resolve `transcript_ref` and `audio_ref` against `CALL_AGENT_ARTIFACTS_DIR`. Both files exist. `transcript.json` has a first turn with `"speaker": "agent"` whose text contains `on behalf of Nathan`, and a `business` turn whose text is the `answer_text`. The same directory holds `dial.json` with `"from": "+15555550100"`, `"to": "+14155552671"`, `"stream_bidirectional_mode": "rtp"`, and `"stream_bidirectional_target_legs": "self"`.
+- **Artifacts (default wipe).** The JSON still names `transcript_ref` and `audio_ref`. Those paths do not exist after hangup. See [privacy-wipe.md](./privacy-wipe.md).
+- **Artifacts (retain).** Run the hours command with `RETAIN_CALL_ARTIFACTS=1`. Resolve `transcript_ref` and `audio_ref` against `CALL_AGENT_ARTIFACTS_DIR`. Both files exist. `transcript.json` has a first turn with `"speaker": "agent"` whose text contains `on behalf of Nathan`, and a `business` turn whose text is the `answer_text`. The same directory holds `dial.json` with `"from": "+15555550100"`, `"to": "+14155552671"`, `"stream_bidirectional_mode": "rtp"`, and `"stream_bidirectional_target_legs": "self"`.
 - **Live gate.** Run `.venv/bin/call-agent quick-ask --to +14155552671 --ask hours --name Nathan --live`. Exit code `2`. Stderr says live mode is gated and names `QUICK_ASK_LIVE=1`.
 - **Proof.** Save the result JSON line as `quick-ask-result.json` and copy the call's artifacts directory into the evidence directory.
 

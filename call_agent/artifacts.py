@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -233,3 +234,9 @@ def publish_durable_artifacts(
             else "application/octet-stream"
         )
         store.put(key, path.read_bytes(), content_type)
+
+
+def wipe_run_dir(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)

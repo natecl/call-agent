@@ -103,6 +103,29 @@ def test_feature_map_documents_cli_live_ingress() -> None:
     assert "assert_live_dial_origins" in INVENTORY
 
 
+def test_feature_map_lists_default_wipe_and_keeps_privacy_page_unshipped() -> None:
+    assert "| default wipe | shipped |" in INVENTORY
+    assert "| `retain_call_artifacts` | shipped |" in INVENTORY
+    assert "| privacy page | not shipped |" in INVENTORY
+    assert "(./privacy-wipe.md)" in RECIPES
+    wipe_at = _heading_index(INVENTORY, "Run directory")
+    not_shipped_at = _heading_index(INVENTORY, "Not shipped")
+    assert wipe_at < not_shipped_at
+    features = (
+        REPO / ".cursor" / "skills" / "verify-call-agent" / "features"
+    )
+    text = (features / "privacy-wipe.md").read_text()
+    required = (
+        "## Sub-features",
+        "## How to get to it (user POV)",
+        "## Driving it with call-agent",
+        "## Gotchas",
+    )
+    positions = [text.find(section) for section in required]
+    assert all(index != -1 for index in positions)
+    assert positions == sorted(positions)
+
+
 def test_book_feature_recipes_use_the_entry_contract() -> None:
     features = (
         REPO / ".cursor" / "skills" / "verify-call-agent" / "features"
