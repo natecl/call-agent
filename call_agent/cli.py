@@ -27,7 +27,7 @@ from .linq import (
 )
 from .persistence import PersistenceConfigError
 from .runtime import run_call, validate_live
-from .server import serve_in_process
+from .server import probe_live_ingress, serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
 from .verify import (
     BookVerifyInput,
@@ -339,8 +339,14 @@ async def _run_request(
 ) -> CallResult:
     if request.mode is Mode.STUB:
         return await run_call(request, settings)
+    validate_live(settings)
     running = await serve_in_process(settings)
     try:
+        await probe_live_ingress(
+            settings.public_base_url,
+            running.serve_token,
+            settings.live_ingress_timeout_s,
+        )
         return await run_call(request, settings)
     finally:
         await running.stop()

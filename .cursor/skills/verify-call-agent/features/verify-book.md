@@ -34,4 +34,4 @@ Preconditions:
 - `multi_turn_booking` fails when the stub emits one ask and one answer. That is the loud fail for a theater path.
 - `clean_hangup` expects `booked` or `declined`, not `answered`.
 - `pytest` and the CLI call the same function. A green pytest with a red CLI means the CLI wiring changed.
-- Live book against `+17272701288` needs `QUICK_ASK_LIVE=1`, Telnyx and OpenAI keys, and `PUBLIC_BASE_URL`. This skill never sets them.
+- Live book against `+17272701288` needs `QUICK_ASK_LIVE=1`, Telnyx and OpenAI keys, and a `PUBLIC_BASE_URL` tunnel to the local BOOK process. Fly `PUBLIC_BASE_URL` is not valid for Mac CLI live. This skill never sets them.

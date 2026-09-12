@@ -33,5 +33,6 @@ Preconditions:
 
 - There is no `call-agent-web` map in this repository. Do not invent one. The Worker name is `call-agent-webhooks`.
 - Pointing `PUBLIC_BASE_URL` at the Worker sends media to `/media-stream` and gets 501. Keep media on the tunnel.
+- CLI `book --live` and `quick-ask --live` host CallHandle in the laptop process. `PUBLIC_BASE_URL` must be a tunnel to that process. Fly `https://hidden-beacon-080.fly.dev` is a different process with no BOOK entry. The live verb probes `/health` for `serve_token` before it dials.
 - The Linq POST is a Worker forward to FastAPI, not SMS. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI `POST /linq/webhook` verifies HMAC and replies via MessagingPort. Prod `APP_BASE_URL` is `https://hidden-beacon-080.fly.dev` (no path).
 - The live hostname is `call-agent-webhooks.usetreena.workers.dev`. A wrangler temporary preview can expire unless claimed. Claiming keeps that hostname.

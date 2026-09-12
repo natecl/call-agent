@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
@@ -338,7 +339,16 @@ class CallHandle:
                     timeout=self.settings.event_timeout_s,
                 )
             except TimeoutError:
-                self.submit(TimeoutEvent())
+                self.submit(
+                    TimeoutEvent(
+                        webhook_host=public_url_host(
+                            self.dial_spec.webhook_url
+                        ),
+                        stream_host=public_url_host(
+                            self.dial_spec.stream_url
+                        ),
+                    )
+                )
                 continue
             await self._process_event(event)
         return self._result
@@ -463,6 +473,16 @@ class CallBook:
 
 
 BOOK = CallBook()
+
+
+def public_url_host(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return parsed.netloc or url
+    if parsed.port:
+        return f"{host}:{parsed.port}"
+    return host
 
 
 def webhook_and_stream_urls(settings: Settings) -> tuple[str, str]:

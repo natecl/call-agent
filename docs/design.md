@@ -33,7 +33,7 @@ $ call-agent verify-book
 6/6 passed
 ```
 
-`quick-ask --ask stock` and `--ask aisle` also take `--item`. `--live` requires `QUICK_ASK_LIVE=1`, the keys in `.env.example`, and a public `PUBLIC_BASE_URL` that reaches this process. The programmatic caller and the pytest use the same two functions:
+`quick-ask --ask stock` and `--ask aisle` also take `--item`. `--live` requires `QUICK_ASK_LIVE=1`, the keys in `.env.example`, and a public `PUBLIC_BASE_URL` that reaches this process. Fly FastAPI is a different process and is not that URL for Mac CLI live. The programmatic caller and the pytest use the same two functions:
 
 ```python
 result = await run_quick_ask(request, settings)
@@ -77,7 +77,7 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 - We accept six small unions on `Call` in exchange for never special-casing transport arrival order.
 - We accept a heuristic `assess_transcript` in exchange for the fake never owning the verdict. A tool-call verdict via GPT-Live delegation is the day-2 upgrade.
 - We accept raw L16 written as WAV and PCMU written raw in exchange for zero transcoding at 16 kHz. An L16 stream that Telnyx opens at 8 kHz is resampled 2x in the reducer so GPT-Live still runs at 16 kHz.
-- We accept `quick-ask --live` hosting the FastAPI app in the same process in exchange for one command and no job service. `PUBLIC_BASE_URL` must route media to it. Production Call Control webhooks go to the Cloudflare Worker inbox in `workers/webhooks`, not the laptop tunnel.
+- We accept `quick-ask --live` hosting the FastAPI app in the same process in exchange for one command and no job service. `PUBLIC_BASE_URL` must route media and, when `PUBLIC_WEBHOOK_URL` is empty, webhooks to it. CLI live probes that origin for this process's `serve_token` before it dials. Production Call Control webhooks go to the Cloudflare Worker inbox in `workers/webhooks`, not the laptop tunnel.
 - We accept no mid-call crash resume. A crashed live call ends with Telnyx's own timeout.
 - We accept up to `hangup_drain_timeout_s` of extra call time when Telnyx never echoes the final mark, in exchange for never cutting the closing line. The timeout is journaled and fails `verify-quick-ask`.
 
@@ -97,4 +97,4 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 
 ## Next implementation step
 
-Live book against `+17272701288` once `QUICK_ASK_LIVE=1`, keys, and a public tunnel are set. Do not dial from CI.
+Live book against `+17272701288` once `QUICK_ASK_LIVE=1`, keys, and a public tunnel to this process are set, and `{PUBLIC_BASE_URL}/health` returns this process's `serve_token`. Cap HOLD REDIAL until that probe is green. Do not dial from CI.

@@ -12,7 +12,9 @@ from .persistence import (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", populate_by_name=True
+    )
 
     telnyx_api_key: str | None = None
     telnyx_connection_id: str | None = None
@@ -39,6 +41,7 @@ class Settings(BaseSettings):
     r2_endpoint: str | None = None
     quick_ask_live: bool = False
     event_timeout_s: float = 30.0
+    live_ingress_timeout_s: float = 15.0
     hangup_trailing_silence_s: float = 0.4
     hangup_drain_timeout_s: float = 10.0
 

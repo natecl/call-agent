@@ -37,4 +37,5 @@ Preconditions:
 - `from` in `dial.json` is the user's ledger number. A run with a dirty ledger shows a different number than `+15555550100`.
 - `audio/inbound.wav` in stub mode is silence. Its existence and WAV header are the proof, not its content.
 - The live gate exits before any network call. A gate test with keys set and `QUICK_ASK_LIVE=1` would place a real call. Never set them in this skill.
+- CLI `quick-ask --live` hosts CallHandle in this process. `PUBLIC_BASE_URL` must be a tunnel to `CALL_AGENT_PORT` on the laptop. Fly `PUBLIC_BASE_URL` alone is not valid for Mac CLI live. The verb probes `/health` for `serve_token` before it dials.
 - A leftover `R2_ACCOUNT_ID` (or any incomplete `R2_*` set) makes `quick-ask` exit 2 before it dials. Unset the four required `R2_*` vars and `NEON_DATABASE_URL` in the baseline.

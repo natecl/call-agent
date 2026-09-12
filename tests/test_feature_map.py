@@ -68,6 +68,13 @@ def test_fly_toml_keeps_always_on_machines_and_feature_map_names_the_host() -> N
     assert "https://<app>.fly.dev" not in INVENTORY
 
 
+def test_feature_map_documents_cli_live_ingress() -> None:
+    assert "| live CLI ingress | shipped |" in INVENTORY
+    assert "| delivery-miss timeout | shipped |" in INVENTORY
+    assert "serve_token" in INVENTORY
+    assert "Fly `PUBLIC_BASE_URL`" in INVENTORY
+
+
 def test_book_feature_recipes_use_the_entry_contract() -> None:
     features = (
         REPO / ".cursor" / "skills" / "verify-call-agent" / "features"
