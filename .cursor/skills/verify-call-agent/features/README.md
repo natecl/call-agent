@@ -38,6 +38,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
+- [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, `speak_first` append frames, Realtime reject, and no tool-delegation.
 - [Verify quick-ask](./verify-quick-ask.md) covers the five-check lever in stub mode and its exit codes.
 - [Book a table](./book.md) covers a stub booking call, the result JSON, the artifacts, and the live gate.
 - [Verify book](./verify-book.md) covers the six-check lever in stub mode and its exit codes.
