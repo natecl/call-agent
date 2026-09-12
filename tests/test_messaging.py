@@ -74,7 +74,16 @@ def test_receive_ignores_sms_and_non_message_events() -> None:
     port = StubLinq()
 
     assert port.receive(inbound_fixture(service="SMS")) is None
-    assert port.receive(b'{"event_type":"message.sent","event_id":"x","data":{}}') is None
+    for event_type in (
+        "message.sent",
+        "message.delivered",
+        "message.read",
+        "message.failed",
+    ):
+        raw = json.dumps(
+            {"event_type": event_type, "event_id": "x", "data": {}}
+        ).encode()
+        assert port.receive(raw) is None
 
 
 def test_parse_inbound_accepts_2025_shape() -> None:
@@ -167,7 +176,7 @@ def test_live_send_posts_chats_parts_shape() -> None:
 def test_linq_webhook_route_verifies_signature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LINQ_WEBHOOK_SECRET", STUB_WEBHOOK_SECRET)
+    monkeypatch.setenv("LINQ_WEBHOOK_SIGNING_SECRET", STUB_WEBHOOK_SECRET)
     body = inbound_fixture()
     headers = sign_linq_webhook(
         STUB_WEBHOOK_SECRET,
@@ -194,8 +203,12 @@ def test_linq_webhook_route_verifies_signature(
         ),
     )
 
+    worker = client.post("/linq/webhook", content=body, headers=headers)
+
     assert ok.status_code == 200
     assert ok.json() == {"ok": True}
+    assert worker.status_code == 200
+    assert worker.json() == {"ok": True}
     assert denied.status_code == 401
     assert ignored.status_code == 200
     assert ignored.json() == {"ok": True, "ignored": True}
@@ -204,7 +217,7 @@ def test_linq_webhook_route_verifies_signature(
 def test_linq_webhook_route_fails_without_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LINQ_WEBHOOK_SECRET", "")
+    monkeypatch.setenv("LINQ_WEBHOOK_SIGNING_SECRET", "")
     client = TestClient(app)
     denied = client.post("/webhooks/linq", content=inbound_fixture())
 

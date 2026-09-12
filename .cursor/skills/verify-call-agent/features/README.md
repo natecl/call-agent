@@ -6,7 +6,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 - The package is installed in `.venv` (`.venv/bin/pip install -e ".[dev]"`).
 - `CALL_AGENT_DB_PATH` and `CALL_AGENT_ARTIFACTS_DIR` point under `/tmp/verify-call-agent-$RUN_ID/` so concurrent runs share nothing.
-- `QUICK_ASK_LIVE` is `0` or unset, and `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `OPENAI_API_KEY`, `PUBLIC_BASE_URL`, `LINQ_API_TOKEN`, `LINQ_WEBHOOK_SECRET`, `LINQ_WEBHOOK_URL`, and `PUBLIC_WEBHOOK_URL` are unset.
+- `QUICK_ASK_LIVE` is `0` or unset, and `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `OPENAI_API_KEY`, `PUBLIC_BASE_URL`, `LINQ_API_TOKEN`, `LINQ_WEBHOOK_SIGNING_SECRET`, `LINQ_WEBHOOK_URL`, and `PUBLIC_WEBHOOK_URL` are unset.
 - No ledger row exists yet for `--user default`.
 
 ## Driving conventions

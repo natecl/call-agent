@@ -5,7 +5,7 @@ description: Drive the call-agent CLI in stub mode the way a user does and keep 
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `verify-message`, and `linq register-webhook`. There is no server to keep alive in stub mode. Each drive is one process that reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. The FastAPI routes exist for live Telnyx and the Linq webhook skeleton. Stub verify-message does not host them.
+call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `verify-message`, and `linq register-webhook`. There is no server to keep alive in stub mode. Each drive is one process that reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub verify-message does not host them.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -25,7 +25,7 @@ export CALL_AGENT_DB_PATH="/tmp/verify-call-agent-$RUN_ID/ledger.sqlite3"
 export CALL_AGENT_ARTIFACTS_DIR="/tmp/verify-call-agent-$RUN_ID/artifacts"
 export QUICK_ASK_LIVE=0
 unset TELNYX_API_KEY TELNYX_CONNECTION_ID OPENAI_API_KEY PUBLIC_BASE_URL
-unset LINQ_API_TOKEN LINQ_WEBHOOK_SECRET LINQ_WEBHOOK_URL PUBLIC_WEBHOOK_URL
+unset LINQ_API_TOKEN LINQ_WEBHOOK_SIGNING_SECRET LINQ_WEBHOOK_URL PUBLIC_WEBHOOK_URL
 mkdir -p "/tmp/verify-call-agent-$RUN_ID"
 ```
 

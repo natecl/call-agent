@@ -10,8 +10,8 @@ Read these from env. Do not hardcode the sandbox line as the only source.
 
 - `LINQ_API_TOKEN`. Bearer token. Required for live send and `linq register-webhook`.
 - `LINQ_FROM_E164`. Sending line.
-- `LINQ_WEBHOOK_SECRET`. Standard Webhooks secret (`whsec_...`) from the create-subscription response.
-- `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL`. Always-on HTTPS URL for inbound. This comes from the Cloudflare Workers track, not from `PUBLIC_BASE_URL`.
+- `LINQ_WEBHOOK_SIGNING_SECRET`. Standard Webhooks secret (`whsec_...`) from the create-subscription response. Lives on Builder's box. Not in this VM.
+- `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL`. Always-on HTTPS URL for inbound. This is the Cloudflare Workers target, not `PUBLIC_BASE_URL`.
 
 Stub mode needs none of them. `LiveLinqHttp` fails loud if the token is missing.
 
@@ -21,22 +21,29 @@ Stub mode needs none of them. `LiveLinqHttp` fails loud if the token is missing.
 
 ## Inbound
 
-`POST /webhooks/linq` requires `LINQ_WEBHOOK_SECRET`. It verifies `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body, then maps `message.received` into `InboundMessage`. Missing secret or bad signature is 401. Signature checks and parse are stub-testable with no public URL.
+Linq posts to the registered Workers URL. That Worker route is ACK-only (`implemented:false`). This process owns real inbound processing: verify HMAC, then map `message.received` into `InboundMessage`. Other subscription events (`message.sent`, `message.delivered`, `message.read`, `message.failed`) and SMS are ignored.
 
-Always-on public URL is the Workers track. Until that URL exists:
+`POST /webhooks/linq` and `POST /linq/webhook` require `LINQ_WEBHOOK_SIGNING_SECRET`. They verify `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body. Missing secret or bad signature is 401. Signature checks and parse are stub-testable with no public URL and no box secret.
 
-1. Poll `GET https://api.linqapp.com/api/partner/v3/chats/{chatId}/messages` with the same bearer token.
-2. A temp tunnel may be used to catch webhooks. Do not treat a tunnel as production.
+Registered subscription (already live):
 
-## Register the webhook after Workers lands
+- `target_url`: `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook?version=2026-02-03`
+- `subscription_id`: `4c1ad6c6-d674-4fa2-b63a-ca947f2d9b7c`
+- events: `message.received`, `message.sent`, `message.delivered`, `message.read`, `message.failed`
+
+Polling `GET https://api.linqapp.com/api/partner/v3/chats/{chatId}/messages` remains a backup while the Worker only ACKs. A temp tunnel is interim only.
+
+## Register the webhook
+
+The closed-alpha subscription above is already registered. To register again after a URL change:
 
 ```bash
 export LINQ_API_TOKEN=...
-export LINQ_WEBHOOK_URL=https://<workers-host>/webhooks/linq
+export LINQ_WEBHOOK_URL=https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook?version=2026-02-03
 call-agent linq register-webhook
 ```
 
-The command fails loud if the token or URL is missing. Store the printed `signing_secret` as `LINQ_WEBHOOK_SECRET`. Linq will not return that secret again.
+The command fails loud if the token or URL is missing. Store the printed `signing_secret` as `LINQ_WEBHOOK_SIGNING_SECRET`. Linq will not return that secret again.
 
 Equivalent curl:
 

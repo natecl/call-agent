@@ -199,7 +199,7 @@ def linq_register_webhook() -> None:
     typer.echo(f"target_url {subscription.target_url}")
     typer.echo(f"signing_secret {subscription.signing_secret}")
     typer.echo(
-        "store signing_secret as LINQ_WEBHOOK_SECRET; "
+        "store signing_secret as LINQ_WEBHOOK_SIGNING_SECRET; "
         "Linq will not return it again"
     )
 

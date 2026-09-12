@@ -29,5 +29,5 @@ Preconditions:
 ## Gotchas
 
 - This lever never hits `api.linqapp.com`. The closed-alpha outbound prove on the sandbox line (Builder's box) is not this command.
-- Always-on inbound needs `LINQ_WEBHOOK_URL` from the Cloudflare Workers track plus `LINQ_WEBHOOK_SECRET` from `linq register-webhook`. Until then, poll `GET /api/partner/v3/chats/{chatId}/messages`.
+- The Workers URL is live and the Linq subscription is registered. The Worker is ACK-only. This lever proves HMAC verify + `message.received` map locally with `LINQ_WEBHOOK_SIGNING_SECRET` unset. The box secret is not this command.
 - SMS inbound is ignored on purpose. Do not treat an ignored SMS fixture as a failed parse of iMessage.

@@ -33,15 +33,14 @@ async def telnyx_webhook(request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.post("/webhooks/linq")
-async def linq_webhook(request: Request) -> dict[str, bool]:
+async def process_linq_webhook(request: Request) -> dict[str, bool]:
     body = await request.body()
     settings = Settings()
-    if not settings.linq_webhook_secret:
+    if not settings.linq_webhook_signing_secret:
         raise HTTPException(status_code=401, detail="unauthorized")
     try:
         verify_linq_signature(
-            settings.linq_webhook_secret,
+            settings.linq_webhook_signing_secret,
             body,
             request.headers,
         )
@@ -51,6 +50,10 @@ async def linq_webhook(request: Request) -> dict[str, bool]:
     if inbound is None:
         return {"ok": True, "ignored": True}
     return {"ok": True}
+
+
+app.add_api_route("/webhooks/linq", process_linq_webhook, methods=["POST"])
+app.add_api_route("/linq/webhook", process_linq_webhook, methods=["POST"])
 
 
 @app.websocket("/media-stream")
