@@ -27,7 +27,7 @@ npx wrangler secret put APP_BASE_URL
 npx wrangler deploy
 ```
 
-`TELNYX_PUBLIC_KEY` is the Mission Control account public key. Do not put it in `wrangler.jsonc` or git. `APP_BASE_URL` is the FastAPI origin with no path, for example `https://call-agent.example`. Linq POST appends `/linq/webhook`. Leave it unset in stub tests. Prod POST fails 501 `missing_app_base_url` until you put the secret and deploy. Optional `UPSTREAM_WEBHOOK_URL` forwards a first-seen Telnyx body to a live FastAPI process. The Worker still returns 2xx for Telnyx if that process is down. Linq POST awaits the app and returns 502 `app_unreachable` if the fetch throws. This VM has no Cloudflare credentials. Hostname stays `call-agent-webhooks.blossom-linen.workers.dev`.
+`TELNYX_PUBLIC_KEY` is the Mission Control account public key. Do not put it in `wrangler.jsonc` or git. `APP_BASE_URL` is the FastAPI origin with no path, for example `https://<app>.fly.dev`. Linq POST appends `/linq/webhook`. Leave it unset in stub tests. Prod POST fails 501 `missing_app_base_url` until you put the secret and deploy. Optional `UPSTREAM_WEBHOOK_URL` forwards a first-seen Telnyx body to a live FastAPI process. The Worker still returns 2xx for Telnyx if that process is down. Linq POST awaits the app and returns 502 `app_unreachable` if the fetch throws. This VM has no Cloudflare credentials. Hostname stays `call-agent-webhooks.blossom-linen.workers.dev`.
 
 Dry-run without an account:
 

@@ -1,0 +1,7 @@
+.venv
+.git
+artifacts
+__pycache__
+.env
+*.sqlite3
+workers/webhooks/node_modules
