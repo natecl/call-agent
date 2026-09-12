@@ -23,7 +23,7 @@ Preconditions:
 
 - **CI command.** Run `.venv/bin/call-agent verify-persistence`. Exit code `0`. Stdout has exactly three lines that start with `[PASS]`, in this order: `config`, `ledger_roundtrip`, `artifact_put_get`. The `config` line contains `sqlite ledger + local artifacts`. The last line is `3/3 passed`.
 - **Partial R2.** Run the same command with `R2_ACCOUNT_ID=acct` and the other `R2_*` vars unset. Exit code `2`. Stderr contains `R2 is misconfigured` and `R2_BUCKET`.
-- **Proof.** Save stdout as `verify-persistence.txt` in the evidence directory.
+- **Proof.** Save the passing stdout as `verify-persistence.txt` in the evidence directory. The partial-R2 run's stderr stays in `transcript.txt` and must contain `R2 is misconfigured`.
 
 ## Gotchas
 
