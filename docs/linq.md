@@ -36,7 +36,7 @@ User: approve
 Treena: Okay, I'm going to call them now.
 ```
 
-Party and time come from the first text. Treena asks only for the restaurant phone number. After the number she always asks to confirm before dial. Confirm / approve / yes are accepted. The first message never dials, even when it already includes `+E164`. `name` may be omitted when `LINQ_KICKOFF_CALLER` is set. Anything else stays on the `Received:` echo. Collect and confirm reply 200. Approve returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Mid-call chat is not shipped; clarification needed texts `Call failed:`. qa owns live prove.
+Party and time come from the first text. Treena asks only for the restaurant phone number. After the number she always asks to confirm before dial. Confirm / approve / yes are accepted. The first message never dials, even when it already includes `+E164`. Caller name comes from the `users` row for the inbound phone, never from iMessage and never from `LINQ_KICKOFF_CALLER`. No row, or a row with no first name, texts a plain account-settings line (see [accounts.md](accounts.md)). Anything else stays on the `Received:` echo. Collect and confirm reply 200. Approve returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Mid-call chat is not shipped; clarification needed texts `Call failed:`. qa owns live prove.
 
 Prove the stub path:
 
@@ -44,7 +44,7 @@ Prove the stub path:
 call-agent verify-linq-call
 ```
 
-Expect nine `[PASS]` lines and `9/9 passed`.
+Expect eleven `[PASS]` lines and `11/11 passed`.
 
 `POST /webhooks/linq` and `POST /linq/webhook` on FastAPI require `LINQ_WEBHOOK_SIGNING_SECRET`. They verify `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body. Missing secret or bad signature is 401. Live reply needs `LINQ_API_TOKEN` and `LINQ_FROM_E164`. Signature checks, parse, stub reply, and artifacts are stub-testable with no public URL and no box secret. Prod `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). Nathan's laptop is not that host.
 

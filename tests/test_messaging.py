@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from call_agent.accounts import AccountWrite, open_accounts
 from call_agent.domain import E164
 from call_agent.config import Settings
 from call_agent.linq import (
@@ -34,6 +35,8 @@ from call_agent.server import app
 from call_agent.kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
+    NO_ACCOUNT_TEXT,
+    NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     pending_collect_path,
 )
@@ -286,16 +289,27 @@ def _signed_headers(body: bytes, msg_id: str = INBOUND_EVENT_ID) -> dict[str, st
 
 
 def _webhook_env(
-    monkeypatch: pytest.MonkeyPatch, artifacts: Path
+    monkeypatch: pytest.MonkeyPatch, artifacts: Path, *, seed_account: bool = True
 ) -> None:
     artifacts.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("LINQ_WEBHOOK_SIGNING_SECRET", STUB_WEBHOOK_SECRET)
     monkeypatch.setenv("LINQ_FROM_E164", "+15555550100")
     monkeypatch.delenv("LINQ_API_TOKEN", raising=False)
     monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(artifacts))
-    monkeypatch.setenv(
-        "CALL_AGENT_DB_PATH", str(artifacts.parent / "ledger.sqlite3")
-    )
+    db_path = artifacts.parent / "ledger.sqlite3"
+    monkeypatch.setenv("CALL_AGENT_DB_PATH", str(db_path))
+    if seed_account:
+        settings = Settings(
+            _env_file=None,
+            call_agent_db_path=db_path,
+            call_agent_artifacts_dir=artifacts,
+        )
+        open_accounts(settings).upsert(
+            AccountWrite(
+                phone=E164(INBOUND_SENDER),
+                first_name="Nathan",
+            )
+        )
 
 
 def test_linq_webhook_route_verifies_signature(
@@ -465,7 +479,6 @@ def test_linq_webhook_kickoff_returns_202_and_cross_links(
 ) -> None:
     artifacts = tmp_path / "artifacts"
     _webhook_env(monkeypatch, artifacts)
-    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
     collect_id = "kickoff-route-book-collect"
     phone_id = "kickoff-route-book-phone"
@@ -556,7 +569,6 @@ def test_linq_webhook_kickoff_duplicate_does_not_redial(
 ) -> None:
     artifacts = tmp_path / "artifacts"
     _webhook_env(monkeypatch, artifacts)
-    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
     collect_body = kickoff_inbound_bytes(
         NATURAL_BOOK_TEXT, "kickoff-dup-collect", message_id="msg-dup-collect"
@@ -606,7 +618,6 @@ def test_linq_webhook_two_step_collects_then_dials(
 ) -> None:
     artifacts = tmp_path / "artifacts"
     _webhook_env(monkeypatch, artifacts)
-    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
     collect_id = "kickoff-route-collect"
     phone_id = "kickoff-route-phone"
@@ -696,7 +707,6 @@ def test_linq_webhook_bad_phone_followup_fails_and_does_not_dial(
 ) -> None:
     artifacts = tmp_path / "artifacts"
     _webhook_env(monkeypatch, artifacts)
-    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     collect_id = "kickoff-route-collect-fail"
     bad_id = "kickoff-route-bad"
     collect_body = kickoff_inbound_bytes(
@@ -744,7 +754,6 @@ def test_linq_webhook_live_host_guard_does_not_dial(
     monkeypatch.setenv(
         "PUBLIC_WEBHOOK_URL", "https://hidden-beacon-080.fly.dev"
     )
-    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     collect_id = "kickoff-route-host-collect"
     phone_id = "kickoff-route-host-phone"
     event_id = "kickoff-route-host"
@@ -788,4 +797,64 @@ def test_linq_webhook_live_host_guard_does_not_dial(
     assert "Call not placed:" in response.json()["reason"]
     assert "hidden-beacon-080.fly.dev" in response.json()["reason"]
     assert replies[0]["kind"] == "error"
+    assert not (artifacts / "stub-call-0001").exists()
+
+
+def test_linq_webhook_no_account_replies_plain_and_does_not_dial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts, seed_account=False)
+    event_id = "kickoff-route-no-account"
+    body = kickoff_inbound_bytes(NATURAL_BOOK_TEXT, event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook", content=body, headers=_signed_headers(body)
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+
+    assert response.status_code == 200
+    assert response.json()["blocked"] is True
+    assert replies[0]["text"] == NO_ACCOUNT_TEXT
+    assert not replies[0]["text"].startswith("Call failed:")
+    assert not (linq_dir / "kickoff.json").exists()
+    assert not (artifacts / "stub-call-0001").exists()
+
+
+def test_linq_webhook_no_name_replies_plain_and_does_not_dial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts, seed_account=False)
+    settings = Settings(
+        _env_file=None,
+        call_agent_db_path=artifacts.parent / "ledger.sqlite3",
+        call_agent_artifacts_dir=artifacts,
+    )
+    open_accounts(settings).upsert(
+        AccountWrite(phone=E164(INBOUND_SENDER), first_name=None)
+    )
+    event_id = "kickoff-route-no-name"
+    body = kickoff_inbound_bytes(NATURAL_BOOK_TEXT, event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook", content=body, headers=_signed_headers(body)
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+
+    assert response.status_code == 200
+    assert response.json()["blocked"] is True
+    assert replies[0]["text"] == NO_NAME_TEXT
+    assert not replies[0]["text"].startswith("Call failed:")
+    assert not (linq_dir / "kickoff.json").exists()
     assert not (artifacts / "stub-call-0001").exists()

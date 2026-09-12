@@ -19,9 +19,19 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
+from .accounts import (
+    AccountConflict,
+    AccountSyncAuthError,
+    AccountSyncPayloadError,
+    lookup_account,
+    open_accounts,
+    parse_account_sync_payload,
+    verify_account_sync_signature,
+)
 from .config import Settings
 from .domain import MediaStartEvent, MediaStopEvent
 from .kickoff import (
+    KickoffBlocked,
     KickoffCollecting,
     KickoffFailed,
     KickoffParsed,
@@ -48,6 +58,7 @@ from .linq import (
     write_inbound_artifact,
 )
 from .messaging import inbound_plain_text
+from .persistence import PersistenceConfigError
 from .runtime import BOOK
 from .telnyx import LiveTelnyxMedia, parse_media_frame, parse_webhook
 
@@ -73,6 +84,33 @@ async def health() -> dict[str, bool | str]:
     if _serve_token is not None:
         payload["serve_token"] = _serve_token
     return payload
+
+
+@app.post("/accounts/sync")
+async def accounts_sync(request: Request) -> dict[str, bool | str]:
+    body = await request.body()
+    settings = Settings()
+    secret = settings.account_sync_secret or ""
+    if not secret.strip():
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        verify_account_sync_signature(secret, body, request.headers)
+        write = parse_account_sync_payload(body)
+        result = open_accounts(settings).upsert(write)
+    except AccountSyncAuthError as error:
+        raise HTTPException(status_code=401, detail="unauthorized") from error
+    except AccountSyncPayloadError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except AccountConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except PersistenceConfigError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    return {
+        "ok": True,
+        "user_id": str(result.record.user_id),
+        "skipped": result.skipped,
+        "created": result.created,
+    }
 
 
 @app.post("/webhooks/telnyx")
@@ -119,10 +157,14 @@ async def process_linq_webhook(
         pending = load_pending_collect(
             settings.call_agent_artifacts_dir, inbound.chat_id
         )
+        account = lookup_account(settings, inbound.sender)
         parsed = intake_kickoff(
-            inbound_plain_text(inbound), settings, pending=pending
+            inbound_plain_text(inbound),
+            settings,
+            pending=pending,
+            account=account,
         )
-    except OSError as error:
+    except (OSError, PersistenceConfigError) as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
     if parsed is None:
         try:
@@ -163,6 +205,21 @@ async def process_linq_webhook(
             "ok": True,
             "replied": True,
             "collecting": True,
+            "chat_id": str(receipt.chat_id),
+            "message_id": str(receipt.message_id),
+        }
+    if isinstance(parsed, KickoffBlocked):
+        try:
+            clear_pending_collect(
+                settings.call_agent_artifacts_dir, inbound.chat_id
+            )
+            receipt = session.text(parsed.reply, kind="error")
+        except (LinqConfigError, OSError) as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        return {
+            "ok": True,
+            "replied": True,
+            "blocked": True,
             "chat_id": str(receipt.chat_id),
             "message_id": str(receipt.message_id),
         }

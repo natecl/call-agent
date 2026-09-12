@@ -60,6 +60,31 @@ def test_verify_feature_index_lists_book_recipes() -> None:
     assert "(./verify-linq-call.md)" in RECIPES
 
 
+def test_feature_map_lists_account_rows() -> None:
+    required_rows = (
+        "| `users` | shipped |",
+        "| `open_accounts` | shipped |",
+        "| `account upsert` | shipped |",
+        "| `account get` | shipped |",
+        "| `account list` | shipped |",
+        "| `POST /accounts/sync` | shipped |",
+        "| `Stripe → users sync` | gated |",
+        "| `minutes ledger` | not shipped |",
+        "| `kickoff account lookup` | shipped |",
+        "| `no-account reply` | shipped |",
+        "| `no-name reply` | shipped |",
+    )
+
+    missing = [row for row in required_rows if row not in INVENTORY]
+
+    assert missing == []
+    did_at = _heading_index(INVENTORY, "did provision and did list")
+    accounts_at = _heading_index(INVENTORY, "accounts")
+    quick_ask_at = _heading_index(INVENTORY, "quick-ask")
+    assert did_at < accounts_at < quick_ask_at
+    assert "(./accounts.md)" in RECIPES
+
+
 def test_feature_map_lists_linq_to_call_rows() -> None:
     required_rows = (
         "| `linq-to-call` | shipped |",
@@ -72,6 +97,9 @@ def test_feature_map_lists_linq_to_call_rows() -> None:
         "| `kickoff dedupe` | shipped |",
         "| `verify-linq-call` | shipped |",
         "| mid-call chat | not shipped |",
+        "| `kickoff account lookup` | shipped |",
+        "| `no-account reply` | shipped |",
+        "| `no-name reply` | shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]
@@ -145,6 +173,7 @@ def test_book_feature_recipes_use_the_entry_contract() -> None:
         "gpt-live-prompt.md",
         "linq-to-call.md",
         "verify-linq-call.md",
+        "accounts.md",
     ):
         text = (features / name).read_text()
         positions = [text.find(section) for section in required]

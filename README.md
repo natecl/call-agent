@@ -20,10 +20,11 @@ Fly Machines run always-on uvicorn. `fly.toml` pins `app = "hidden-beacon-080"` 
 
 ```bash
 fly secrets set LINQ_WEBHOOK_SIGNING_SECRET=...
+fly secrets set ACCOUNT_SYNC_SECRET=...
 fly deploy
 ```
 
-`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset.
+`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan` until the website PR POSTs sync. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
 
 Then point the Worker at the Fly origin (no path) and deploy the Worker:
 
@@ -74,7 +75,7 @@ call-agent verify-message
 
 You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send shape, inbound `message.received` mapping, inbound reply + artifact text, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
 
-`call-agent verify-linq-call` proves iMessage natural collect + confirm-before-dial → stub `run_call` → result reply on the same chat, plus artifact cross-links. Nine `[PASS]` lines and `9/9 passed`. It fails if dial happens before confirm. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
+`call-agent verify-linq-call` proves iMessage natural collect + confirm-before-dial → stub `run_call` → result reply on the same chat, plus artifact cross-links. Eleven `[PASS]` lines and `11/11 passed`. It fails if dial happens before confirm. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
 
 `call-agent verify-persistence` checks the Neon and R2 ports. With those vars unset it uses SQLite and a local directory, prints three `[PASS]` lines, and exits 0. If some `R2_*` vars are set and others are not, or if `NEON_DATABASE_URL` is not a `postgresql://` URL, it exits 2 and names the problem. CI runs it with the vars unset. It never opens Neon or R2.
 
