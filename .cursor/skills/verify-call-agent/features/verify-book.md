@@ -16,7 +16,7 @@
 
 - Run `call-agent verify-book` in a terminal, with or without the input flags.
 - CI runs `call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub`.
-- `pytest tests/test_verify_book.py` calls the same function, including the theater, goodbye-hangup, and decline faults.
+- `pytest tests/test_verify_book.py` calls the same function, including the theater (goodbye hangup) and decline faults.
 
 ## Driving it with call-agent
 
