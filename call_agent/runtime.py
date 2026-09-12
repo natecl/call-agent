@@ -54,7 +54,8 @@ from .gpt_live import (
     StubScenario,
     serialize_session_start,
 )
-from .ledger import Ledger
+from .artifacts import ArtifactStore, open_artifact_store, publish_durable_artifacts
+from .ledger import open_ledger
 from .report import JournalRow, Refs, build_call_report, redact_call_report
 from .telnyx import (
     LiveTelnyxHttp,
@@ -226,6 +227,9 @@ class RunDir:
             output.setframerate(self._sample_rate)
             output.writeframes(audio)
 
+    def audio_names(self) -> tuple[str, str]:
+        return (self._audio_name("inbound"), self._audio_name("outbound"))
+
     def _audio_name(self, direction: str) -> str:
         extension = "wav" if self._codec is Codec.L16 else "pcmu"
         return f"{direction}.{extension}"
@@ -300,6 +304,7 @@ class CallHandle:
         run_dir: RunDir,
         settings: Settings,
         dial_spec: DialSpec,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.call = call
         self.queue = queue
@@ -307,6 +312,7 @@ class CallHandle:
         self.run_dir = run_dir
         self.settings = settings
         self.dial_spec = dial_spec
+        self.artifact_store = artifact_store
         self._sequence = 0
         self._result: QuickAskResult | None = None
         self._reduce_settings = ReduceSettings(
@@ -408,6 +414,13 @@ class CallHandle:
                 self.call,
                 self._reduce_settings,
             )
+            if self.artifact_store is not None:
+                publish_durable_artifacts(
+                    self.run_dir.root,
+                    self.run_dir.call_control_id,
+                    self.run_dir.audio_names(),
+                    self.artifact_store,
+                )
 
 
 class CallBook:
@@ -491,6 +504,8 @@ async def run_quick_ask(
 ) -> QuickAskResult:
     if request.mode is Mode.LIVE:
         validate_live(settings)
+    settings.ledger_config()
+    artifact_store = open_artifact_store(settings)
     run_id = RunId(str(uuid.uuid4()))
     codec = Codec(settings.telnyx_stream_codec)
     run_dir = RunDir(
@@ -509,7 +524,7 @@ async def run_quick_ask(
     connection_id = (
         settings.telnyx_connection_id or "stub-connection"
     )
-    record = Ledger(settings.call_agent_db_path).provision(
+    record = open_ledger(settings).provision(
         request.user_id,
         active_ports.telnyx_http,
         connection_id,
@@ -543,6 +558,7 @@ async def run_quick_ask(
         run_dir=run_dir,
         settings=settings,
         dial_spec=dial_spec,
+        artifact_store=artifact_store,
     )
     BOOK.register(run_id, handle)
     try:

@@ -2,7 +2,7 @@
 
 A phone agent that calls a business on your behalf, asks one quick question, and writes down the answer. You paste an E.164 number, pick `hours`, `stock`, or `aisle`, and give your first name. The agent dials from a Telnyx number that belongs to you, opens with "I'm calling on behalf of Nathan", gets the answer, hangs up, and leaves a result, a transcript, and the call audio on disk.
 
-The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a SQLite ledger of numbers. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
+The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a DID ledger that defaults to SQLite. Set `NEON_DATABASE_URL` to use Neon. Set the four `R2_*` vars to put finished artifacts on R2. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
 
 Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook and the `MessagingPort` process path. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, packaging, and SMS are out of scope. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
 
@@ -47,6 +47,8 @@ call-agent verify-message
 
 You should see five `[PASS]` lines and `5/5 passed`. The checks are stub send shape, inbound `message.received` mapping, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
 
+`call-agent verify-persistence` checks the Neon and R2 ports. With those vars unset it uses SQLite and a local directory, prints three `[PASS]` lines, and exits 0. If some `R2_*` vars are set and others are not, or if `NEON_DATABASE_URL` is not a `postgresql://` URL, it exits 2 and names the problem. CI runs it with the vars unset. It never opens Neon or R2.
+
 ## Use the CLI in stub mode
 
 ```bash
@@ -57,6 +59,8 @@ call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nath
 ```
 
 `quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json`.
+
+Laptop and stub mode keep the ledger in `CALL_AGENT_DB_PATH` (SQLite) and the full run directory on disk. When `NEON_DATABASE_URL` is set, `did provision` and `did list` use Neon with the same `dids` table. When `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` are all set, `finish` also puts `transcript.json`, `result.json`, `call_report.json`, and both audio files to that bucket. `events.jsonl`, `dial.json`, and `call_report.redacted.json` stay on the local disk. A partial R2 set fails before the call starts. Install `psycopg[binary]` before setting the Neon URL.
 
 ## Read a call
 

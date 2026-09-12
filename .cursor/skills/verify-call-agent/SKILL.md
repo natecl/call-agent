@@ -1,11 +1,11 @@
 ---
 name: verify-call-agent
-description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, verify-message, or verify-webhooks still work. Keep the feature files under features/ current with the implementation.
+description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, verify-message, verify-webhooks, or verify-persistence still work. Keep the feature files under features/ current with the implementation.
 ---
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `verify-message`, `verify-webhooks`, and `linq register-webhook`. Stub drives of the first five need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub verify-message does not host them. The Worker inbox ACKs Linq and does not forward into the app yet.
+call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `verify-message`, `verify-webhooks`, `linq register-webhook`, and `verify-persistence`. Stub drives of the first five need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub verify-message does not host them. The Worker inbox ACKs Linq and does not forward into the app yet. This skill never sets `NEON_DATABASE_URL` or `R2_*`.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -26,10 +26,11 @@ export CALL_AGENT_ARTIFACTS_DIR="/tmp/verify-call-agent-$RUN_ID/artifacts"
 export QUICK_ASK_LIVE=0
 unset TELNYX_API_KEY TELNYX_CONNECTION_ID OPENAI_API_KEY PUBLIC_BASE_URL
 unset LINQ_API_TOKEN LINQ_WEBHOOK_SIGNING_SECRET LINQ_WEBHOOK_URL PUBLIC_WEBHOOK_URL
+unset NEON_DATABASE_URL R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT
 mkdir -p "/tmp/verify-call-agent-$RUN_ID"
 ```
 
-Ready means `.venv/bin/call-agent --help` exits 0 and lists `verify-quick-ask`, `verify-message`, and `verify-webhooks`. Two runs with different `RUN_ID` values can run at the same time.
+Ready means `.venv/bin/call-agent --help` exits 0 and lists `verify-quick-ask`, `verify-message`, `verify-webhooks`, and `verify-persistence`. Two runs with different `RUN_ID` values can run at the same time.
 
 ## Doctor
 
@@ -37,7 +38,7 @@ Run before driving whenever anything looks off. All three must hold.
 
 ```bash
 .venv/bin/python -c "import call_agent; print('import ok')"
-.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-message|verify-webhooks'
+.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-message|verify-webhooks|verify-persistence'
 [ "${QUICK_ASK_LIVE:-0}" = "0" ] && echo "stub mode"
 ```
 
@@ -63,6 +64,7 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `verify-quick-ask.txt`. The five-line checklist and `5/5 passed`.
 - `verify-message.txt`. The five-line MessagingPort checklist and `5/5 passed`.
 - `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
+- `verify-persistence.txt`. The three-line checklist, `sqlite ledger + local artifacts`, and `3/3 passed`. The partial-R2 refusal is in `transcript.txt`.
 
 Proof standards. Exercise the real CLI verb, not a Python function. Capture the command and the state it produced, so the result JSON and the files it references, not only the exit code. For a mutation such as `did provision`, prove it with a second read (`did list`), and prove idempotency by running it twice. Stub mode is the only mock, and it sits where production already isolates Telnyx and OpenAI. Confirm it opened no sockets by running with the keys unset, which the script does.
 

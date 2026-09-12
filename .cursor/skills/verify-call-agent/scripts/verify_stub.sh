@@ -15,6 +15,7 @@ export CALL_AGENT_ARTIFACTS_DIR="$SCRATCH/artifacts"
 export QUICK_ASK_LIVE=0
 unset TELNYX_API_KEY TELNYX_CONNECTION_ID OPENAI_API_KEY PUBLIC_BASE_URL
 unset LINQ_API_TOKEN LINQ_WEBHOOK_SIGNING_SECRET LINQ_WEBHOOK_URL PUBLIC_WEBHOOK_URL
+unset NEON_DATABASE_URL R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT
 
 mkdir -p "$SCRATCH" "$EVIDENCE"
 cleanup() { rm -rf "$SCRATCH"; }
@@ -29,6 +30,7 @@ run "$PY" -c "import call_agent; print('import ok')"
 run "$CLI" --help | grep -q "verify-quick-ask" || { echo "verify-quick-ask verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-message" || { echo "verify-message verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-webhooks" || { echo "verify-webhooks verb missing from --help"; exit 1; }
+run "$CLI" --help | grep -q "verify-persistence" || { echo "verify-persistence verb missing from --help"; exit 1; }
 
 step "did provision twice returns the same DID"
 FIRST="$(run "$CLI" did provision --user default | tail -n1)"
@@ -68,6 +70,20 @@ set -e
 step "verify-webhooks stub checklist"
 run "$CLI" verify-webhooks | tee "$EVIDENCE/verify-webhooks.txt" >/dev/null
 grep -q "5/5 passed" "$EVIDENCE/verify-webhooks.txt"
+
+step "verify-persistence stub checklist"
+run "$CLI" verify-persistence | tee "$EVIDENCE/verify-persistence.txt" >/dev/null
+grep -q "3/3 passed" "$EVIDENCE/verify-persistence.txt"
+grep -q "sqlite ledger + local artifacts" "$EVIDENCE/verify-persistence.txt"
+
+step "verify-persistence rejects partial R2"
+set +e
+R2_ACCOUNT_ID=acct run "$CLI" verify-persistence
+PERSIST_EXIT=$?
+set -e
+[ "$PERSIST_EXIT" -eq 2 ] || { echo "expected exit 2 for partial R2, got $PERSIST_EXIT"; exit 1; }
+grep -q "R2 is misconfigured" "$EVIDENCE/transcript.txt"
+unset R2_ACCOUNT_ID
 
 step "live mode is gated"
 set +e

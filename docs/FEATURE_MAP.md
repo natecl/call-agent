@@ -12,14 +12,14 @@ This file lists what `main` implements today. It is not a plan. It is a standing
 
 ## did provision and did list
 
-The ledger is the SQLite store.
+The ledger is SQLite unless `NEON_DATABASE_URL` is set. Then it is Neon.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `did provision` | shipped | Assigns one number per user through `Ledger.provision`. A later run for that user prints the same E.164. `StubTelnyxHttp` starts at `+15555550100` on each new instance, so a second user in a later CLI process can hit `UNIQUE(did)`. Distinct DIDs for two users are proven only when one `StubTelnyxHttp` is reused. | `call_agent/cli.py` `did_provision`. `call_agent/ledger.py` `Ledger.provision`. `call_agent/telnyx.py` `StubTelnyxHttp.search_and_order_number`. `tests/test_ledger.py` `test_provision_is_idempotent_and_users_get_distinct_dids`. `tests/test_cli.py` `test_did_provision_twice_prints_same_did` |
 | `did provision --live` | gated | Orders a US voice number through `LiveTelnyxHttp.search_and_order_number` when `--live` is set and `_require_live_gate` plus `validate_live` pass. | `call_agent/cli.py` `did_provision`. `call_agent/telnyx.py` `LiveTelnyxHttp.search_and_order_number`. `call_agent/runtime.py` `validate_live`. `tests/test_cli.py` `test_did_provision_live_is_gated` |
 | `did list` | shipped | Prints every ledger row as USER, DID, and STATUS. | `call_agent/cli.py` `did_list`. `call_agent/ledger.py` `Ledger.list`. `.cursor/skills/verify-call-agent/features/did-provision.md` |
-| `Ledger` | shipped | Stores DID rows in SQLite table `dids` with `user_id TEXT PRIMARY KEY` and `did TEXT UNIQUE`. | `call_agent/ledger.py` `CREATE TABLE IF NOT EXISTS dids`. `docs/design.md` Shape, "Idempotent by shape." `tests/test_ledger.py` |
+| `Ledger` | shipped | Stores DID rows in SQLite table `dids` with `user_id TEXT PRIMARY KEY` and `did TEXT UNIQUE` when `NEON_DATABASE_URL` is unset. | `call_agent/ledger.py` `Ledger` `DIDS_SCHEMA`. `call_agent/persistence.py` `parse_ledger_config`. `docs/design.md` Shape, "Idempotent by shape." `tests/test_ledger.py` `test_provision_is_idempotent_and_users_get_distinct_dids` |
 
 ## quick-ask
 
@@ -55,12 +55,12 @@ CLI verb `verify-quick-ask` calls `verify_quick_ask`.
 
 ## verify-call-agent
 
-The Cursor skill drives the stub CLI verbs and never sets live keys.
+The Cursor skill drives the stub CLI verbs and never sets live keys or Neon and R2 vars.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
-| `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `verify-message`, `webhooks`, `linq-inbound`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode or sets Neon and R2 vars. | `.cursor/skills/verify-call-agent/SKILL.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `verify-message`, `webhooks`, `linq-inbound`, `verify-webhooks`, and `verify-persistence` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
 | `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ACK ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
 | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
@@ -68,7 +68,8 @@ The Cursor skill drives the stub CLI verbs and never sets live keys.
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the five stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-message.md` | shipped | Covers the five MessagingPort checks and the register-webhook gate. | `.cursor/skills/verify-call-agent/features/verify-message.md` |
-| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-message`, `verify-webhooks`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
+| `.cursor/skills/verify-call-agent/features/verify-persistence.md` | shipped | Covers the three stub checks, the SQLite and local fallback, and the misconfig exit. | `.cursor/skills/verify-call-agent/features/verify-persistence.md` |
+| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-message`, `verify-webhooks`, `verify-persistence`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
 
 ## Always-on webhooks
 
@@ -114,7 +115,7 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever.
+`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever. `verify-persistence` is the later port lever. It is listed under Durable persistence.
 
 `README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook.
 
@@ -130,3 +131,15 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 | Worker→app Linq forward | not shipped | Worker ACKs `POST /linq/webhook`. FastAPI `process_linq_webhook` is the process path. No bridge yet. | `workers/webhooks/src/handler.ts`. `call_agent/server.py` `process_linq_webhook` |
 | Linq SMS | not shipped | Worker exposes `POST /linq/webhook` with `implemented: false`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |
+
+## Durable persistence
+
+Neon holds the DID ledger when `NEON_DATABASE_URL` is set. R2 holds the finished artifact subset when the four required `R2_*` vars are set. Unset env keeps SQLite and `CALL_AGENT_ARTIFACTS_DIR`. Partial R2 env fails before any I/O.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| SQLite ledger fallback | shipped | `parse_ledger_config` returns `SqliteLedgerConfig` when `NEON_DATABASE_URL` is unset or blank. `open_ledger` constructs `Ledger`. | `call_agent/persistence.py` `parse_ledger_config`. `call_agent/ledger.py` `open_ledger`. `tests/test_persistence.py` `test_unset_env_selects_sqlite_and_local`. `tests/test_ledger.py` `test_open_ledger_unset_returns_sqlite` |
+| Neon ledger | shipped | `NEON_DATABASE_URL` selects `NeonLedger` and the same `dids` schema. Provision stays idempotent. A blank or schemeless URL fails loud. Missing `psycopg` fails loud. | `call_agent/ledger.py` `NeonLedger` `DIDS_SCHEMA`. `call_agent/persistence.py` `NeonLedgerConfig`. `tests/test_ledger.py` `test_neon_ledger_roundtrip_through_sqlite_bridge` `test_psycopg_connect_fails_loud_when_driver_missing`. `tests/test_persistence.py` `test_neon_url_without_scheme_fails_loud` |
+| Local artifact fallback | shipped | `parse_artifact_config` returns `LocalArtifactConfig` when no `R2_*` var is set. `LocalArtifactStore` put/get writes under `CALL_AGENT_ARTIFACTS_DIR`. | `call_agent/persistence.py` `parse_artifact_config`. `call_agent/artifacts.py` `LocalArtifactStore`. `tests/test_artifacts.py` `test_local_artifact_put_get_roundtrip` `test_open_artifact_store_defaults_local` |
+| R2 artifacts | shipped | Complete `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` selects `R2ArtifactStore`. Put/get use the S3 API. Partial env raises `PersistenceConfigError`. `RunDir.finish` publishes transcript, result, `call_report.json`, and both audio files. `events.jsonl` stays local. | `call_agent/artifacts.py` `R2ArtifactStore` `publish_durable_artifacts` `DURABLE_RELATIVE`. `call_agent/runtime.py` `FinishEffect`. `tests/test_artifacts.py` `test_r2_put_get_with_httpx_mock` `test_publish_durable_artifacts_puts_documented_subset`. `tests/test_persistence.py` `test_partial_r2_fails_loud_and_names_missing` |
+| `verify-persistence` | shipped | Headless lever. Unset env prints three `[PASS]` lines for `config`, `ledger_roundtrip`, and `artifact_put_get` against SQLite and local stubs. Partial `R2_*` or a bad `NEON_DATABASE_URL` exits 2. Complete Neon/R2 env still exercises stubs so CI needs no cloud. | `call_agent/cli.py` `verify_persistence_command`. `call_agent/verify_persistence.py` `verify_persistence`. `tests/test_verify_persistence.py`. `.cursor/skills/verify-call-agent/features/verify-persistence.md` |

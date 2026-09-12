@@ -21,6 +21,7 @@ jobs:
       - run: pytest -q
       - run: call-agent verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub
       - run: call-agent verify-message
+      - run: call-agent verify-persistence
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
