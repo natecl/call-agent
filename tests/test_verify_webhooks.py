@@ -93,7 +93,7 @@ def test_feature_maps_record_always_on_versus_tunnel() -> None:
     assert "call-agent-webhooks" in webhooks
     assert "no `call-agent-web` map" in webhooks
     linq_url = (
-        "https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook"
+        "https://call-agent-webhooks.usetreena.workers.dev/linq/webhook"
     )
     assert linq_url in feature_map
     assert linq_url in webhooks

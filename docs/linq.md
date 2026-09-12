@@ -21,13 +21,13 @@ Stub mode needs none of them. `LiveLinqHttp` fails loud if the token is missing.
 
 ## Inbound
 
-Linq posts to the registered Workers URL. The Worker forwards POST to `APP_BASE_URL/linq/webhook` with the raw body and Standard Webhooks headers. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI in this process verifies HMAC, then maps `message.received` into `InboundMessage`. Other subscription events (`message.sent`, `message.delivered`, `message.read`, `message.failed`) and SMS are ignored.
+Linq posts to the registered Workers URL. The Worker forwards POST to `APP_BASE_URL/linq/webhook` with the raw body and Standard Webhooks headers. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI in this process verifies HMAC, maps iMessage `message.received` into `InboundMessage`, and sends a `Received: {text}` ack on the same chat via MessagingPort (`POST /chats/{chatId}/messages`, same `message.parts` shape as outbound kickoff). Other subscription events (`message.sent`, `message.delivered`, `message.read`, `message.failed`) and SMS are ignored. Processed inbound writes `inbound.json` (inbound text, ids, timing) and `reply.json` under `CALL_AGENT_ARTIFACTS_DIR/linq/<event_id>/`. Missing artifact dir fails loud (500), not `{ok:true}` without a send.
 
-`POST /webhooks/linq` and `POST /linq/webhook` on FastAPI require `LINQ_WEBHOOK_SIGNING_SECRET`. They verify `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body. Missing secret or bad signature is 401. Signature checks and parse are stub-testable with no public URL and no box secret. Prod `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). Nathan's laptop is not that host.
+`POST /webhooks/linq` and `POST /linq/webhook` on FastAPI require `LINQ_WEBHOOK_SIGNING_SECRET`. They verify `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body. Missing secret or bad signature is 401. Live reply needs `LINQ_API_TOKEN` and `LINQ_FROM_E164`. Signature checks, parse, stub reply, and artifacts are stub-testable with no public URL and no box secret. Prod `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). Nathan's laptop is not that host.
 
 Registered subscription (already live):
 
-- `target_url`: `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook?version=2026-02-03`
+- `target_url`: `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook?version=2026-02-03`
 - `subscription_id`: `4c1ad6c6-d674-4fa2-b63a-ca947f2d9b7c`
 - events: `message.received`, `message.sent`, `message.delivered`, `message.read`, `message.failed`
 
@@ -39,7 +39,7 @@ The closed-alpha subscription above is already registered. To register again aft
 
 ```bash
 export LINQ_API_TOKEN=...
-export LINQ_WEBHOOK_URL=https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook?version=2026-02-03
+export LINQ_WEBHOOK_URL=https://call-agent-webhooks.usetreena.workers.dev/linq/webhook?version=2026-02-03
 call-agent linq register-webhook
 ```
 
@@ -60,7 +60,7 @@ curl -X POST https://api.linqapp.com/api/partner/v3/webhook-subscriptions \
 call-agent verify-message
 ```
 
-Expect five `[PASS]` lines and `5/5 passed`. Pytest covers the same lever.
+Expect six `[PASS]` lines and `6/6 passed`. Pytest covers the same lever. The `inbound_reply` line names the inbound text.
 
 ## Privacy
 

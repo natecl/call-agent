@@ -5,7 +5,7 @@ description: Drive the call-agent CLI in stub mode the way a user does and keep 
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `verify-webhooks`, `linq register-webhook`, and `verify-persistence`. Stub drives of the call and messaging verbs need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub verify-message does not host them. The Worker inbox forwards Linq POST to `APP_BASE_URL/linq/webhook` and returns 501 `missing_app_base_url` when that origin is unset. This skill never sets `NEON_DATABASE_URL` or `R2_*`.
+call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `verify-webhooks`, `linq register-webhook`, and `verify-persistence`. Stub drives of the call and messaging verbs need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call or inbound message runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub `verify-message` proves the MessagingPort reply without hosting those routes. The Worker inbox forwards Linq POST to `APP_BASE_URL/linq/webhook` and returns 501 `missing_app_base_url` when that origin is unset. This skill never sets `NEON_DATABASE_URL` or `R2_*`.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -65,7 +65,7 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `book-result.json`. The JSON line `book` printed.
 - `book-artifacts/<call_control_id>/`. The booking call's artifacts, copied from the scratch artifacts dir.
 - `verify-book.txt`. The six-line checklist and `6/6 passed`.
-- `verify-message.txt`. The five-line MessagingPort checklist and `5/5 passed`.
+- `verify-message.txt`. The six-line MessagingPort checklist and `6/6 passed`.
 - `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
 - `verify-persistence.txt`. The three-line checklist, `sqlite ledger + local artifacts`, and `3/3 passed`. The partial-R2 refusal is in `transcript.txt`.
 

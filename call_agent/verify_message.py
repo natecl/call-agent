@@ -6,16 +6,24 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from .config import Settings
 from .domain import E164
 from .linq import (
     LinqConfigError,
     LinqWebhookAuthError,
     LiveLinqHttp,
     StubLinq,
+    handle_inbound,
     sign_linq_webhook,
     verify_linq_signature,
 )
-from .messaging import IMESSAGE, InboundMessage, TextPart, text_chat
+from .messaging import (
+    IMESSAGE,
+    InboundMessage,
+    TextPart,
+    ack_reply_text,
+    text_chat,
+)
 
 STUB_FROM = E164("+15555550100")
 STUB_TO = E164("+14155552671")
@@ -25,6 +33,7 @@ INBOUND_EVENT_ID = "2915e81c-5068-4796-ace2-21d2c94ad298"
 INBOUND_CHAT_ID = "8f392755-6865-4b18-880a-227f9d8b458f"
 INBOUND_MESSAGE_ID = "89e3566e-1d13-49e5-a8ee-48490d5bfeb7"
 INBOUND_SENDER = "+14155552671"
+INBOUND_FIXTURE_TEXT = "reply"
 
 
 class MessageVerifyInput(BaseModel):
@@ -38,6 +47,7 @@ class MessageVerifyInput(BaseModel):
 CheckName = Literal[
     "stub_send",
     "inbound_map",
+    "inbound_reply",
     "signature",
     "live_token",
     "imessage_only",
@@ -62,6 +72,7 @@ class MessageVerifyReport(BaseModel):
         MessageVerifyCheck,
         MessageVerifyCheck,
         MessageVerifyCheck,
+        MessageVerifyCheck,
     ]
 
 
@@ -80,7 +91,7 @@ def inbound_fixture(*, service: str = IMESSAGE) -> bytes:
                     "handle": INBOUND_SENDER,
                     "service": service,
                 },
-                "parts": [{"type": "text", "value": "reply"}],
+                "parts": [{"type": "text", "value": INBOUND_FIXTURE_TEXT}],
                 "service": service,
             },
         }
@@ -124,7 +135,7 @@ def verify_message(
         chat_id=INBOUND_CHAT_ID,
         message_id=INBOUND_MESSAGE_ID,
         sender=INBOUND_SENDER,
-        parts=(TextPart(value="reply"),),
+        parts=(TextPart(value=INBOUND_FIXTURE_TEXT),),
         service=IMESSAGE,
     )
     inbound_check = MessageVerifyCheck(
@@ -135,6 +146,60 @@ def verify_message(
             f"chat_id={getattr(inbound, 'chat_id', None)} "
             f"service={getattr(inbound, 'service', None)}"
         ),
+    )
+
+    reply_port = StubLinq()
+    settings = Settings(
+        _env_file=None,
+        linq_api_token=None,
+        linq_from_e164=str(active.from_did),
+    )
+    settings.call_agent_artifacts_dir.mkdir(parents=True, exist_ok=True)
+    expected_reply = (
+        ack_reply_text(inbound) if inbound is not None else ""
+    )
+    expected_path = f"/chats/{INBOUND_CHAT_ID}/messages"
+    try:
+        if inbound is None:
+            raise ValueError("inbound fixture did not map")
+        reply_receipt = handle_inbound(inbound, settings, reply_port)
+        reply_payload = reply_port.last_payload or {}
+        reply_message = reply_payload.get("message") or {}
+        artifact_dir = (
+            settings.call_agent_artifacts_dir / "linq" / INBOUND_EVENT_ID
+        )
+        inbound_artifact = json.loads(
+            (artifact_dir / "inbound.json").read_text()
+        )
+        reply_artifact = json.loads((artifact_dir / "reply.json").read_text())
+        reply_ok = (
+            reply_receipt is not None
+            and reply_port.last_path == expected_path
+            and "from" not in reply_payload
+            and "to" not in reply_payload
+            and reply_message.get("preferred_service") == IMESSAGE
+            and reply_message.get("parts")
+            == [{"type": "text", "value": expected_reply}]
+            and "SMS" not in json.dumps(reply_payload)
+            and reply_receipt.chat_id == INBOUND_CHAT_ID
+            and inbound_artifact.get("text") == INBOUND_FIXTURE_TEXT
+            and inbound_artifact.get("event_id") == INBOUND_EVENT_ID
+            and inbound_artifact.get("message_id") == INBOUND_MESSAGE_ID
+            and reply_artifact.get("text") == expected_reply
+            and reply_artifact.get("outbound_path") == expected_path
+        )
+        reply_detail = (
+            f"path={reply_port.last_path} inbound_text="
+            f"{inbound_artifact.get('text')!r} reply_text="
+            f"{reply_artifact.get('text')!r}"
+        )
+    except (OSError, ValueError, json.JSONDecodeError, KeyError) as error:
+        reply_ok = False
+        reply_detail = str(error)
+    reply_check = MessageVerifyCheck(
+        name="inbound_reply",
+        passed=bool(reply_ok),
+        detail=reply_detail,
     )
 
     timestamp = str(int(time.time()))
@@ -182,6 +247,7 @@ def verify_message(
     checks = (
         send_check,
         inbound_check,
+        reply_check,
         signature_check,
         token_check,
         imessage_check,
@@ -201,5 +267,5 @@ def format_message_report(report: MessageVerifyReport) -> str:
         for check in report.checks
     ]
     passed = sum(check.passed for check in report.checks)
-    lines.append(f"{passed}/5 passed")
+    lines.append(f"{passed}/6 passed")
     return "\n".join(lines)
