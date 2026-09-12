@@ -1,11 +1,11 @@
 ---
 name: verify-call-agent
-description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, verify-message, verify-webhooks, or verify-persistence still work. Keep the feature files under features/ current with the implementation.
+description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, book, verify-book, verify-message, verify-webhooks, or verify-persistence still work. Update features/ in the same change that ships or changes a verb.
 ---
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `verify-message`, `verify-webhooks`, `linq register-webhook`, and `verify-persistence`. Stub drives of the first five need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub verify-message does not host them. The Worker inbox ACKs Linq and does not forward into the app yet. This skill never sets `NEON_DATABASE_URL` or `R2_*`.
+call-agent is a CLI. Its user surface is `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `verify-webhooks`, `linq register-webhook`, and `verify-persistence`. Stub drives of the call and messaging verbs need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub verify-message does not host them. The Worker inbox ACKs Linq and does not forward into the app yet. This skill never sets `NEON_DATABASE_URL` or `R2_*`.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -30,7 +30,7 @@ unset NEON_DATABASE_URL R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_B
 mkdir -p "/tmp/verify-call-agent-$RUN_ID"
 ```
 
-Ready means `.venv/bin/call-agent --help` exits 0 and lists `verify-quick-ask`, `verify-message`, `verify-webhooks`, and `verify-persistence`. Two runs with different `RUN_ID` values can run at the same time.
+Ready means `.venv/bin/call-agent --help` exits 0 and lists `verify-quick-ask`, `verify-book`, `verify-message`, `verify-webhooks`, and `verify-persistence`. Two runs with different `RUN_ID` values can run at the same time.
 
 ## Doctor
 
@@ -38,7 +38,7 @@ Run before driving whenever anything looks off. All three must hold.
 
 ```bash
 .venv/bin/python -c "import call_agent; print('import ok')"
-.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-message|verify-webhooks|verify-persistence'
+.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-book|verify-message|verify-webhooks|verify-persistence'
 [ "${QUICK_ASK_LIVE:-0}" = "0" ] && echo "stub mode"
 ```
 
@@ -52,7 +52,7 @@ Run the whole path in one command. It launches, doctors, drives every mapped fea
 .cursor/skills/verify-call-agent/scripts/verify_stub.sh
 ```
 
-To drive one feature by hand, use its file under `features/`. The commands there are literal. Always pass `--user`, `--to`, `--ask`, and `--name` as written so the expected output matches.
+To drive one feature by hand, use its file under `features/`. The commands there are literal. For `quick-ask` pass `--user`, `--to`, `--ask`, and `--name` as written. For `book` pass `--user`, `--to`, `--name`, `--party`, and `--time` as written.
 
 ## Evidence
 
@@ -62,6 +62,9 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `quick-ask-result.json`. The JSON line `quick-ask` printed.
 - `quick-ask-artifacts/<call_control_id>/`. The call's `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/`, `hangup.json`, and `result.json`, copied from the scratch artifacts dir.
 - `verify-quick-ask.txt`. The five-line checklist and `5/5 passed`.
+- `book-result.json`. The JSON line `book` printed.
+- `book-artifacts/<call_control_id>/`. The booking call's artifacts, copied from the scratch artifacts dir.
+- `verify-book.txt`. The six-line checklist and `6/6 passed`.
 - `verify-message.txt`. The five-line MessagingPort checklist and `5/5 passed`.
 - `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
 - `verify-persistence.txt`. The three-line checklist, `sqlite ledger + local artifacts`, and `3/3 passed`. The partial-R2 refusal is in `transcript.txt`.

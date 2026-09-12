@@ -287,6 +287,8 @@ class StubScenario(BaseModel):
     media_sample_rate: SampleRate = 16000
     playback_never_drains: bool = False
     audio_chunks_after_closing_line: int = Field(default=2, ge=0)
+    decline_booking: bool = False
+    one_shot_booking: bool = False
 
 
 class StubGptLive:
@@ -318,55 +320,19 @@ class StubGptLive:
         lines = spec.instructions.splitlines()
         first_line = lines[1]
         ask = lines[2]
+        if "I'd like to book a table" in spec.instructions:
+            self._play_booking(first_line, ask)
+            return
         opening = (
             f"I have one quick question. {ask}"
             if self._scenario.skip_disclosure
             else f"{first_line} {ask}"
         )
-        first_half, second_half = self._halves(opening)
-        self._submit(
-            self._parse(
-                {
-                    "type": "session.output_transcript.delta",
-                    "delta": first_half,
-                }
-            )
-        )
-        self._submit(
-            self._parse(
-                {
-                    "type": "session.output_transcript.delta",
-                    "delta": second_half,
-                }
-            )
-        )
+        self._emit_output(opening)
         answer = self._scenario.canned_answer or self._answer_for(ask)
-        first_half, second_half = self._halves(answer)
-        self._submit(
-            self._parse(
-                {
-                    "type": "session.input_transcript.delta",
-                    "delta": first_half,
-                }
-            )
-        )
-        self._submit(
-            self._parse(
-                {
-                    "type": "session.input_transcript.delta",
-                    "delta": second_half,
-                }
-            )
-        )
+        self._emit_input(answer)
         self._emit_audio(2)
-        self._submit(
-            self._parse(
-                {
-                    "type": "session.output_transcript.delta",
-                    "delta": CLOSING_LINE,
-                }
-            )
-        )
+        self._emit_closing()
         self._emit_audio(self._scenario.audio_chunks_after_closing_line)
 
     async def speak_first(self, line: str) -> None:
@@ -381,6 +347,91 @@ class StubGptLive:
         self._closed = True
         self._emit_audio(1)
         self._submit(self._parse({"type": "session.closed"}))
+
+    def _play_booking(self, first_line: str, facts: str) -> None:
+        opening = (
+            f"I have a booking question. {facts}"
+            if self._scenario.skip_disclosure
+            else first_line
+        )
+        if self._scenario.one_shot_booking:
+            self._emit_output(f"{opening} Can we get a table?")
+            self._emit_input(
+                self._scenario.canned_answer or "Yes, that works."
+            )
+            self._emit_audio(2)
+            self._emit_closing()
+            self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+            return
+        self._emit_output(f"{opening} We need a table for that party size.")
+        self._emit_input(f"A table for that party size is fine. {facts}")
+        self._emit_output(f"Does {facts} work for the time?")
+        self._emit_input(f"{facts} works for us.")
+        self._emit_output(f"Any issue with the constraints in {facts}?")
+        if self._scenario.decline_booking:
+            self._emit_input(
+                self._scenario.canned_answer
+                or "We're fully booked. We can't take that reservation."
+            )
+        else:
+            self._emit_input(
+                self._scenario.canned_answer
+                or (
+                    f"You're booked. We'll see you then. "
+                    f"Reservation confirmed. {facts}"
+                )
+            )
+        self._emit_audio(2)
+        self._emit_closing()
+        self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+
+    def _emit_closing(self) -> None:
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.output_transcript.delta",
+                    "delta": CLOSING_LINE,
+                }
+            )
+        )
+
+    def _emit_output(self, text: str) -> None:
+        first_half, second_half = self._halves(text)
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.output_transcript.delta",
+                    "delta": first_half,
+                }
+            )
+        )
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.output_transcript.delta",
+                    "delta": second_half,
+                }
+            )
+        )
+
+    def _emit_input(self, text: str) -> None:
+        first_half, second_half = self._halves(text)
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.input_transcript.delta",
+                    "delta": first_half,
+                }
+            )
+        )
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.input_transcript.delta",
+                    "delta": second_half,
+                }
+            )
+        )
 
     def _emit_audio(self, chunks: int) -> None:
         audio = base64.b64encode(bytes(640)).decode()

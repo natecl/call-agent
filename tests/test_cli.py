@@ -147,6 +147,110 @@ def test_quick_ask_requires_name(tmp_path: Path) -> None:
     assert "--name" in result.output
 
 
+def test_book_stub_prints_booked_result(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--party",
+            "2",
+            "--time",
+            "Friday 7pm",
+            "--notes",
+            "outdoor if possible",
+        ],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "booked"
+    assert "booked" in payload["confirmation_text"].casefold()
+    assert payload["call_control_id"] == "stub-call-0001"
+    assert (
+        tmp_path / "artifacts" / payload["transcript_ref"]
+    ).is_file()
+
+
+def test_book_requires_party(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--time",
+            "Friday 7pm",
+        ],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "--party" in result.output
+
+
+def test_book_requires_time(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--party",
+            "2",
+        ],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "--time" in result.output
+
+
+def test_verify_book_stub_exits_zero(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-book", "--mode", "stub"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 0
+    assert "6/6 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 6
+
+
+def test_verify_book_live_requires_gate(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-book", "--mode", "live"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert LIVE_GATE_MESSAGE in result.output
+
+
+def test_verify_book_wrong_did_exits_one_with_fail_lines(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-book", "--mode", "stub", "--from-did", "+15555559999"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 1
+    assert "[FAIL] did_in_ledger" in result.stdout
+    assert "4/6 passed" in result.stdout
+
+
 def test_did_provision_twice_prints_same_did(
     tmp_path: Path,
 ) -> None:

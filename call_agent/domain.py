@@ -180,6 +180,10 @@ def first_spoken_line(caller: FirstName) -> str:
     return f"Hi, I'm calling on behalf of {caller}. I have one quick question."
 
 
+def first_book_line(caller: FirstName) -> str:
+    return f"Hi, I'm calling on behalf of {caller}. I'd like to book a table."
+
+
 def build_instructions(caller: FirstName, question: Question) -> str:
     return "\n".join(
         (
@@ -198,12 +202,98 @@ def build_instructions(caller: FirstName, question: Question) -> str:
     )
 
 
+BOOK_NEEDLES = (
+    "booked",
+    "reserved",
+    "reservation",
+    "we'll see you",
+    "we will see you",
+    "table for",
+    "you're all set",
+    "you are all set",
+    "confirmation",
+)
+
+DECLINE_BOOK_NEEDLES = (
+    "fully booked",
+    "no tables",
+    "can't take",
+    "cannot take",
+    "no availability",
+    "not available",
+    "waitlist",
+    "waiting list",
+)
+
+
+def build_book_instructions(
+    caller: FirstName,
+    party_size: int,
+    time_text: str,
+    constraints: str | None,
+) -> str:
+    notes = constraints or "none"
+    return "\n".join(
+        (
+            f"You are a polite phone assistant calling a restaurant on behalf of {caller}.",
+            first_book_line(caller),
+            (
+                f"Party size: {party_size}. "
+                f"Requested time: {time_text}. "
+                f"Constraints: {notes}."
+            ),
+            (
+                "Work with the restaurant on party, time, and constraints. "
+                "Reason about alternatives they offer. "
+                "Do not read a fixed list of questions."
+            ),
+            (
+                "Never join a hold queue or waitlist. "
+                "If they cannot seat this party at this time, accept the decline."
+            ),
+            (
+                "When the table is booked, or they clearly cannot take "
+                "the reservation, "
+                f"say exactly: {CLOSING_LINE}"
+            ),
+            "Keep every turn under two sentences.",
+        )
+    )
+
+
+def request_opener(request: QuickAskRequest | BookRequest) -> str:
+    if isinstance(request, BookRequest):
+        return first_book_line(request.caller)
+    return first_spoken_line(request.caller)
+
+
+def request_instructions(request: QuickAskRequest | BookRequest) -> str:
+    if isinstance(request, BookRequest):
+        return build_book_instructions(
+            request.caller,
+            request.party_size,
+            request.time_text,
+            request.constraints,
+        )
+    return build_instructions(request.caller, request.question)
+
+
 class QuickAskRequest(FrozenModel):
     user_id: UserId
     to: E164
     question: Question
     caller: FirstName
     mode: Mode
+
+
+class BookRequest(FrozenModel):
+    user_id: UserId
+    to: E164
+    caller: FirstName
+    mode: Mode
+    party_size: int = Field(ge=1)
+    time_text: str = Field(min_length=1)
+    constraints: str | None = None
 
 
 class Answered(FrozenModel):
@@ -239,11 +329,33 @@ class Failed(FrozenModel):
     reason: str
 
 
+class Booked(FrozenModel):
+    status: Literal["booked"] = "booked"
+    confirmation_text: str = Field(min_length=1)
+    call_control_id: str = ""
+    transcript_ref: str | None = None
+    audio_ref: str | None = None
+    answer_text: None = None
+
+
 QuickAskResult: TypeAlias = Annotated[
     Answered | Declined | NoAnswer | Failed,
     Field(discriminator="status"),
 ]
 QUICK_ASK_RESULT_ADAPTER = TypeAdapter(QuickAskResult)
+
+BookResult: TypeAlias = Annotated[
+    Booked | Declined | NoAnswer | Failed,
+    Field(discriminator="status"),
+]
+BOOK_RESULT_ADAPTER = TypeAdapter(BookResult)
+
+CallRequest: TypeAlias = QuickAskRequest | BookRequest
+CallResult: TypeAlias = Annotated[
+    Answered | Booked | Declined | NoAnswer | Failed,
+    Field(discriminator="status"),
+]
+CALL_RESULT_ADAPTER = TypeAdapter(CallResult)
 
 
 class ClientState(FrozenModel):
@@ -324,7 +436,9 @@ class Transcript(FrozenModel):
         )
 
 
-Verdict: TypeAlias = Annotated[Answered | Declined, Field(discriminator="status")]
+Verdict: TypeAlias = Annotated[
+    Answered | Booked | Declined, Field(discriminator="status")
+]
 
 
 class DialPending(FrozenModel):
@@ -472,7 +586,7 @@ HangupTrack: TypeAlias = Annotated[
 
 class Call(FrozenModel):
     run_id: RunId
-    request: QuickAskRequest
+    request: QuickAskRequest | BookRequest
     from_did: E164
     dial: DialTrack = DialPending()
     telnyx: TelnyxTrack = TelnyxAwaiting()
@@ -644,7 +758,7 @@ class CloseLiveEffect(FrozenModel):
 
 class FinishEffect(FrozenModel):
     kind: Literal["finish"] = "finish"
-    result: QuickAskResult
+    result: CallResult
 
 
 Effect: TypeAlias = Annotated[
@@ -695,6 +809,39 @@ def assess_transcript(
     return Answered(answer_text=last_business_turn)
 
 
+def assess_book(transcript: Transcript) -> Booked | Declined | None:
+    agent_text = " ".join(
+        turn.text for turn in transcript.turns if turn.speaker is Speaker.AGENT
+    )
+    collapsed = " ".join(agent_text.split())
+    if CLOSING_LINE.casefold() not in collapsed.casefold():
+        return None
+    business_text = transcript.business_text()
+    if not business_text.strip():
+        return None
+    lowered = business_text.casefold()
+    has_book = any(needle in lowered for needle in BOOK_NEEDLES)
+    has_decline = any(needle in lowered for needle in DECLINE_BOOK_NEEDLES)
+    if has_decline:
+        return Declined()
+    if not has_book:
+        return None
+    last_business_turn = next(
+        turn.text.strip()
+        for turn in reversed(transcript.turns)
+        if turn.speaker is Speaker.BUSINESS
+    )
+    return Booked(confirmation_text=last_business_turn)
+
+
+def assess_conversation(
+    transcript: Transcript, request: QuickAskRequest | BookRequest
+) -> Answered | Booked | Declined | None:
+    if isinstance(request, BookRequest):
+        return assess_book(transcript)
+    return assess_transcript(transcript, request.question)
+
+
 def _maybe_open_live(
     call: Call, settings: ReduceSettings
 ) -> tuple[Call, tuple[Effect, ...]]:
@@ -705,9 +852,7 @@ def _maybe_open_live(
     ):
         spec = LiveSessionSpec(
             model=settings.live_model,
-            instructions=build_instructions(
-                call.request.caller, call.request.question
-            ),
+            instructions=request_instructions(call.request),
             audio=LiveAudioFormat.for_codec(call.media.codec),
             voice=settings.voice,
         )
@@ -749,18 +894,16 @@ def _call_control_id(call: Call) -> str:
     return ""
 
 
-def _result_from_verdict(call: Call) -> Answered | Declined:
+def _result_from_verdict(call: Call) -> Answered | Booked | Declined:
     call_control_id = _call_control_id(call)
     if not isinstance(call.conversation, ConversationTerminal):
         raise ValueError("terminal conversation required")
     verdict = call.conversation.verdict
-    if isinstance(verdict, Answered):
-        return verdict.model_copy(update={"call_control_id": call_control_id})
     return verdict.model_copy(update={"call_control_id": call_control_id})
 
 
 def _finish(
-    call: Call, result: QuickAskResult, effects: tuple[Effect, ...] = ()
+    call: Call, result: CallResult, effects: tuple[Effect, ...] = ()
 ) -> tuple[Call, tuple[Effect, ...]]:
     finished = call.model_copy(update={"finished": True})
     return finished, effects + (FinishEffect(result=result),)
@@ -916,7 +1059,7 @@ def reduce(
         if not isinstance(call.live, LiveStarting):
             return call, ()
         effects: tuple[Effect, ...] = (
-            SpeakFirstEffect(line=first_spoken_line(call.request.caller)),
+            SpeakFirstEffect(line=request_opener(call.request)),
         ) + tuple(
             ForwardAudioEffect(payload_b64=payload)
             for payload in call.live.buffered_audio
@@ -975,7 +1118,7 @@ def reduce(
         call = call.model_copy(
             update={"conversation": ConversationOpen(transcript=transcript)}
         )
-        verdict = assess_transcript(transcript, call.request.question)
+        verdict = assess_conversation(transcript, call.request)
         if verdict is None:
             return call, ()
         updates = {

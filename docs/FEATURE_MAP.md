@@ -1,10 +1,10 @@
 # Feature map
 
-This file lists what `main` implements today. It is not a plan. It is a standing map. Each implementation updates its own rows here and its file under `.cursor/skills/verify-call-agent/features/`. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md). There is no `call-agent-web` map in this repository.
+This file lists what this tree implements today. It is not a plan. It is a standing map. Each implementation updates its own rows here and its file under `.cursor/skills/verify-call-agent/features/`. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md). There is no `call-agent-web` map in this repository.
 
 ## Status
 
-`shipped` means stub-proven on main. CI or pytest exercises it.
+`shipped` means stub-proven on this tree. CI or pytest exercises it.
 
 `gated` means a live adapter or live CLI verb exists in code and refuses to run without its keys. Telnyx live needs `QUICK_ASK_LIVE=1` plus the Telnyx and OpenAI keys in `.env.example`. Linq live send and `linq register-webhook` need `LINQ_API_TOKEN`. Register also needs `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL`. `README.md` states the Telnyx live path has not been exercised from this repository.
 
@@ -23,25 +23,39 @@ The ledger is SQLite unless `NEON_DATABASE_URL` is set. Then it is Neon.
 
 ## quick-ask
 
-CLI verb `quick-ask` drives `run_quick_ask`.
+CLI verb `quick-ask` drives `run_call` with a `QuickAskRequest`. `run_quick_ask` is the same function.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
-| `quick-ask` | shipped | Runs one outbound call through `run_quick_ask` with `--to`, `--ask`, `--name`, and `--item` for stock and aisle. | `call_agent/cli.py` `quick_ask`. `call_agent/runtime.py` `run_quick_ask`. `tests/test_cli.py` `test_quick_ask_stub_prints_answered_result`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
-| `quick-ask --live` | gated | Hosts FastAPI routes `/webhooks/telnyx` and `/media-stream` with `serve_in_process` and runs `run_quick_ask` when `--live` is set and `_require_live_gate` passes. | `call_agent/cli.py` `_run_request` `_require_live_gate`. `call_agent/server.py` `serve_in_process`. `call_agent/runtime.py` `run_quick_ask`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
-| `Call` | shipped | Holds six tracks named dial, telnyx, media, live, conversation, and hangup, and `reduce` applies every transition. | `call_agent/domain.py` `Call` `reduce`. `docs/design.md` Shape, "The call is a product of tracks, reduced by one pure function." `tests/test_domain.py` |
+| `quick-ask` | shipped | Runs one outbound call through `run_call` with `--to`, `--ask`, `--name`, and `--item` for stock and aisle. | `call_agent/cli.py` `quick_ask`. `call_agent/runtime.py` `run_call`. `tests/test_cli.py` `test_quick_ask_stub_prints_answered_result`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
+| `quick-ask --live` | gated | Hosts FastAPI routes `/webhooks/telnyx` and `/media-stream` with `serve_in_process` and runs `run_call` when `--live` is set and `_require_live_gate` passes. | `call_agent/cli.py` `_run_request` `_require_live_gate`. `call_agent/server.py` `serve_in_process`. `call_agent/runtime.py` `run_call`. `.cursor/skills/verify-call-agent/features/quick-ask.md` |
+| `Call` | shipped | Holds six tracks named dial, telnyx, media, live, conversation, and hangup, and `reduce` applies every transition. `Call.request` is `QuickAskRequest \| BookRequest`. | `call_agent/domain.py` `Call` `reduce`. `docs/design.md` Shape, "The call is a product of tracks, reduced by one pure function." `tests/test_domain.py` |
 | `HANGUP_MARK` | shipped | Sends one Telnyx mark named `hangup` after live closes, and `clean_hangup` requires `marks_sent == 1`. | `call_agent/domain.py` `HANGUP_MARK = "hangup"`. `call_agent/verify.py` `clean_hangup`. `tests/test_domain.py` `test_goodbye_audio_storm_sends_one_final_mark_after_live_closes_and_hangs_up_once`. `tests/test_runtime.py` `test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail`. `tests/test_verify_quick_ask.py` `test_verify_passes_with_one_final_mark_when_goodbye_audio_storms` |
-| `CLOSING_LINE` | shipped | `assess_transcript` joins agent text, sets `collapsed = " ".join(agent_text.split())`, and requires casefold containment of `Thanks, that's all I needed. Goodbye.`. | `call_agent/domain.py` `CLOSING_LINE` `assess_transcript`. `tests/test_domain.py` `test_split_closing_turns_still_verdict_and_enter_hangup_drain` |
+| `CLOSING_LINE` | shipped | `assess_transcript` and `assess_book` join agent text, set `collapsed = " ".join(agent_text.split())`, and require casefold containment of `Thanks, that's all I needed. Goodbye.`. | `call_agent/domain.py` `CLOSING_LINE` `assess_transcript` `assess_book`. `tests/test_domain.py` `test_split_closing_turns_still_verdict_and_enter_hangup_drain` `test_assess_book_waits_for_closing_then_books_or_declines` |
 | `HangupTrailElapsedEvent` | shipped | Schedules `HangupTrailElapsedEvent` after `hangup_trailing_silence_s` of 0.4 s on the final mark echo and hangs up with path trail, and a 10 s `HangupDrainTimeoutEvent` fails `clean_hangup`. | `call_agent/domain.py` `HangupTrailElapsedEvent` `HangupDrainTimeoutEvent`. `call_agent/config.py` `hangup_trailing_silence_s` `hangup_drain_timeout_s`. `call_agent/verify.py` `marks_sent == 1` `hangup_path == "trail"` last audio then trail then `call.hangup`. `docs/design.md` Shape, "The hangup waits for the goodbye." |
+
+## book
+
+CLI verb `book` drives `run_call` with a `BookRequest`. This section stays next to `quick-ask`. It is not an appendix.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `book` | shipped | Runs one outbound booking call through `run_call` with `--to`, `--name`, `--party`, `--time`, and optional `--notes`. Stub `StubGptLive` walks party, time, and constraints, then a booked or declined close. | `call_agent/cli.py` `book`. `call_agent/runtime.py` `run_call`. `call_agent/domain.py` `BookRequest` `assess_book`. `tests/test_cli.py` `test_book_stub_prints_booked_result`. `.cursor/skills/verify-call-agent/features/book.md` |
+| `book --live` | gated | Same live gate as `quick-ask --live`. Hosts FastAPI routes and runs `run_call` when `--live` is set and `_require_live_gate` passes. This repository has not dialed live book. Later live target is `+17272701288`. | `call_agent/cli.py` `_run_request` `_require_live_gate`. `call_agent/server.py` `serve_in_process`. `.cursor/skills/verify-call-agent/features/book.md` |
+| `BookRequest` | shipped | Holds `party_size` (>= 1), `time_text`, and optional `constraints`. | `call_agent/domain.py` `BookRequest`. `tests/test_domain.py` `test_book_result_is_discriminated_and_confirmation_is_nonempty` |
+| `BookResult` | shipped | Discriminated union on `status`: `booked` requires `confirmation_text`, `declined` / `no_answer` / `failed` pin it absent. | `call_agent/domain.py` `Booked` `BookResult`. `tests/test_domain.py` `test_assess_book_waits_for_closing_then_books_or_declines` |
+| `build_book_instructions` | shipped | Disclosure line `I'd like to book a table`, then party, time, and constraints. Tells the model to reason, not read a script, and never join a hold or waitlist. | `call_agent/domain.py` `first_book_line` `build_book_instructions`. `tests/test_domain.py` `test_build_book_instructions_puts_disclosure_before_facts` |
+| `assess_book` | shipped | Pure. Needs `CLOSING_LINE`, then booked needles or decline needles. Decline wins when both match (`fully booked` contains `booked`). A close without either needle is not a verdict. | `call_agent/domain.py` `assess_book` `BOOK_NEEDLES` `DECLINE_BOOK_NEEDLES`. `tests/test_domain.py` `test_assess_book_waits_for_closing_then_books_or_declines` |
+| `StubScenario` booking faults | shipped | `one_shot_booking` emits one ask and one answer so `multi_turn_booking` fails. `decline_booking` walks the same turns and ends `declined`. | `call_agent/gpt_live.py` `StubScenario` `StubGptLive._play_booking`. `tests/test_verify_book.py` `test_verify_book_fails_one_shot_theater` `test_verify_book_passes_on_clear_decline` |
 
 ## Run directory
 
-Each `quick-ask` run writes one run directory.
+Each `quick-ask` or `book` run writes one run directory.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | run directory | shipped | Writes `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json` under `CALL_AGENT_ARTIFACTS_DIR` in a directory named for `call_control_id`. | `call_agent/runtime.py` `RunDir`. `README.md`. `docs/design.md` Shape, "Artifacts are the proof." |
-| `CallReport` | shipped | Records `timing_ms`, `hangup.path` as trail, drain_timeout, failure, or far_party, `counts.marks_sent`, and refs, and `result_artifact` checks that `CallReport` and those refs exist. | `call_agent/report.py` `CallReport` `HangupSummary.path` `Counts.marks_sent`. `call_agent/verify.py` `result_artifact`. `tests/test_verify_quick_ask.py` |
+| `CallReport` | shipped | Records `timing_ms`, `hangup.path` as trail, drain_timeout, failure, or far_party, `counts.marks_sent`, and refs. `status` includes `booked`. For a booked result, `answer_text` is the confirmation. `result_artifact` checks that `CallReport` and those refs exist. | `call_agent/report.py` `CallReport` `HangupSummary.path` `Counts.marks_sent`. `call_agent/verify.py` `result_artifact`. `tests/test_verify_quick_ask.py`. `tests/test_verify_book.py` |
 | `call_report.redacted.json` | shipped | Writes a `RedactedCallReport` sibling from `redact_call_report` after `call_report.json`. Phone fields are `[phone]`. The caller field is `[name]` or `None`. | `call_agent/report.py` `redact_call_report`. `call_agent/runtime.py` `RunDir.finish`. `tests/test_report.py` |
 
 ## verify-quick-ask
@@ -53,23 +67,35 @@ CLI verb `verify-quick-ask` calls `verify_quick_ask`.
 | `verify-quick-ask` | shipped | Runs five checks: `did_in_ledger`, `dial_payload`, `disclosure_first`, `clean_hangup`, and `result_artifact`. | `call_agent/cli.py` `verify_quick_ask_command`. `call_agent/verify.py` `verify_quick_ask`. `.github/workflows/ci.yml`. `tests/test_verify_quick_ask.py`. `tests/test_cli.py` `test_verify_quick_ask_stub_exits_zero`. `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
 | `verify-quick-ask --mode live` | gated | The CLI exits 2 unless `QUICK_ASK_LIVE=1`. `verify_quick_ask` still provisions with `StubTelnyxHttp` and does not call `serve_in_process`. | `call_agent/cli.py` `verify_quick_ask_command`. `call_agent/verify.py` `verify_quick_ask`. `tests/test_cli.py` `test_verify_quick_ask_live_requires_gate` `test_verify_quick_ask_live_names_missing_keys` |
 
-## verify-call-agent
+## verify-book
 
-The Cursor skill drives the stub CLI verbs and never sets live keys or Neon and R2 vars.
+CLI verb `verify-book` calls `verify_book`. This section stays next to `verify-quick-ask`.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
-| `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode or sets Neon and R2 vars. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `verify-message`, `webhooks`, `linq-inbound`, `verify-webhooks`, and `verify-persistence` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `verify-book` | shipped | Runs six checks: `did_in_ledger`, `dial_payload`, `disclosure_first`, `clean_hangup` (`booked` or `declined`), `result_artifact`, and `multi_turn_booking`. | `call_agent/cli.py` `verify_book_command`. `call_agent/verify.py` `verify_book`. `tests/test_verify_book.py`. `tests/test_cli.py` `test_verify_book_stub_exits_zero`. `.github/workflows/ci.yml`. `.cursor/skills/verify-call-agent/features/verify-book.md` |
+| `multi_turn_booking` | shipped | Requires at least three agent turns and two business turns, party and time and constraints spoken, and status `booked` or `declined`. A one-shot stub fails this check. | `call_agent/verify.py` `verify_book`. `tests/test_verify_book.py` `test_verify_book_fails_one_shot_theater`. `.cursor/skills/verify-call-agent/features/verify-book.md` |
+| `verify-book --mode live` | gated | The CLI exits 2 unless `QUICK_ASK_LIVE=1`. `verify_book` still provisions with `StubTelnyxHttp` and does not call `serve_in_process`. | `call_agent/cli.py` `verify_book_command`. `tests/test_cli.py` `test_verify_book_live_requires_gate` |
+
+## verify-call-agent
+
+The Cursor skill drives the CLI verbs in stub mode and never sets live keys or Neon and R2 vars. Its `features/` directory is a standing map. Update it in the same change that ships or changes a verb.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode or sets Neon and R2 vars. Lists `book`, `verify-book`, `verify-message`, `verify-webhooks`, and `verify-persistence`. | `.cursor/skills/verify-call-agent/SKILL.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `webhooks`, `linq-inbound`, `verify-webhooks`, and `verify-persistence` recipes. | `.cursor/skills/verify-call-agent/features/README.md` `tests/test_feature_map.py` |
 | `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ACK ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
 | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the five stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
+| `.cursor/skills/verify-call-agent/features/book.md` | shipped | Covers stub book, missing flags, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/book.md` |
+| `.cursor/skills/verify-call-agent/features/verify-book.md` | shipped | Covers the six stub checks, theater fail, decline, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-book.md` |
 | `.cursor/skills/verify-call-agent/features/verify-message.md` | shipped | Covers the five MessagingPort checks and the register-webhook gate. | `.cursor/skills/verify-call-agent/features/verify-message.md` |
 | `.cursor/skills/verify-call-agent/features/verify-persistence.md` | shipped | Covers the three stub checks, the SQLite and local fallback, and the misconfig exit. | `.cursor/skills/verify-call-agent/features/verify-persistence.md` |
-| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-message`, `verify-webhooks`, `verify-persistence`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
+| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-book`, `verify-message`, `verify-webhooks`, `verify-persistence`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
 
 ## Always-on webhooks
 
@@ -115,9 +141,9 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever. `verify-persistence` is the later port lever. It is listed under Durable persistence.
+`docs/design.md` Usage shows `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `book`, and `verify-book`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever. `verify-persistence` is the later port lever. It is listed under Durable persistence.
 
-`README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook.
+`README.md` states hold queues, packaging, and SMS are out of scope. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook. Restaurant book is shipped in stub. This repository has not dialed live book. Neon and R2 ports are shipped with sqlite and local fallback. Live Neon and R2 stay gated on env.
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
 
@@ -125,8 +151,7 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
-| `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
-| hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
+| hold queues | not shipped | Named out of scope in `README.md`. `build_book_instructions` says never join a hold or waitlist. `build_instructions` for quick-ask still says never book. | `README.md`. `call_agent/domain.py` `build_book_instructions` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
 | Worker→app Linq forward | not shipped | Worker ACKs `POST /linq/webhook`. FastAPI `process_linq_webhook` is the process path. No bridge yet. | `workers/webhooks/src/handler.ts`. `call_agent/server.py` `process_linq_webhook` |
 | Linq SMS | not shipped | Worker exposes `POST /linq/webhook` with `implemented: false`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |

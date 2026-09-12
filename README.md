@@ -2,9 +2,9 @@
 
 A phone agent that calls a business on your behalf, asks one quick question, and writes down the answer. You paste an E.164 number, pick `hours`, `stock`, or `aisle`, and give your first name. The agent dials from a Telnyx number that belongs to you, opens with "I'm calling on behalf of Nathan", gets the answer, hangs up, and leaves a result, a transcript, and the call audio on disk.
 
-The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a DID ledger that defaults to SQLite. Set `NEON_DATABASE_URL` to use Neon. Set the four `R2_*` vars to put finished artifacts on R2. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
+The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a DID ledger that defaults to SQLite. Set `NEON_DATABASE_URL` to use Neon. Set the four `R2_*` vars to put finished artifacts on R2. The design and its rationale are in [docs/design.md](docs/design.md). What this tree implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md). The standing verification map is [`.cursor/skills/verify-call-agent/features/`](.cursor/skills/verify-call-agent/features/README.md). Both maps update when a lever ships.
 
-Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook and the `MessagingPort` process path. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, packaging, and SMS are out of scope. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
+Day 1 ships quick-ask and restaurant book. Closed alpha includes iMessage inbound through the Linq Worker hook and the `MessagingPort` process path. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Hold queues, packaging, and SMS are out of scope. Telnyx vs Linq is in [docs/linq.md](docs/linq.md). This repository has not dialed live book.
 
 ## Public webhook URL (Linq, register now)
 
@@ -23,15 +23,18 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
 call-agent verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub
+call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub
 ```
 
-You should see five `[PASS]` lines and `5/5 passed`, and the command exits 0. The five checks are:
+`verify-quick-ask` should print five `[PASS]` lines and `5/5 passed`, and exit 0. The five checks are:
 
 1. `did_in_ledger`. The user has exactly one number in the ledger, and provisioning twice returns the same number.
 2. `dial_payload`. The Call Control body has `from` set to that number, `to` set to the destination, a `wss://` `stream_url`, `stream_bidirectional_mode: rtp`, and `stream_bidirectional_target_legs: self`.
 3. `disclosure_first`. The GPT-Live `session.start` instructions name the caller ("on behalf of Nathan") before the question, and the agent's first transcript turn does too.
 4. `clean_hangup`. The verdict comes from the transcript, the agent closes GPT-Live and plays out what it still sends, sends exactly one Telnyx mark named `hangup` once GPT-Live confirms the close, Telnyx echoes it, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s), or a call that sends more than one mark, fails this check.
 5. `result_artifact`. `result.json` is a valid `QuickAskResult`, its `transcript_ref` and `audio_ref` point at files that exist, and `call_report.json` is a valid `CallReport` whose refs exist.
+
+`verify-book` should print six `[PASS]` lines and `6/6 passed`. The first five checks match `verify-quick-ask`, except `clean_hangup` expects `booked` or `declined`. The sixth check is `multi_turn_booking`. The transcript must have at least three agent turns and two business turns, and it must mention party, time, and constraints. A one-shot stub that skips that conversation fails this check and exits 1.
 
 To run the test suite:
 
@@ -56,9 +59,10 @@ call-agent did provision --user default
 call-agent did list
 call-agent quick-ask --to +14155552671 --ask hours --name Nathan
 call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nathan
+call-agent book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible"
 ```
 
-`quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json`.
+`quick-ask` prints one JSON object with `status` (`answered`, `declined`, `no_answer`, or `failed`), `answer_text`, `call_control_id`, `transcript_ref`, and `audio_ref`. `book` prints `status` (`booked`, `declined`, `no_answer`, or `failed`) and `confirmation_text` on a booked result. The refs are relative to `CALL_AGENT_ARTIFACTS_DIR`. Each call writes one directory there with `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json`.
 
 Laptop and stub mode keep the ledger in `CALL_AGENT_DB_PATH` (SQLite) and the full run directory on disk. When `NEON_DATABASE_URL` is set, `did provision` and `did list` use Neon with the same `dids` table. When `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` are all set, `finish` also puts `transcript.json`, `result.json`, `call_report.json`, and both audio files to that bucket. `events.jsonl`, `dial.json`, and `call_report.redacted.json` stay on the local disk. A partial R2 set fails before the call starts. Install `psycopg[binary]` before setting the Neon URL.
 
@@ -78,9 +82,9 @@ Live mode places a real call. It is gated so that no test or CI run can reach th
 2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx opens the media socket at that host on `/media-stream`. For local-only webhook tests you can leave `PUBLIC_WEBHOOK_URL` empty so Telnyx also posts to `PUBLIC_BASE_URL/webhooks/telnyx`. Production webhooks use the always-on Worker at `https://call-agent-webhooks.blossom-linen.workers.dev`. Set `PUBLIC_WEBHOOK_URL` and the Telnyx Call Control application webhook to `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Linq registers `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` (alias `/webhooks/linq`). The Worker does not terminate media. A request to `/media-stream` on the Worker returns 501. See [workers/webhooks/README.md](workers/webhooks/README.md).
 3. Set `QUICK_ASK_LIVE=1`.
 4. Provision a real number once with `call-agent did provision --user default --live`. The Numbers API orders a voice-capable US number and records it in the ledger. Without `--live` the verb records a stub number.
-5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends.
+5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends. `call-agent book --to +1... --name Nathan --party 2 --time "Friday 7pm" --live` is the same path with a `BookRequest`. The later live target for book is `+17272701288`. Do not dial it until the tunnel and keys above are set. This PR does not place that call.
 
-`call-agent verify-quick-ask --mode live` runs the same five checks against a real call. Only call numbers you control until you have reviewed consent, calling-hour, and AI-disclosure rules for your destination.
+`call-agent verify-quick-ask --mode live` runs the same five checks against a real call. `call-agent verify-book --mode live` is gated the same way and still runs the stub adapters unless you change the code. Only call numbers you control until you have reviewed consent, calling-hour, and AI-disclosure rules for your destination.
 
 Prove the Worker inbox without deploying:
 

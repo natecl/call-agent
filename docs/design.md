@@ -21,6 +21,16 @@ $ call-agent verify-quick-ask
 [PASS] clean_hangup       verdict answered, one final mark echoed, trail, then hangup, then call.hangup
 [PASS] result_artifact    result.json and call_report.json valid, every ref exists
 5/5 passed
+$ call-agent book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible"
+{"status": "booked", "confirmation_text": "You're booked. We'll see you then. Reservation confirmed. Party size: 2. Requested time: Friday 7pm. Constraints: outdoor if possible.", "call_control_id": "stub-call-0001", "transcript_ref": "stub-call-0001/transcript.json", "audio_ref": "stub-call-0001/audio/inbound.wav", "answer_text": null}
+$ call-agent verify-book
+[PASS] did_in_ledger      one row for user verify, from_did +15555550100
+[PASS] dial_payload       from=+15555550100 to=+14155552671 stream_url=wss://... rtp/self
+[PASS] disclosure_first   "on behalf of Nathan" before "I'd like to book a table"
+[PASS] clean_hangup       verdict booked, one final mark echoed, trail, then hangup
+[PASS] result_artifact    result.json and call_report.json valid, every ref exists
+[PASS] multi_turn_booking  >=3 agent turns, >=2 business turns, party/time/constraints spoken
+6/6 passed
 ```
 
 `quick-ask --ask stock` and `--ask aisle` also take `--item`. `--live` requires `QUICK_ASK_LIVE=1`, the keys in `.env.example`, and a public `PUBLIC_BASE_URL` that reaches this process. The programmatic caller and the pytest use the same two functions:
@@ -28,6 +38,8 @@ $ call-agent verify-quick-ask
 ```python
 result = await run_quick_ask(request, settings)
 report = verify_quick_ask(VerifyInput(), workspace)
+result = await run_call(book_request, settings)
+report = verify_book(BookVerifyInput(), workspace)
 ```
 
 ## Shape
@@ -85,4 +97,4 @@ Deleted from candidate 2: the restart-replay effect outbox, `LifecycleEvidence`,
 
 ## Next implementation step
 
-`domain.py` first: tokens, `Call` with its six tracks, `reduce`, `assess_transcript`, and the question table, driven by a failing `tests/test_verify_quick_ask.py` that calls `verify_quick_ask` against an empty workspace.
+Live book against `+17272701288` once `QUICK_ASK_LIVE=1`, keys, and a public tunnel are set. Do not dial from CI.

@@ -13,7 +13,7 @@ from .domain import (
     HangupRequested,
     HangupVia,
     Mode,
-    QuickAskResult,
+    CallResult,
     ReduceSettings,
     TelnyxEnded,
 )
@@ -72,7 +72,7 @@ class CallReport(FrozenModel):
     mode: Mode
     to: E164
     from_did: E164
-    status: Literal["answered", "declined", "no_answer", "failed"]
+    status: Literal["answered", "booked", "declined", "no_answer", "failed"]
     answer_text: str | None
     reason: str | None
     started_at: datetime
@@ -99,7 +99,7 @@ class RedactedCallReport(FrozenModel):
     to: MaskedE164
     from_did: MaskedE164
     caller_first_name: MaskedFirstName | None
-    status: Literal["answered", "declined", "no_answer", "failed"]
+    status: Literal["answered", "booked", "declined", "no_answer", "failed"]
     started_at: datetime
     ended_at: datetime
     duration_ms: int
@@ -177,7 +177,7 @@ def _hangup_path(call: Call) -> HangupPath | None:
 
 def build_call_report(
     call: Call,
-    result: QuickAskResult,
+    result: CallResult,
     rows: list[JournalRow],
     started_at: datetime,
     ended_at: datetime,
@@ -210,7 +210,11 @@ def build_call_report(
         to=call.request.to,
         from_did=call.from_did,
         status=result.status,
-        answer_text=result.answer_text,
+        answer_text=(
+            result.confirmation_text
+            if result.status == "booked"
+            else result.answer_text
+        ),
         reason=getattr(result, "reason", None),
         started_at=started_at,
         ended_at=ended_at,

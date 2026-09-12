@@ -5,8 +5,11 @@ import pytest
 from pydantic import ValidationError
 
 from call_agent.domain import (
+    BOOK_RESULT_ADAPTER,
     CLOSING_LINE,
     Answered,
+    Booked,
+    BookRequest,
     Call,
     CloseLiveEffect,
     Codec,
@@ -52,7 +55,9 @@ from call_agent.domain import (
     Turn,
     UserId,
     WebhookEvent,
+    assess_book,
     assess_transcript,
+    build_book_instructions,
     build_instructions,
     reduce,
 )
@@ -515,3 +520,82 @@ def test_quick_ask_result_is_discriminated_and_answer_is_nonempty() -> None:
     assert dumped == raw_results
     with pytest.raises(ValidationError):
         Answered(answer_text="")
+
+
+def test_assess_book_waits_for_closing_then_books_or_declines() -> None:
+    talk = Transcript().append_delta(
+        Speaker.BUSINESS, "You're booked. We'll see you Friday."
+    )
+
+    before_close = assess_book(talk)
+    after_close = assess_book(
+        talk.append_delta(
+            Speaker.AGENT, "Thanks, that's all I needed. Goodbye."
+        )
+    )
+    declined = assess_book(
+        Transcript()
+        .append_delta(
+            Speaker.BUSINESS, "We're fully booked. We can't take that."
+        )
+        .append_delta(
+            Speaker.AGENT, "Thanks, that's all I needed. Goodbye."
+        )
+    )
+    theater = assess_book(
+        Transcript()
+        .append_delta(Speaker.BUSINESS, "Yes, that works.")
+        .append_delta(
+            Speaker.AGENT, "Thanks, that's all I needed. Goodbye."
+        )
+    )
+
+    assert before_close is None
+    assert after_close == Booked(
+        confirmation_text="You're booked. We'll see you Friday."
+    )
+    assert declined == Declined()
+    assert theater is None
+
+
+def test_build_book_instructions_puts_disclosure_before_facts() -> None:
+    instructions = build_book_instructions(
+        FirstName("Nathan"), 2, "Friday 7pm", "outdoor if possible"
+    )
+
+    assert instructions.index("on behalf of Nathan") < instructions.index(
+        "I'd like to book a table"
+    )
+    assert "Party size: 2." in instructions
+    assert "Requested time: Friday 7pm." in instructions
+    assert "Constraints: outdoor if possible." in instructions
+    assert "hold queue" in instructions
+    assert "Never book, reserve, or hold anything." not in instructions
+
+
+def test_book_result_is_discriminated_and_confirmation_is_nonempty() -> None:
+    booked = {
+        "status": "booked",
+        "confirmation_text": "You're booked for Friday.",
+        "call_control_id": "call-1",
+        "transcript_ref": "call-1/transcript.json",
+        "audio_ref": "call-1/audio/inbound.wav",
+        "answer_text": None,
+    }
+
+    dumped = BOOK_RESULT_ADAPTER.validate_python(booked).model_dump(
+        mode="json"
+    )
+
+    assert dumped == booked
+    with pytest.raises(ValidationError):
+        Booked(confirmation_text="")
+    with pytest.raises(ValidationError):
+        BookRequest(
+            user_id=UserId("user-1"),
+            to=E164("+14155552671"),
+            caller=FirstName("Nathan"),
+            mode=Mode.STUB,
+            party_size=0,
+            time_text="Friday 7pm",
+        )

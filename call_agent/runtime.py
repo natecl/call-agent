@@ -36,8 +36,9 @@ from .domain import (
     Mode,
     OpenLiveEffect,
     PlayAudioEffect,
+    BookRequest,
+    CallResult,
     QuickAskRequest,
-    QuickAskResult,
     ReduceSettings,
     RunId,
     SampleRate,
@@ -165,10 +166,10 @@ class RunDir:
 
     def finish(
         self,
-        result: QuickAskResult,
+        result: CallResult,
         call: Call,
         settings: ReduceSettings,
-    ) -> QuickAskResult:
+    ) -> CallResult:
         self.write_transcript(call.conversation.transcript)
         self._write_audio()
         refs = Refs(
@@ -314,7 +315,7 @@ class CallHandle:
         self.dial_spec = dial_spec
         self.artifact_store = artifact_store
         self._sequence = 0
-        self._result: QuickAskResult | None = None
+        self._result: CallResult | None = None
         self._reduce_settings = ReduceSettings(
             live_model=settings.openai_live_model,
             voice=settings.openai_live_voice,
@@ -328,7 +329,7 @@ class CallHandle:
     def bind_media(self, media: TelnyxMedia) -> None:
         self.ports.telnyx_media = media
 
-    async def run(self) -> QuickAskResult:
+    async def run(self) -> CallResult:
         await self._perform(DialEffect(spec=self.dial_spec))
         while self._result is None:
             try:
@@ -496,12 +497,12 @@ def validate_live(settings: Settings) -> None:
         )
 
 
-async def run_quick_ask(
-    request: QuickAskRequest,
+async def run_call(
+    request: QuickAskRequest | BookRequest,
     settings: Settings,
     ports: Ports | None = None,
     scenario: StubScenario | None = None,
-) -> QuickAskResult:
+) -> CallResult:
     if request.mode is Mode.LIVE:
         validate_live(settings)
     settings.ledger_config()
@@ -565,3 +566,6 @@ async def run_quick_ask(
         return await handle.run()
     finally:
         BOOK._drop_handle(handle)
+
+
+run_quick_ask = run_call
