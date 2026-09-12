@@ -202,3 +202,27 @@ def test_linq_register_webhook_fails_without_url(
 
     assert result.exit_code == 2
     assert "LINQ_WEBHOOK_URL" in result.output
+
+
+def test_verify_webhooks_stub_exits_zero(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-webhooks"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 0
+    assert "5/5 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 5
+
+
+def test_verify_webhooks_broken_url_fails_loud(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-webhooks", "--url", "http://127.0.0.1:9"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 1
+    assert "[FAIL]" in result.stdout
+    assert "5/5 passed" not in result.stdout

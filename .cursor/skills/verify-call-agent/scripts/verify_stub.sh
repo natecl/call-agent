@@ -28,6 +28,7 @@ step "doctor"
 run "$PY" -c "import call_agent; print('import ok')"
 run "$CLI" --help | grep -q "verify-quick-ask" || { echo "verify-quick-ask verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-message" || { echo "verify-message verb missing from --help"; exit 1; }
+run "$CLI" --help | grep -q "verify-webhooks" || { echo "verify-webhooks verb missing from --help"; exit 1; }
 
 step "did provision twice returns the same DID"
 FIRST="$(run "$CLI" did provision --user default | tail -n1)"
@@ -63,6 +64,10 @@ run "$CLI" linq register-webhook
 REGISTER_EXIT=$?
 set -e
 [ "$REGISTER_EXIT" -eq 2 ] || { echo "expected exit 2 for register-webhook without token, got $REGISTER_EXIT"; exit 1; }
+
+step "verify-webhooks stub checklist"
+run "$CLI" verify-webhooks | tee "$EVIDENCE/verify-webhooks.txt" >/dev/null
+grep -q "5/5 passed" "$EVIDENCE/verify-webhooks.txt"
 
 step "live mode is gated"
 set +e

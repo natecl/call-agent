@@ -15,12 +15,12 @@ class Settings(BaseSettings):
     linq_from_e164: str | None = None
     linq_webhook_signing_secret: str | None = None
     linq_webhook_url: str | None = None
-    public_webhook_url: str | None = None
     openai_api_key: str | None = None
     openai_live_model: str = "gpt-live-1"
     openai_live_voice: str = "marin"
     openai_live_extra_headers: str | None = None
     public_base_url: str = "https://stub.invalid"
+    public_webhook_url: str | None = None
     port: int = Field(default=8000, validation_alias="CALL_AGENT_PORT")
     call_agent_db_path: Path = Path("./call_agent.sqlite3")
     call_agent_artifacts_dir: Path = Path("./artifacts")

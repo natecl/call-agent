@@ -33,7 +33,7 @@ from call_agent.domain import (
     UserId,
 )
 from call_agent.gpt_live import StubGptLive
-from call_agent.runtime import CallHandle, Ports, RunDir
+from call_agent.runtime import CallHandle, Ports, RunDir, run_quick_ask
 from call_agent.telnyx import StubTelnyxHttp, parse_media_frame
 
 AUDIO = base64.b64encode(bytes(640)).decode()
@@ -246,3 +246,36 @@ async def test_drain_timeout_hangs_up_anyway_and_journals_the_timeout(
         "kind": "hangup_requested",
         "via": "drain_timeout",
     }
+
+
+async def test_dial_uses_worker_webhook_and_tunnel_media(
+    settings: Settings,
+) -> None:
+    split = Settings(
+        _env_file=None,
+        call_agent_db_path=settings.call_agent_db_path,
+        call_agent_artifacts_dir=settings.call_agent_artifacts_dir,
+        public_base_url="https://tunnel.example.test",
+        public_webhook_url=(
+            "https://call-agent-webhooks.example.workers.dev"
+        ),
+    )
+    request = QuickAskRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        question=Question.from_cli(QuestionType.HOURS, None),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+    )
+    result = await run_quick_ask(request, split)
+    dial = json.loads(
+        (
+            split.call_agent_artifacts_dir
+            / result.call_control_id
+            / "dial.json"
+        ).read_text()
+    )
+    assert dial["webhook_url"] == (
+        "https://call-agent-webhooks.example.workers.dev/webhooks/telnyx"
+    )
+    assert dial["stream_url"] == "wss://tunnel.example.test/media-stream"

@@ -451,6 +451,17 @@ class CallBook:
 BOOK = CallBook()
 
 
+def webhook_and_stream_urls(settings: Settings) -> tuple[str, str]:
+    media_base = settings.public_base_url.rstrip("/")
+    webhook_base = (
+        settings.public_webhook_url or settings.public_base_url
+    ).rstrip("/")
+    return (
+        f"{webhook_base}/webhooks/telnyx",
+        f"{media_base.replace('https://', 'wss://', 1)}/media-stream",
+    )
+
+
 def validate_live(settings: Settings) -> None:
     missing: list[str] = []
     if not settings.quick_ask_live:
@@ -507,15 +518,13 @@ async def run_quick_ask(
         raise RuntimeError(
             f"DID order {record.order_id} is still pending"
         )
-    base_url = settings.public_base_url.rstrip("/")
+    webhook_url, stream_url = webhook_and_stream_urls(settings)
     dial_spec = DialSpec(
         connection_id=connection_id,
         to=request.to,
         from_did=record.did,
-        stream_url=(
-            f"{base_url.replace('https://', 'wss://', 1)}/media-stream"
-        ),
-        webhook_url=f"{base_url}/webhooks/telnyx",
+        stream_url=stream_url,
+        webhook_url=webhook_url,
         codec=codec,
         client_state=ClientState(
             run_id=run_id,

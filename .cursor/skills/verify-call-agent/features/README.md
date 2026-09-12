@@ -1,6 +1,8 @@
 # call-agent verification map
 
-This directory is the maintained source for verifying the user-facing behavior of the call-agent CLI. Read this index before driving, then use the matching feature file as the recipe.
+This directory is the standing feature map for call-agent. Each implementation keeps its own file current. `docs/FEATURE_MAP.md` holds the same rows for `main`. A one-shot edit of `FEATURE_MAP.md` without a file here is not enough. There is no `call-agent-web` map in this repository.
+
+Read this index before driving, then use the matching feature file as the recipe.
 
 ## Baseline preconditions
 
@@ -38,3 +40,6 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
 - [Verify quick-ask](./verify-quick-ask.md) covers the five-check lever in stub mode and its exit codes.
 - [Verify message](./verify-message.md) covers the MessagingPort + Linq V3 stub lever and the register-webhook gate.
+- [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
+- [Linq inbound (closed alpha)](./linq-inbound.md) covers the iMessage L1 ingress hook. SMS stays off.
+- [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.

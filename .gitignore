@@ -8,3 +8,5 @@ dist/
 .env
 *.sqlite3
 artifacts/
+workers/webhooks/node_modules/
+workers/webhooks/.wrangler/

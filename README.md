@@ -4,7 +4,15 @@ A phone agent that calls a business on your behalf, asks one quick question, and
 
 The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a SQLite ledger of numbers. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
 
-Day 1 ships quick-ask. Closed-alpha also includes the Linq iMessage path on the sandbox line: `MessagingPort`, outbound `parts` text, and inbound `message.received` mapping. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, and packaging stay out of scope. SMS stays off. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
+Day 1 ships quick-ask. Closed-alpha also includes the Linq iMessage path: `MessagingPort` and outbound `parts` text in this process, plus inbound ACK at the Worker hook. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, and packaging stay out of scope. SMS stays off. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
+
+## Public webhook URL (Linq, register now)
+
+Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inbound path. Builder can register it now. No Nathan click. SMS stays off.
+
+`https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
+
+`POST` (and `GET`) return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. The Worker ACKs only. FastAPI `POST /webhooks/linq` is the process path. Forward from Worker to app is a follow-up. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Run the stub verification
 
@@ -63,14 +71,28 @@ Start with `call_report.json`. It names the call (`call_control_id`, `run_id`, `
 Live mode places a real call. It is gated so that no test or CI run can reach the network by accident.
 
 1. Copy `.env.example` to `.env` and fill in `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, and `OPENAI_API_KEY`. Keep `.env` out of git.
-2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx posts webhooks to `PUBLIC_BASE_URL/webhooks/telnyx` and opens the media socket at the same host on `/media-stream`. In the Telnyx portal, set the Call Control application's webhook URL to the same `/webhooks/telnyx` address.
+2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx opens the media socket at that host on `/media-stream`. For local-only webhook tests you can leave `PUBLIC_WEBHOOK_URL` empty so Telnyx also posts to `PUBLIC_BASE_URL/webhooks/telnyx`. Production webhooks use the always-on Worker at `https://call-agent-webhooks.blossom-linen.workers.dev`. Set `PUBLIC_WEBHOOK_URL` and the Telnyx Call Control application webhook to `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Linq registers `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` (alias `/webhooks/linq`). The Worker does not terminate media. A request to `/media-stream` on the Worker returns 501. See [workers/webhooks/README.md](workers/webhooks/README.md).
 3. Set `QUICK_ASK_LIVE=1`.
 4. Provision a real number once with `call-agent did provision --user default --live`. The Numbers API orders a voice-capable US number and records it in the ledger. Without `--live` the verb records a stub number.
 5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends.
 
 `call-agent verify-quick-ask --mode live` runs the same five checks against a real call. Only call numbers you control until you have reviewed consent, calling-hour, and AI-disclosure rules for your destination.
 
-The live path is written to the recipe but has not been exercised against Telnyx or OpenAI from this repository. The three things it needs that this repository cannot supply are the Telnyx keys, the OpenAI key with GPT-Live access, and a public tunnel URL.
+Prove the Worker inbox without deploying:
+
+```bash
+call-agent verify-webhooks
+```
+
+You should see five `[PASS]` lines and `5/5 passed`. Against a deployed Worker:
+
+```bash
+call-agent verify-webhooks --url https://call-agent-webhooks.blossom-linen.workers.dev
+```
+
+Unsigned Telnyx POSTs must be 401. If they are 200, signature verification is unwired and the lever fails.
+
+The live path is written to the recipe but has not been exercised against Telnyx or OpenAI from this repository. The things it needs that this repository cannot supply are the Telnyx keys, the OpenAI key with GPT-Live access, and a public media `wss://` host. The always-on webhook Worker is already at `https://call-agent-webhooks.blossom-linen.workers.dev`.
 
 ## Model routing for agents
 

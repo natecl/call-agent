@@ -1,6 +1,6 @@
 # Feature map
 
-This file lists what `main` implements today. It is not a plan. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md).
+This file lists what `main` implements today. It is not a plan. It is a standing map. Each implementation updates its own rows here and its file under `.cursor/skills/verify-call-agent/features/`. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md). There is no `call-agent-web` map in this repository.
 
 ## Status
 
@@ -60,12 +60,30 @@ The Cursor skill drives the stub CLI verbs and never sets live keys.
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, and `verify-message` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `verify-message`, `webhooks`, `linq-inbound`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
+| `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ACK ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
+| `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the five stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-message.md` | shipped | Covers the five MessagingPort checks and the register-webhook gate. | `.cursor/skills/verify-call-agent/features/verify-message.md` |
-| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
+| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-message`, `verify-webhooks`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
+
+## Always-on webhooks
+
+The Worker is the production HTTPS inbox. The laptop tunnel is the local-dev path and the media host until a later always-on media process exists.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `POST /webhooks/telnyx` Worker | shipped | Cloudflare Worker `call-agent-webhooks` verifies Telnyx Ed25519, claims `data.id`, returns 2xx on first seen and on duplicate, and 401 when the signature is missing or wrong. Laptop-off still ACKs. | `workers/webhooks/src/handler.ts` `receiveTelnyx`. `workers/webhooks/test/webhook.test.ts`. `call-agent verify-webhooks` `signature` `idempotency` |
+| `GET /health` Worker | shipped | Returns `{"ok":true}`. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `health` |
+| Linq inbound (closed alpha) | shipped | L1 testers text Treena through Linq. Ingress is `POST https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` (alias `/webhooks/linq`). GET on those paths returns the same 200. Body is `{"ok":true,"provider":"linq","implemented":false}`. No SMS. Builder registers the `/linq/webhook` URL now. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `linq_hook`. `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
+| Worker `/media-stream` | shipped | Returns 501 `media_not_terminated_here`. The Worker does not terminate Telnyx media. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `media_gap` |
+| `verify-webhooks` | shipped | Headless five-check lever for parse, signature, idempotency, the Linq hook, and the media gap. Stub drives `createHandler` in-process. `--url` hits a deployed Worker and fails loud if unsigned Telnyx POST is 200. | `call_agent/verify_webhooks.py` `verify_webhooks`. `call_agent/cli.py` `verify_webhooks_command`. `workers/webhooks/scripts/verify.mjs`. `tests/test_verify_webhooks.py`. `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
+| `PUBLIC_WEBHOOK_URL` | shipped | Dial `webhook_url` uses this origin when set. `stream_url` still comes from `PUBLIC_BASE_URL`. Empty keeps today's single-origin tunnel. | `call_agent/runtime.py` `webhook_and_stream_urls`. `tests/test_verify_webhooks.py` `test_webhook_url_splits_from_media_origin` |
+| local FastAPI tunnel | gated | `quick-ask --live` still hosts `/webhooks/telnyx` and `/media-stream` in-process for laptop dev. Prod Call Control webhook URL is the Worker, not the tunnel. | `call_agent/server.py`. `README.md`. `.cursor/skills/verify-call-agent/features/webhooks.md` |
+| wrangler deploy | shipped | Live origin is `https://call-agent-webhooks.blossom-linen.workers.dev`. Linq registers `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. Telnyx uses `/webhooks/telnyx`. `TELNYX_PUBLIC_KEY` is still unset on the preview Worker (unsigned Telnyx POST is 401 `missing_public_key`). | `workers/webhooks/wrangler.jsonc`. `workers/webhooks/README.md` |
 
 ## Live adapters
 
@@ -96,9 +114,9 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md).
+`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever.
 
-`README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off.
+`README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook.
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
 
@@ -109,4 +127,6 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 | `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
 | hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
+| Worker→app Linq forward | not shipped | Worker ACKs `POST /linq/webhook`. FastAPI `process_linq_webhook` is the process path. No bridge yet. | `workers/webhooks/src/handler.ts`. `call_agent/server.py` `process_linq_webhook` |
+| Linq SMS | not shipped | Worker exposes `POST /linq/webhook` with `implemented: false`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |
