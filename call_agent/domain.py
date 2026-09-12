@@ -175,6 +175,18 @@ class Question(FrozenModel):
 DISCLOSURE_PHRASE = "on behalf of "
 CLOSING_LINE = "Thanks, that's all I needed. Goodbye."
 
+DELEGATION_POLICY_LINES = (
+    "Delegation policy:",
+    "Backend tools:",
+    "- None. This session has no tool-calling backend.",
+    "Delegate to the backend when:",
+    "- Never. There is no backend to hand work to.",
+    "Do not delegate to the backend when:",
+    "- The other party greets you, repeats a result, or needs a brief clarification.",
+    "- You can continue from these instructions and what they have already said.",
+    "Do not guess or promise a result the other party has not said.",
+)
+
 
 def first_spoken_line(caller: FirstName) -> str:
     return f"Hi, I'm calling on behalf of {caller}. I have one quick question."
@@ -184,10 +196,19 @@ def first_book_line(caller: FirstName) -> str:
     return f"Hi, I'm calling on behalf of {caller}. I'd like to book a table."
 
 
+def _role_line(caller: FirstName, place: str) -> str:
+    return (
+        f"You are a calm, friendly phone assistant calling a {place} "
+        f"on behalf of {caller}. Speak warmly and naturally at an unhurried "
+        "pace, be clear and direct rather than overly cheerful, and if they "
+        "are frustrated acknowledge it briefly then take the next helpful step."
+    )
+
+
 def build_instructions(caller: FirstName, question: Question) -> str:
     return "\n".join(
         (
-            f"You are a polite phone assistant calling a business on behalf of {caller}.",
+            _role_line(caller, "business"),
             first_spoken_line(caller),
             question.text,
             (
@@ -198,6 +219,7 @@ def build_instructions(caller: FirstName, question: Question) -> str:
                 "Never book, reserve, or hold anything. "
                 "Keep every turn under two sentences."
             ),
+            *DELEGATION_POLICY_LINES,
         )
     )
 
@@ -235,7 +257,7 @@ def build_book_instructions(
     notes = constraints or "none"
     return "\n".join(
         (
-            f"You are a polite phone assistant calling a restaurant on behalf of {caller}.",
+            _role_line(caller, "restaurant"),
             first_book_line(caller),
             (
                 f"Party size: {party_size}. "
@@ -257,6 +279,7 @@ def build_book_instructions(
                 f"say exactly: {CLOSING_LINE}"
             ),
             "Keep every turn under two sentences.",
+            *DELEGATION_POLICY_LINES,
         )
     )
 
