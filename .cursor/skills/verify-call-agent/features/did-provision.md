@@ -1,6 +1,6 @@
 # Provision a number
 
-`did provision` gives a user one Telnyx number and records it in the SQLite ledger. Running it again for the same user returns the same number. `did list` shows every user's number and its status. In stub mode the numbers are fake and start at `+15555550100`.
+`did provision` gives a user one Telnyx number and records it in the ledger. The ledger is SQLite unless `NEON_DATABASE_URL` is set. Running it again for the same user returns the same number. `did list` shows every user's number and its status. In stub mode the numbers are fake and start at `+15555550100`. This skill never sets the Neon URL.
 
 ## Sub-features
 

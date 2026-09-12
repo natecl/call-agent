@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       QUICK_ASK_LIVE: "0"
+      NO_COLOR: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +22,7 @@ jobs:
       - run: pytest -q
       - run: call-agent verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub
       - run: call-agent verify-message
+      - run: call-agent verify-persistence
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

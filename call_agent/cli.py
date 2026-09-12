@@ -16,13 +16,14 @@ from .domain import (
     QuickAskResult,
     UserId,
 )
-from .ledger import Ledger
+from .ledger import open_ledger
 from .linq import (
     LinqConfigError,
     LiveLinqHttp,
     resolve_webhook_url,
     validate_linq_live_token,
 )
+from .persistence import PersistenceConfigError
 from .runtime import run_quick_ask, validate_live
 from .server import serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
@@ -32,6 +33,7 @@ from .verify_message import (
     format_message_report,
     verify_message,
 )
+from .verify_persistence import format_persistence_report, verify_persistence
 from .verify_webhooks import (
     VerifyWebhooksInput,
     format_webhooks_report,
@@ -69,11 +71,15 @@ def did_provision(
             typer.echo(str(error), err=True)
             raise typer.Exit(code=2) from error
         telnyx = LiveTelnyxHttp(settings.telnyx_api_key or "")
-    record = Ledger(settings.call_agent_db_path).provision(
-        user_id,
-        telnyx,
-        settings.telnyx_connection_id or "stub-connection",
-    )
+    try:
+        record = open_ledger(settings).provision(
+            user_id,
+            telnyx,
+            settings.telnyx_connection_id or "stub-connection",
+        )
+    except PersistenceConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
     if record.did is None:
         typer.echo(
             f"DID order {record.order_id} is still pending at Telnyx; "
@@ -87,7 +93,11 @@ def did_provision(
 @did_app.command("list")
 def did_list() -> None:
     settings = Settings()
-    records = Ledger(settings.call_agent_db_path).list()
+    try:
+        records = open_ledger(settings).list()
+    except PersistenceConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
     typer.echo(f"{'USER':<10} {'DID':<16} STATUS")
     for record in records:
         typer.echo(
@@ -227,6 +237,19 @@ def linq_register_webhook() -> None:
         "store signing_secret as LINQ_WEBHOOK_SIGNING_SECRET; "
         "Linq will not return it again"
     )
+
+
+@app.command("verify-persistence")
+def verify_persistence_command() -> None:
+    settings = Settings()
+    try:
+        report = verify_persistence(settings)
+    except PersistenceConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(format_persistence_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
 
 
 def _require_live_gate(settings: Settings) -> None:

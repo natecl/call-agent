@@ -16,6 +16,7 @@ def environment(tmp_path: Path) -> dict[str, str]:
         "QUICK_ASK_LIVE": "0",
         "NO_COLOR": "1",
         "TERM": "dumb",
+        "COLUMNS": "120",
     }
 
 

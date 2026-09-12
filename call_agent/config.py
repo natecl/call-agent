@@ -3,6 +3,13 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .persistence import (
+    ArtifactConfig,
+    LedgerConfig,
+    parse_artifact_config,
+    parse_ledger_config,
+)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -24,7 +31,28 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, validation_alias="CALL_AGENT_PORT")
     call_agent_db_path: Path = Path("./call_agent.sqlite3")
     call_agent_artifacts_dir: Path = Path("./artifacts")
+    neon_database_url: str | None = None
+    r2_account_id: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    r2_bucket: str | None = None
+    r2_endpoint: str | None = None
     quick_ask_live: bool = False
     event_timeout_s: float = 30.0
     hangup_trailing_silence_s: float = 0.4
     hangup_drain_timeout_s: float = 10.0
+
+    def ledger_config(self) -> LedgerConfig:
+        return parse_ledger_config(
+            self.neon_database_url, self.call_agent_db_path
+        )
+
+    def artifact_config(self) -> ArtifactConfig:
+        return parse_artifact_config(
+            self.r2_account_id,
+            self.r2_access_key_id,
+            self.r2_secret_access_key,
+            self.r2_bucket,
+            self.call_agent_artifacts_dir,
+            self.r2_endpoint,
+        )
