@@ -31,9 +31,12 @@ L1 testers text a natural book on the same chat. Restaurant book is the prove jo
 User: can you make a reservation with this restaurant at 7:30 for a party of two?
 Treena: okay, sounds good. What's the restaurant's phone number?
 User: +14155552671
+Treena: Okay, I'm going to call this number. Do you confirm? Reply "approve"
+User: approve
+Treena: Okay, I'm going to call them now.
 ```
 
-Party and time come from the first text. Treena asks only for the restaurant phone number. A complete one-shot that already includes `+E164` still dials. `name` may be omitted when `LINQ_KICKOFF_CALLER` is set. Anything else stays on the `Received:` echo. Collect replies 200. The number follow-up returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Mid-call chat is not shipped; clarification needed texts `Call failed:`. qa owns live prove.
+Party and time come from the first text. Treena asks only for the restaurant phone number. After the number she always asks to confirm before dial. Confirm / approve / yes are accepted. The first message never dials, even when it already includes `+E164`. `name` may be omitted when `LINQ_KICKOFF_CALLER` is set. Anything else stays on the `Received:` echo. Collect and confirm reply 200. Approve returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Mid-call chat is not shipped; clarification needed texts `Call failed:`. qa owns live prove.
 
 Prove the stub path:
 
@@ -41,7 +44,7 @@ Prove the stub path:
 call-agent verify-linq-call
 ```
 
-Expect eight `[PASS]` lines and `8/8 passed`.
+Expect nine `[PASS]` lines and `9/9 passed`.
 
 `POST /webhooks/linq` and `POST /linq/webhook` on FastAPI require `LINQ_WEBHOOK_SIGNING_SECRET`. They verify `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body. Missing secret or bad signature is 401. Live reply needs `LINQ_API_TOKEN` and `LINQ_FROM_E164`. Signature checks, parse, stub reply, and artifacts are stub-testable with no public URL and no box secret. Prod `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). Nathan's laptop is not that host.
 

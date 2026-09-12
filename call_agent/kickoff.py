@@ -45,6 +45,10 @@ PARTY_AND_TIME_ASK_TEXT = (
 )
 KIND_ASK_TEXT = "okay, sounds good. What should I ask them?"
 ITEM_ASK_TEXT = "okay, sounds good. Which item?"
+CONFIRM_ASK_TEXT = (
+    'Okay, I\'m going to call this number. Do you confirm? Reply "approve"'
+)
+DIAL_NOW_TEXT = "Okay, I'm going to call them now."
 
 _BOOK_RE = re.compile(
     r"^book\s+(?P<to>\+[1-9]\d{7,14})\s+party\s+(?P<party>\d+)\s+at\s+"
@@ -113,7 +117,13 @@ _ASK_INTENT_RE = re.compile(
 )
 
 ReplyKind = Literal["ack", "result", "error"]
-WaitingFor = Literal["party", "time", "party_and_time", "to", "kind", "item"]
+WaitingFor = Literal[
+    "party", "time", "party_and_time", "to", "kind", "item", "confirm"
+]
+_AFFIRM_RE = re.compile(
+    r"\b(?:i\s+)?(?:confirm|approve|yes|confirmed|approved)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +250,8 @@ def collect_reply_text(waiting_for: WaitingFor) -> str:
         return PARTY_AND_TIME_ASK_TEXT
     if waiting_for == "item":
         return ITEM_ASK_TEXT
+    if waiting_for == "confirm":
+        return CONFIRM_ASK_TEXT
     return KIND_ASK_TEXT
 
 
@@ -273,6 +285,16 @@ def intake_kickoff(
         if extracted.intent is None:
             return None
         return _decide(extracted, settings, verb=extracted.intent)
+    if pending.waiting_for == "confirm":
+        if not _is_confirm_affirmative(normalized):
+            return KickoffFailed(
+                "I need you to confirm before I call.",
+                pending.verb,
+            )
+        merged = _merge(pending, extracted)
+        return _decide(
+            merged, settings, verb=pending.verb, confirmed=True
+        )
     if not _progressed(pending, extracted):
         return KickoffFailed(
             "I need the restaurant's phone number."
@@ -285,12 +307,8 @@ def intake_kickoff(
 
 
 def kickoff_ack_text(request: BookRequest | QuickAskRequest) -> str:
-    if isinstance(request, BookRequest):
-        return (
-            f"Calling {request.to} to book a table for "
-            f"{request.party_size} at {request.time_text}."
-        )
-    return f"Calling {request.to} to ask: {request.question.text}"
+    del request
+    return DIAL_NOW_TEXT
 
 
 def result_reply_text(result: CallResult, to: E164) -> str:
@@ -567,6 +585,7 @@ def _decide(
     settings: Settings,
     *,
     verb: Literal["book", "ask"],
+    confirmed: bool = False,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
     caller = _resolve_caller(extracted.name, settings)
     if caller is None:
@@ -575,8 +594,12 @@ def _decide(
     if user_id is None:
         return KickoffFailed("missing user id", verb)
     if verb == "ask":
-        return _decide_ask(extracted, settings, caller, user_id)
-    return _decide_book(extracted, settings, caller, user_id)
+        return _decide_ask(
+            extracted, settings, caller, user_id, confirmed=confirmed
+        )
+    return _decide_book(
+        extracted, settings, caller, user_id, confirmed=confirmed
+    )
 
 
 def _decide_book(
@@ -584,6 +607,8 @@ def _decide_book(
     settings: Settings,
     caller: FirstName,
     user_id: UserId,
+    *,
+    confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
     missing: list[WaitingFor] = []
     if extracted.party_size is None:
@@ -603,6 +628,12 @@ def _decide_book(
         return KickoffCollecting(
             reply=PHONE_ASK_TEXT,
             pending=_pending_from_extracted(extracted, "book", "to"),
+            verb="book",
+        )
+    if not confirmed:
+        return KickoffCollecting(
+            reply=CONFIRM_ASK_TEXT,
+            pending=_pending_from_extracted(extracted, "book", "confirm"),
             verb="book",
         )
     try:
@@ -625,6 +656,8 @@ def _decide_ask(
     settings: Settings,
     caller: FirstName,
     user_id: UserId,
+    *,
+    confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
     kind = extracted.question_kind
     if kind is None:
@@ -643,6 +676,12 @@ def _decide_ask(
         return KickoffCollecting(
             reply=PHONE_ASK_TEXT,
             pending=_pending_from_extracted(extracted, "ask", "to"),
+            verb="ask",
+        )
+    if not confirmed:
+        return KickoffCollecting(
+            reply=CONFIRM_ASK_TEXT,
+            pending=_pending_from_extracted(extracted, "ask", "confirm"),
             verb="ask",
         )
     try:
@@ -896,6 +935,10 @@ def _party_value(raw: str) -> int | None:
     return value
 
 
+def _is_confirm_affirmative(text: str) -> bool:
+    return _AFFIRM_RE.search(text) is not None
+
+
 def _waiting_for_value(raw: object) -> WaitingFor:
     if raw in {
         "party",
@@ -904,6 +947,7 @@ def _waiting_for_value(raw: object) -> WaitingFor:
         "to",
         "kind",
         "item",
+        "confirm",
     }:
         return raw  # type: ignore[return-value]
     return "to"
