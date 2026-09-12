@@ -37,18 +37,16 @@ async def telnyx_webhook(request: Request) -> dict[str, bool]:
 async def linq_webhook(request: Request) -> dict[str, bool]:
     body = await request.body()
     settings = Settings()
-    if settings.linq_webhook_secret:
-        try:
-            verify_linq_signature(
-                settings.linq_webhook_secret,
-                body,
-                request.headers,
-            )
-        except LinqWebhookAuthError as error:
-            raise HTTPException(
-                status_code=401,
-                detail="unauthorized",
-            ) from error
+    if not settings.linq_webhook_secret:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        verify_linq_signature(
+            settings.linq_webhook_secret,
+            body,
+            request.headers,
+        )
+    except LinqWebhookAuthError as error:
+        raise HTTPException(status_code=401, detail="unauthorized") from error
     inbound = parse_inbound(body)
     if inbound is None:
         return {"ok": True, "ignored": True}

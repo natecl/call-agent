@@ -201,6 +201,16 @@ def test_linq_webhook_route_verifies_signature(
     assert ignored.json() == {"ok": True, "ignored": True}
 
 
+def test_linq_webhook_route_fails_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LINQ_WEBHOOK_SECRET", "")
+    client = TestClient(app)
+    denied = client.post("/webhooks/linq", content=inbound_fixture())
+
+    assert denied.status_code == 401
+
+
 def test_register_webhook_posts_subscription() -> None:
     recorded: list[httpx.Request] = []
 

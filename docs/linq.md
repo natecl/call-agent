@@ -2,7 +2,7 @@
 
 Telnyx places the PSTN call. Linq Partner API V3 owns the peer iMessage kickoff thread (Instinct/Orchid class). That is not Apple Messages for Business. SMS stays off.
 
-Sandbox prove (Builder's box, not this VM): outbound `message.parts` text from `+12138653024` landed on `+17272701288`. That is sandbox prove only. It is not product-live.
+Closed-alpha testers text Treena on this Linq path. The sending line is the sandbox DID (`LINQ_FROM_E164`; sandbox has used `+12138653024`). That is not a public landing claim and not a blue-bubble marketing claim. Builder-box outbound prove (not this VM): `message.parts` text from `+12138653024` landed on `+17272701288`.
 
 ## Settings
 
@@ -21,7 +21,7 @@ Stub mode needs none of them. `LiveLinqHttp` fails loud if the token is missing.
 
 ## Inbound
 
-`POST /webhooks/linq` verifies `webhook-id`, `webhook-timestamp`, and `webhook-signature` when `LINQ_WEBHOOK_SECRET` is set, then maps `message.received` into `InboundMessage`. Signature checks and parse are stub-testable with no public URL.
+`POST /webhooks/linq` requires `LINQ_WEBHOOK_SECRET`. It verifies `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body, then maps `message.received` into `InboundMessage`. Missing secret or bad signature is 401. Signature checks and parse are stub-testable with no public URL.
 
 Always-on public URL is the Workers track. Until that URL exists:
 

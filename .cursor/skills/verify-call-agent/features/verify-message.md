@@ -28,6 +28,6 @@ Preconditions:
 
 ## Gotchas
 
-- This lever never hits `api.linqapp.com`. A sandbox outbound prove on Builder's box is not this command.
+- This lever never hits `api.linqapp.com`. The closed-alpha outbound prove on the sandbox line (Builder's box) is not this command.
 - Always-on inbound needs `LINQ_WEBHOOK_URL` from the Cloudflare Workers track plus `LINQ_WEBHOOK_SECRET` from `linq register-webhook`. Until then, poll `GET /api/partner/v3/chats/{chatId}/messages`.
 - SMS inbound is ignored on purpose. Do not treat an ignored SMS fixture as a failed parse of iMessage.
