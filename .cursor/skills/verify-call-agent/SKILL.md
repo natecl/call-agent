@@ -1,6 +1,6 @@
 ---
 name: verify-call-agent
-description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, book, verify-book, verify-message, verify-webhooks, or verify-persistence still work. Keep the feature files under features/ current with the implementation.
+description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, book, verify-book, verify-message, verify-webhooks, or verify-persistence still work. Update features/ in the same change that ships or changes a verb.
 ---
 
 # Verify call-agent

@@ -6,6 +6,8 @@
 
 - `verify-book-pass` prints six `[PASS]` lines and `6/6 passed` in stub mode.
 - `verify-book-exit` exits `0` on pass and `1` on any failure.
+- `verify-book-theater` fails `multi_turn_booking` when the stub is one ask and one answer.
+- `verify-book-decline` passes when the restaurant clearly declines.
 - `verify-book-live-gate` refuses `--mode live` unless `QUICK_ASK_LIVE=1` and keys are present.
 - `verify-book-inputs` accepts `--to`, `--name`, `--party`, `--time`, `--notes`, `--from-did`, `--user`, and `--mode`.
 
@@ -13,7 +15,7 @@
 
 - Run `call-agent verify-book` in a terminal, with or without the input flags.
 - CI runs `call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub`.
-- `pytest tests/test_verify_book.py` calls the same function.
+- `pytest tests/test_verify_book.py` calls the same function, including the theater and decline faults.
 
 ## Driving it with call-agent
 

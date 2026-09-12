@@ -1,6 +1,6 @@
 # call-agent verification map
 
-This directory is the standing feature map for call-agent. Each implementation keeps its own file current. `docs/FEATURE_MAP.md` holds the same rows for `main`. A one-shot edit of `FEATURE_MAP.md` without a file here is not enough. There is no `call-agent-web` map in this repository.
+This directory is the standing feature map for call-agent. Each implementation keeps its own file current in the same change that ships or changes that verb. `docs/FEATURE_MAP.md` holds the same rows for this tree. A one-shot edit of `FEATURE_MAP.md` without a file here is not enough. There is no `call-agent-web` map in this repository.
 
 Read this index before driving, then use the matching feature file as the recipe.
 

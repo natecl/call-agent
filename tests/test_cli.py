@@ -176,6 +176,44 @@ def test_book_stub_prints_booked_result(tmp_path: Path) -> None:
     ).is_file()
 
 
+def test_book_requires_party(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--time",
+            "Friday 7pm",
+        ],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "--party" in result.output
+
+
+def test_book_requires_time(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--party",
+            "2",
+        ],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "--time" in result.output
+
+
 def test_verify_book_stub_exits_zero(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
