@@ -1,0 +1,14 @@
+{
+  "name": "call-agent-webhooks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/webhook.test.ts",
+    "verify": "node --experimental-strip-types scripts/verify.mjs",
+    "dry-run": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.28.0"
+  }
+}

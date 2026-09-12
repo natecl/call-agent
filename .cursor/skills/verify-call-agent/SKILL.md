@@ -1,11 +1,11 @@
 ---
 name: verify-call-agent
-description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/ or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, or verify-quick-ask still work.
+description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, or verify-webhooks still work. Keep the feature files under features/ current with the implementation.
 ---
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is four verbs: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. There is no server to keep alive in stub mode. Each drive is one process that reads env, touches a SQLite ledger, writes one artifacts directory, and exits. The FastAPI routes exist only for live mode and are not driven here.
+call-agent is a CLI. Its user surface is five verbs: `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, and `verify-webhooks`. Stub drives of the first four need no server. Each of those reads env, touches a SQLite ledger, writes one artifacts directory, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist only for live mode and are not driven here.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -36,7 +36,7 @@ Run before driving whenever anything looks off. All three must hold.
 
 ```bash
 .venv/bin/python -c "import call_agent; print('import ok')"
-.venv/bin/call-agent --help | grep verify-quick-ask
+.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-webhooks'
 [ "${QUICK_ASK_LIVE:-0}" = "0" ] && echo "stub mode"
 ```
 
@@ -60,6 +60,7 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `quick-ask-result.json`. The JSON line `quick-ask` printed.
 - `quick-ask-artifacts/<call_control_id>/`. The call's `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/`, `hangup.json`, and `result.json`, copied from the scratch artifacts dir.
 - `verify-quick-ask.txt`. The five-line checklist and `5/5 passed`.
+- `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
 
 Proof standards. Exercise the real CLI verb, not a Python function. Capture the command and the state it produced, so the result JSON and the files it references, not only the exit code. For a mutation such as `did provision`, prove it with a second read (`did list`), and prove idempotency by running it twice. Stub mode is the only mock, and it sits where production already isolates Telnyx and OpenAI. Confirm it opened no sockets by running with the keys unset, which the script does.
 

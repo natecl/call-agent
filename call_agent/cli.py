@@ -21,6 +21,11 @@ from .runtime import run_quick_ask, validate_live
 from .server import serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
 from .verify import VerifyInput, format_report, verify_quick_ask
+from .verify_webhooks import (
+    VerifyWebhooksInput,
+    format_webhooks_report,
+    verify_webhooks,
+)
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -141,6 +146,26 @@ def verify_quick_ask_command(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
     typer.echo(format_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("verify-webhooks")
+def verify_webhooks_command(
+    url: str | None = typer.Option(
+        None,
+        "--url",
+        help="Deployed Worker origin. Omit for the in-process stub.",
+    ),
+) -> None:
+    try:
+        report = verify_webhooks(
+            VerifyWebhooksInput(url=url) if url else VerifyWebhooksInput()
+        )
+    except (ValueError, RuntimeError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(format_webhooks_report(report))
     if not report.passed:
         raise typer.Exit(code=1)
 
