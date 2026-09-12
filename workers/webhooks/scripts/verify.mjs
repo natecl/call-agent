@@ -114,15 +114,13 @@ async function inProcessChecks(missingKey = false) {
   const linq_hook = {
     name: "linq_hook",
     passed:
-      linqRes.status === 200 &&
-      linqBody.implemented === false &&
-      aliasRes.status === 200 &&
-      aliasBody.implemented === false &&
-      pingRes.status === 200 &&
-      pingBody.implemented === false,
+      linqPostUnsetPass(linqRes.status, linqBody) &&
+      linqPostUnsetPass(aliasRes.status, aliasBody) &&
+      linqPingPass(pingRes.status, pingBody),
     detail:
-      `linq=${linqRes.status} implemented=${linqBody.implemented} ` +
-      `alias=${aliasRes.status} ping=${pingRes.status}`,
+      `linq=${linqRes.status} reason=${linqBody.reason} ` +
+      `alias=${aliasRes.status} ping=${pingRes.status} ` +
+      `provider=${pingBody.provider}`,
   };
 
   const mediaRes = await fetchH("/media-stream", { method: "GET" });
@@ -148,6 +146,32 @@ async function remoteChecks(base) {
       (name) => ({ name, passed: false, detail }),
     );
   }
+}
+
+function linqPingPass(status, body) {
+  return (
+    status === 200 &&
+    body.ok === true &&
+    body.provider === "linq" &&
+    body.implemented !== false
+  );
+}
+
+function linqPostUnsetPass(status, body) {
+  return status === 501 && body.reason === "missing_app_base_url";
+}
+
+function linqPostRemotePass(status, body) {
+  if (status === 200 && body.implemented === false) {
+    return false;
+  }
+  if (status === 501 && body.reason === "missing_app_base_url") {
+    return true;
+  }
+  if (status === 401) {
+    return true;
+  }
+  return status === 200 && body.ok === true;
 }
 
 function challengeDetail(path, response, body) {
@@ -236,15 +260,12 @@ async function remoteChecksAgainst(origin) {
   const linq_hook = {
     name: "linq_hook",
     passed:
-      linqRes.status === 200 &&
-      linqBody.implemented === false &&
-      aliasRes.status === 200 &&
-      aliasBody.implemented === false &&
-      pingRes.status === 200 &&
-      pingBody.implemented === false,
+      linqPostRemotePass(linqRes.status, linqBody) &&
+      linqPostRemotePass(aliasRes.status, aliasBody) &&
+      linqPingPass(pingRes.status, pingBody),
     detail:
       linqChallenge ??
-      `linq=${linqRes.status} implemented=${linqBody.implemented} ` +
+      `linq=${linqRes.status} reason=${linqBody.reason} ` +
         `alias=${aliasRes.status} ping=${pingRes.status}`,
   };
 

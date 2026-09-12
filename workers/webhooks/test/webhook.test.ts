@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import { createHandler } from "../src/handler.ts";
+import { parseAppBaseUrl } from "../src/linq.ts";
 import { CacheSeenStore, MemorySeenStore } from "../src/seen.ts";
 import { parseTelnyxId, verifyTelnyx } from "../src/telnyx.ts";
 
@@ -155,10 +156,10 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     new Request(`${origin}/webhooks/linq`, { method: "POST", body: "{}" }),
     env,
   );
+  assert.equal(linq.status, 501);
   assert.deepEqual(await linq.json(), {
-    ok: true,
-    provider: "linq",
-    implemented: false,
+    ok: false,
+    reason: "missing_app_base_url",
   });
 
   const linqAlias = await handler.fetch(
@@ -166,11 +167,12 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     env,
   );
   assert.equal(linqAlias.status, 200);
-  assert.deepEqual(await linqAlias.json(), {
+  const pingBody = await linqAlias.json();
+  assert.deepEqual(pingBody, {
     ok: true,
     provider: "linq",
-    implemented: false,
   });
+  assert.equal("implemented" in pingBody, false);
 
   const media = await handler.fetch(
     new Request(`${origin}/media-stream`),
@@ -187,4 +189,158 @@ test("CacheSeenStore falls back to memory when caches.default is missing", async
   const store = new CacheSeenStore();
   assert.equal(await store.claim("same"), "first");
   assert.equal(await store.claim("same"), "duplicate");
+});
+
+function bytesOf(body: unknown): Uint8Array {
+  if (typeof body === "string") {
+    return new TextEncoder().encode(body);
+  }
+  if (body instanceof ArrayBuffer) {
+    return new Uint8Array(body);
+  }
+  if (ArrayBuffer.isView(body)) {
+    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  }
+  throw new Error(`unexpected fetch body ${typeof body}`);
+}
+
+test("parseAppBaseUrl treats empty as missing and paths as invalid", () => {
+  assert.deepEqual(parseAppBaseUrl(undefined), { kind: "missing" });
+  assert.deepEqual(parseAppBaseUrl("  "), { kind: "missing" });
+  assert.deepEqual(parseAppBaseUrl("not-a-url"), { kind: "invalid" });
+  assert.deepEqual(parseAppBaseUrl("ftp://app.example.test"), {
+    kind: "invalid",
+  });
+  assert.deepEqual(parseAppBaseUrl("https://app.example.test/linq/webhook"), {
+    kind: "invalid",
+  });
+  assert.deepEqual(parseAppBaseUrl("https://app.example.test/"), {
+    kind: "origin",
+    origin: "https://app.example.test",
+  });
+});
+
+test("GET /linq/webhook pings without implemented", async () => {
+  const handler = createHandler({}, new MemorySeenStore());
+  for (const path of ["/linq/webhook", "/webhooks/linq"]) {
+    const response = await handler.fetch(
+      new Request(`https://example.test${path}`),
+      {},
+    );
+    assert.equal(response.status, 200);
+    const pingBody = await response.json();
+    assert.deepEqual(pingBody, { ok: true, provider: "linq" });
+    assert.equal("implemented" in pingBody, false);
+  }
+});
+
+test("POST /linq/webhook is 501 missing_app_base_url when unset", async () => {
+  const handler = createHandler({}, new MemorySeenStore());
+  const response = await handler.fetch(
+    new Request("https://example.test/linq/webhook", {
+      method: "POST",
+      body: "{}",
+    }),
+    {},
+  );
+  assert.equal(response.status, 501);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    reason: "missing_app_base_url",
+  });
+});
+
+test("POST /linq/webhook forwards raw body and Standard Webhooks headers", async () => {
+  const original = globalThis.fetch;
+  const seen: { url: string; headers: Headers; body: Uint8Array }[] = [];
+  globalThis.fetch = async (input, init) => {
+    const headers = new Headers(init?.headers);
+    seen.push({
+      url: String(input),
+      headers,
+      body: bytesOf(init?.body),
+    });
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const env = { APP_BASE_URL: "https://app.example.test/" };
+    const handler = createHandler(env, new MemorySeenStore());
+    const raw = new TextEncoder().encode('{"event_type":"message.received"}');
+    const response = await handler.fetch(
+      new Request("https://example.test/linq/webhook", {
+        method: "POST",
+        headers: {
+          "webhook-id": "msg-1",
+          "webhook-timestamp": "1700000000",
+          "webhook-signature": "v1,abc",
+          "content-type": "application/json",
+          host: "example.test",
+        },
+        body: raw,
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, "https://app.example.test/linq/webhook");
+    assert.equal(seen[0].headers.get("webhook-id"), "msg-1");
+    assert.equal(seen[0].headers.get("webhook-timestamp"), "1700000000");
+    assert.equal(seen[0].headers.get("webhook-signature"), "v1,abc");
+    assert.equal(seen[0].headers.get("content-type"), "application/json");
+    assert.equal(seen[0].headers.get("host"), null);
+    assert.deepEqual(seen[0].body, raw);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("POST /linq/webhook is 502 app_unreachable when the app fetch throws", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("connect refused");
+  };
+  try {
+    const env = { APP_BASE_URL: "https://app.example.test" };
+    const handler = createHandler(env, new MemorySeenStore());
+    const response = await handler.fetch(
+      new Request("https://example.test/webhooks/linq", {
+        method: "POST",
+        body: "{}",
+      }),
+      env,
+    );
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      reason: "app_unreachable",
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("POST /linq/webhook is 501 invalid_app_base_url for a path or non-http URL", async () => {
+  for (const appBase of [
+    "https://app.example.test/api",
+    "ftp://app.example.test",
+  ]) {
+    const env = { APP_BASE_URL: appBase };
+    const handler = createHandler(env, new MemorySeenStore());
+    const response = await handler.fetch(
+      new Request("https://example.test/linq/webhook", {
+        method: "POST",
+        body: "{}",
+      }),
+      env,
+    );
+    assert.equal(response.status, 501);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      reason: "invalid_app_base_url",
+    });
+  }
 });

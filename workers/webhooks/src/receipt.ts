@@ -5,8 +5,7 @@ export type RejectReason =
   | "bad_signature"
   | "stale_timestamp"
   | "malformed"
-  | "media_not_terminated_here"
-  | "linq_not_implemented";
+  | "media_not_terminated_here";
 
 export type Receipt =
   | { kind: "rejected"; reason: RejectReason }
@@ -20,4 +19,5 @@ export type SeenStore = {
 export type Env = {
   TELNYX_PUBLIC_KEY?: string;
   UPSTREAM_WEBHOOK_URL?: string;
+  APP_BASE_URL?: string;
 };
