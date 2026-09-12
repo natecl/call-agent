@@ -4,7 +4,7 @@ A phone agent that calls a business on your behalf, asks one quick question, and
 
 The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a SQLite ledger of numbers. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
 
-Day 1 ships quick-ask. Closed-alpha also includes the Linq iMessage path: `MessagingPort` and outbound `parts` text in this process, plus inbound ACK at the Worker hook. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, and packaging stay out of scope. SMS stays off. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
+Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook and the `MessagingPort` process path. Live send is gated on `LINQ_API_TOKEN`. That is not a public landing claim. Booking, hold queues, packaging, and SMS are out of scope. Telnyx vs Linq is in [docs/linq.md](docs/linq.md).
 
 ## Public webhook URL (Linq, register now)
 
