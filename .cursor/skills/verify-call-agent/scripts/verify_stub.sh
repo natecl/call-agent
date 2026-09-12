@@ -16,6 +16,7 @@ export QUICK_ASK_LIVE=0
 unset TELNYX_API_KEY TELNYX_CONNECTION_ID OPENAI_API_KEY PUBLIC_BASE_URL
 unset LINQ_API_TOKEN LINQ_WEBHOOK_SIGNING_SECRET LINQ_WEBHOOK_URL PUBLIC_WEBHOOK_URL
 unset NEON_DATABASE_URL R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT
+unset RETAIN_CALL_ARTIFACTS
 
 mkdir -p "$SCRATCH" "$EVIDENCE"
 cleanup() { rm -rf "$SCRATCH"; }
@@ -40,7 +41,7 @@ SECOND="$(run "$CLI" did provision --user default | tail -n1)"
 [ "$FIRST" = "$SECOND" ] || { echo "provision is not idempotent: $FIRST vs $SECOND"; exit 1; }
 run "$CLI" did list
 
-step "quick-ask stub writes a result and artifacts"
+step "quick-ask stub writes a result then wipes artifacts"
 RESULT_JSON="$(run "$CLI" quick-ask --to +14155552671 --ask hours --name Nathan | tail -n1)"
 printf '%s\n' "$RESULT_JSON" > "$EVIDENCE/quick-ask-result.json"
 "$PY" - "$RESULT_JSON" "$CALL_AGENT_ARTIFACTS_DIR" <<'EOF'
@@ -49,16 +50,29 @@ result = json.loads(sys.argv[1]); root = pathlib.Path(sys.argv[2])
 assert result["status"] == "answered", result
 assert result["answer_text"], result
 for key in ("transcript_ref", "audio_ref"):
+    assert not (root / result[key]).is_file(), f"{key} should be wiped: {root / result[key]}"
+print("result ok (wiped):", result["status"], "|", result["answer_text"])
+EOF
+
+step "quick-ask retain keeps artifacts"
+export RETAIN_CALL_ARTIFACTS=1
+RETAIN_JSON="$(run "$CLI" quick-ask --to +14155552671 --ask hours --name Nathan | tail -n1)"
+"$PY" - "$RETAIN_JSON" "$CALL_AGENT_ARTIFACTS_DIR" <<'EOF'
+import json, sys, pathlib
+result = json.loads(sys.argv[1]); root = pathlib.Path(sys.argv[2])
+assert result["status"] == "answered", result
+for key in ("transcript_ref", "audio_ref"):
     assert (root / result[key]).is_file(), f"{key} missing: {root / result[key]}"
-print("result ok:", result["status"], "|", result["answer_text"])
+print("result ok (retained):", result["status"])
 EOF
 cp -r "$CALL_AGENT_ARTIFACTS_DIR" "$EVIDENCE/quick-ask-artifacts"
+unset RETAIN_CALL_ARTIFACTS
 
 step "verify-quick-ask stub checklist"
 run "$CLI" verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub | tee "$EVIDENCE/verify-quick-ask.txt" >/dev/null
 grep -q "5/5 passed" "$EVIDENCE/verify-quick-ask.txt"
 
-step "book stub writes a result and artifacts"
+step "book stub writes a result then wipes artifacts"
 BOOK_JSON="$(run "$CLI" book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible" | tail -n1)"
 printf '%s\n' "$BOOK_JSON" > "$EVIDENCE/book-result.json"
 "$PY" - "$BOOK_JSON" "$CALL_AGENT_ARTIFACTS_DIR" <<'EOF'
@@ -67,10 +81,23 @@ result = json.loads(sys.argv[1]); root = pathlib.Path(sys.argv[2])
 assert result["status"] == "booked", result
 assert result["confirmation_text"], result
 for key in ("transcript_ref", "audio_ref"):
+    assert not (root / result[key]).is_file(), f"{key} should be wiped: {root / result[key]}"
+print("book result ok (wiped):", result["status"])
+EOF
+
+step "book retain keeps artifacts"
+export RETAIN_CALL_ARTIFACTS=1
+RETAIN_BOOK="$(run "$CLI" book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible" | tail -n1)"
+"$PY" - "$RETAIN_BOOK" "$CALL_AGENT_ARTIFACTS_DIR" <<'EOF'
+import json, sys, pathlib
+result = json.loads(sys.argv[1]); root = pathlib.Path(sys.argv[2])
+assert result["status"] == "booked", result
+for key in ("transcript_ref", "audio_ref"):
     assert (root / result[key]).is_file(), f"{key} missing: {root / result[key]}"
-print("book result ok:", result["status"])
+print("book result ok (retained):", result["status"])
 EOF
 cp -r "$CALL_AGENT_ARTIFACTS_DIR" "$EVIDENCE/book-artifacts"
+unset RETAIN_CALL_ARTIFACTS
 
 step "verify-book stub checklist"
 run "$CLI" verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub | tee "$EVIDENCE/verify-book.txt" >/dev/null

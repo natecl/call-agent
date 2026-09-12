@@ -99,6 +99,7 @@ def verify_quick_ask(
         _env_file=None,
         call_agent_db_path=active_workspace.db_path,
         call_agent_artifacts_dir=active_workspace.artifacts_dir,
+        retain_call_artifacts=True,
     )
     ledger = Ledger(active_workspace.db_path)
     telnyx = StubTelnyxHttp()
@@ -372,6 +373,7 @@ def verify_book(
         _env_file=None,
         call_agent_db_path=active_workspace.db_path,
         call_agent_artifacts_dir=active_workspace.artifacts_dir,
+        retain_call_artifacts=True,
     )
     ledger = Ledger(active_workspace.db_path)
     telnyx = StubTelnyxHttp()

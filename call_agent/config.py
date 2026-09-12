@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     live_ingress_timeout_s: float = 15.0
     hangup_trailing_silence_s: float = 0.4
     hangup_drain_timeout_s: float = 10.0
+    retain_call_artifacts: bool = False
 
     def ledger_config(self) -> LedgerConfig:
         return parse_ledger_config(

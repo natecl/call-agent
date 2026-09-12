@@ -29,6 +29,7 @@ Preconditions:
 ## Gotchas
 
 - The verb makes its own temporary workspace. It never reads artifacts from an earlier run, so a stale pass is not possible. Do not point it at a shared directory to "reuse" a call.
+- This lever retains call artifacts so `result_artifact` can read them. Default `quick-ask` wipes those files after hangup.
 - `disclosure_first` requires both the disclosure and the question text to be present before it compares their positions. A fake that skips the disclosure fails this check. If it passes when you expected a failure, the fake did not skip the line.
 - The `pytest` path and the CLI path call the same function. A green pytest with a red CLI, or the reverse, means the CLI wiring changed, not the checks.
 - CLI `--mode live` still does not call `serve_in_process`. Laptop live calls use `quick-ask --live` / `book --live`, which need a tunnel to the local BOOK process.

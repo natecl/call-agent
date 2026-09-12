@@ -307,6 +307,7 @@ class QuickAskRequest(FrozenModel):
     question: Question
     caller: FirstName
     mode: Mode
+    retain_call_artifacts: bool | None = None
 
 
 class BookRequest(FrozenModel):
@@ -317,6 +318,7 @@ class BookRequest(FrozenModel):
     party_size: int = Field(ge=1)
     time_text: str = Field(min_length=1)
     constraints: str | None = None
+    retain_call_artifacts: bool | None = None
 
 
 class Answered(FrozenModel):

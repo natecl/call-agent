@@ -56,7 +56,12 @@ from .gpt_live import (
     StubScenario,
     serialize_session_start,
 )
-from .artifacts import ArtifactStore, open_artifact_store, publish_durable_artifacts
+from .artifacts import (
+    ArtifactStore,
+    open_artifact_store,
+    publish_durable_artifacts,
+    wipe_run_dir,
+)
 from .ledger import open_ledger
 from .report import JournalRow, Refs, build_call_report, redact_call_report
 from .telnyx import (
@@ -427,13 +432,6 @@ class CallHandle:
                 self.call,
                 self._reduce_settings,
             )
-            if self.artifact_store is not None:
-                publish_durable_artifacts(
-                    self.run_dir.root,
-                    self.run_dir.call_control_id,
-                    self.run_dir.audio_names(),
-                    self.artifact_store,
-                )
 
 
 class CallBook:
@@ -475,6 +473,15 @@ class CallBook:
 
 
 BOOK = CallBook()
+
+
+def should_retain_call_artifacts(
+    settings: Settings,
+    request: QuickAskRequest | BookRequest,
+) -> bool:
+    if request.retain_call_artifacts is not None:
+        return request.retain_call_artifacts
+    return settings.retain_call_artifacts
 
 
 def public_url_host(url: str) -> str:
@@ -624,7 +631,18 @@ async def run_call(
     )
     BOOK.register(run_id, handle)
     try:
-        return await handle.run()
+        result = await handle.run()
+        if should_retain_call_artifacts(settings, request):
+            if handle.artifact_store is not None:
+                publish_durable_artifacts(
+                    handle.run_dir.root,
+                    handle.run_dir.call_control_id,
+                    handle.run_dir.audio_names(),
+                    handle.artifact_store,
+                )
+        else:
+            wipe_run_dir(handle.run_dir.path)
+        return result
     finally:
         BOOK._drop_handle(handle)
 

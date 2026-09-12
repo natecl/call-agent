@@ -7,7 +7,7 @@
 - `book-stub` books a table for the given party, time, and notes.
 - `book-missing-party` refuses a run with no `--party`.
 - `book-missing-time` refuses a run with no `--time`.
-- `book-artifacts` writes the per-call directory that `transcript_ref` and `audio_ref` point into.
+- `book-artifacts` writes the per-call directory during the call. After hangup those files are deleted unless `RETAIN_CALL_ARTIFACTS=1`.
 - `book-hangup-on-goodbye` hangs up after `Thanks, that's all I needed. Goodbye.` even when the business confirmation has no booked needle.
 - `book-live-gate` refuses `--live` unless `QUICK_ASK_LIVE=1` and keys are present.
 
@@ -27,7 +27,8 @@ Preconditions:
 - **Book.** Run `.venv/bin/call-agent book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible"`. Exit code `0`. The last stdout line is a JSON object with `"status": "booked"`, a `confirmation_text` that contains `booked`, a `call_control_id`, a `transcript_ref` ending in `transcript.json`, and an `audio_ref` ending in `audio/inbound.wav`.
 - **Missing party.** Run `.venv/bin/call-agent book --to +14155552671 --name Nathan --time "Friday 7pm"`. Exit code `2` and stderr names `--party`.
 - **Missing time.** Run `.venv/bin/call-agent book --to +14155552671 --name Nathan --party 2`. Exit code `2` and stderr names `--time`.
-- **Artifacts.** Resolve `transcript_ref` and `audio_ref` against `CALL_AGENT_ARTIFACTS_DIR`. Both files exist. `transcript.json` has a first turn with `"speaker": "agent"` whose text contains `on behalf of Nathan`, at least three agent turns, at least two business turns, and business text that mentions `Friday 7pm`.
+- **Artifacts (default wipe).** The JSON still names `transcript_ref` and `audio_ref`. Those paths do not exist after hangup. See [privacy-wipe.md](./privacy-wipe.md).
+- **Artifacts (retain).** Run the book command with `RETAIN_CALL_ARTIFACTS=1`. Resolve `transcript_ref` and `audio_ref` against `CALL_AGENT_ARTIFACTS_DIR`. Both files exist. `transcript.json` has a first turn with `"speaker": "agent"` whose text contains `on behalf of Nathan`, at least three agent turns, at least two business turns, and business text that mentions `Friday 7pm`.
 - **Live gate.** Run `.venv/bin/call-agent book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --live`. Exit code `2`. Stderr says live mode is gated and names `QUICK_ASK_LIVE=1`.
 - **Proof.** Save the result JSON line as `book-result.json` and copy the call's artifacts directory into the evidence directory.
 

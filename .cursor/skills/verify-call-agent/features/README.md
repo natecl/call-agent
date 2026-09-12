@@ -49,3 +49,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Verify linq-to-call](./verify-linq-call.md) covers the seven-check stub lever for that path.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.
 - [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, and the misconfig exit.
+- [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. The privacy page stays not shipped.

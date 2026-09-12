@@ -501,10 +501,12 @@ def test_linq_webhook_kickoff_duplicate_does_not_redial(
     assert first.status_code == 202
     assert second.status_code == 200
     assert second.json() == {"ok": True, "duplicate": True}
-    assert (artifacts / "stub-call-0001" / "dial.json").is_file()
-    assert list((artifacts / "stub-call-0001").glob("dial.json")) == [
-        artifacts / "stub-call-0001" / "dial.json"
-    ]
+    call_link = json.loads(
+        (artifacts / "linq" / event_id / "call.json").read_text()
+    )
+    assert call_link["call_control_id"] == "stub-call-0001"
+    assert not (artifacts / "stub-call-0001" / "dial.json").is_file()
+    assert not (artifacts / "stub-call-0001" / "transcript.json").is_file()
 
 
 def test_linq_webhook_malformed_kickoff_helps_and_does_not_dial(

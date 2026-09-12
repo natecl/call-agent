@@ -32,6 +32,7 @@ Preconditions:
 ## Gotchas
 
 - The verb makes its own temporary workspace. It never reads artifacts from an earlier run.
+- This lever retains call artifacts so `result_artifact` can read them. Default `book` wipes those files after hangup.
 - `multi_turn_booking` fails when the stub emits one ask and one answer. That is the loud fail for a theater path. The call still hangs up after goodbye (`hangup.path=trail`, `marks_sent=1`).
 - `clean_hangup` expects `booked` or `declined`, not `answered`. A goodbye without booked or declined needles fails this check with `status=failed` and `hangup_path=trail`. That is the TRE-14 live miss, not `far_party`.
 - `pytest` and the CLI call the same function. A green pytest with a red CLI means the CLI wiring changed.

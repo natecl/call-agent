@@ -10,7 +10,7 @@
 - `parse-ask` `ask +14155552671 hours name Nathan` becomes a hours `QuickAskRequest`.
 - `parse-fail` `book +14155552671 party two` is malformed, texts usage, writes no `kickoff.json`.
 - `kickoff-reply` two `POST /chats/{chat_id}/messages` sends: ack then `Booked:`.
-- `call-ran` stub call is `booked`, hangup path trail, `hangup.json` present.
+- `call-ran` stub call is `booked`, hangup path trail, `hangup.json` present. This lever retains artifacts so it can read them.
 - `cross-link` `linq/<event_id>/call.json` and `<ccid>/linq.json` point at each other.
 - `same-host` `dial.json` webhook host equals stream host (`stub.invalid`).
 
@@ -34,4 +34,5 @@ Preconditions:
 
 - This lever never sets `QUICK_ASK_LIVE=1` and never POSTs to Fly.
 - Stub Telnyx always uses `call_control_id` `stub-call-0001`. Two stub kickoffs in one artifacts dir reuse that run dir.
+- This lever sets `retain_call_artifacts=True` so `call_ran` and `same_host_dial` can read hangup and dial files. Default CLI `book`/`quick-ask` wipe those files.
 - Echo-only inbound is `verify-message`, not this verb.
