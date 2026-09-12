@@ -57,6 +57,13 @@ step "verify-message stub checklist"
 run "$CLI" verify-message | tee "$EVIDENCE/verify-message.txt" >/dev/null
 grep -q "5/5 passed" "$EVIDENCE/verify-message.txt"
 
+step "linq register-webhook fails loud without token"
+set +e
+run "$CLI" linq register-webhook
+REGISTER_EXIT=$?
+set -e
+[ "$REGISTER_EXIT" -eq 2 ] || { echo "expected exit 2 for register-webhook without token, got $REGISTER_EXIT"; exit 1; }
+
 step "live mode is gated"
 set +e
 run "$CLI" quick-ask --to +14155552671 --ask hours --name Nathan --live
