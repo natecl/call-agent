@@ -31,7 +31,13 @@ from call_agent.messaging import (
     text_chat,
 )
 from call_agent.server import app
-from call_agent.verify_linq_call import BOOK_KICKOFF_TEXT, kickoff_inbound_bytes
+from call_agent.kickoff import PHONE_ASK_TEXT, pending_collect_path
+from call_agent.verify_linq_call import (
+    NATURAL_BOOK_TEXT,
+    ONESHOT_BOOK_TEXT,
+    PHONE_FOLLOWUP_TEXT,
+    kickoff_inbound_bytes,
+)
 from call_agent.verify_message import (
     INBOUND_CHAT_ID,
     INBOUND_EVENT_ID,
@@ -456,7 +462,7 @@ def test_linq_webhook_kickoff_returns_202_and_cross_links(
     monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
     event_id = "kickoff-route-book"
-    body = kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, event_id)
+    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
     with TestClient(app) as client:
         response = client.post(
             "/linq/webhook", content=body, headers=_signed_headers(body)
@@ -492,7 +498,7 @@ def test_linq_webhook_kickoff_duplicate_does_not_redial(
     _webhook_env(monkeypatch, artifacts)
     monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
     event_id = "kickoff-route-dup"
-    body = kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, event_id)
+    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
     headers = _signed_headers(body)
     with TestClient(app) as client:
         first = client.post("/linq/webhook", content=body, headers=headers)
@@ -509,30 +515,110 @@ def test_linq_webhook_kickoff_duplicate_does_not_redial(
     assert not (artifacts / "stub-call-0001" / "transcript.json").is_file()
 
 
-def test_linq_webhook_malformed_kickoff_helps_and_does_not_dial(
+def test_linq_webhook_two_step_collects_then_dials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     artifacts = tmp_path / "artifacts"
     _webhook_env(monkeypatch, artifacts)
-    event_id = "kickoff-route-bad"
-    body = kickoff_inbound_bytes("book +14155552671 party two", event_id)
+    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
+    monkeypatch.setenv("HANGUP_TRAILING_SILENCE_S", "0")
+    collect_id = "kickoff-route-collect"
+    phone_id = "kickoff-route-phone"
+    collect_body = kickoff_inbound_bytes(
+        NATURAL_BOOK_TEXT, collect_id, message_id="msg-collect"
+    )
+    phone_body = kickoff_inbound_bytes(
+        PHONE_FOLLOWUP_TEXT, phone_id, message_id="msg-phone"
+    )
     with TestClient(app) as client:
-        response = client.post(
-            "/linq/webhook", content=body, headers=_signed_headers(body)
+        collect = client.post(
+            "/linq/webhook",
+            content=collect_body,
+            headers=_signed_headers(collect_body, msg_id="collect-1"),
+        )
+        assert collect.status_code == 200
+        assert collect.json() == {
+            "ok": True,
+            "replied": True,
+            "collecting": True,
+            "chat_id": INBOUND_CHAT_ID,
+            "message_id": "stub-msg-0001",
+        }
+        assert not (artifacts / "stub-call-0001").exists()
+        collect_dir = artifacts / "linq" / collect_id
+        collect_replies = [
+            json.loads(line)
+            for line in (collect_dir / "replies.jsonl").read_text().splitlines()
+        ]
+        assert collect_replies[0]["kind"] == "ack"
+        assert collect_replies[0]["text"] == PHONE_ASK_TEXT
+        assert not (collect_dir / "kickoff.json").exists()
+        assert pending_collect_path(artifacts, INBOUND_CHAT_ID).is_file()
+
+        dial = client.post(
+            "/linq/webhook",
+            content=phone_body,
+            headers=_signed_headers(phone_body, msg_id="phone-1"),
         )
 
-    linq_dir = artifacts / "linq" / event_id
+    phone_dir = artifacts / "linq" / phone_id
+    replies = [
+        json.loads(line)
+        for line in (phone_dir / "replies.jsonl").read_text().splitlines()
+    ]
+    call_link = json.loads((phone_dir / "call.json").read_text())
+
+    assert dial.status_code == 202
+    assert dial.json() == {
+        "ok": True,
+        "kicked_off": True,
+        "event_id": phone_id,
+    }
+    assert [row["kind"] for row in replies] == ["ack", "result"]
+    assert replies[1]["text"].startswith("Booked:")
+    assert call_link["call_control_id"] == "stub-call-0001"
+    assert not pending_collect_path(artifacts, INBOUND_CHAT_ID).exists()
+
+
+def test_linq_webhook_bad_phone_followup_fails_and_does_not_dial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts)
+    monkeypatch.setenv("LINQ_KICKOFF_CALLER", "Nathan")
+    collect_id = "kickoff-route-collect-fail"
+    bad_id = "kickoff-route-bad"
+    collect_body = kickoff_inbound_bytes(
+        NATURAL_BOOK_TEXT, collect_id, message_id="msg-collect-fail"
+    )
+    bad_body = kickoff_inbound_bytes("nope", bad_id, message_id="msg-bad")
+    with TestClient(app) as client:
+        collect = client.post(
+            "/linq/webhook",
+            content=collect_body,
+            headers=_signed_headers(collect_body, msg_id="collect-fail"),
+        )
+        response = client.post(
+            "/linq/webhook",
+            content=bad_body,
+            headers=_signed_headers(bad_body, msg_id="bad-1"),
+        )
+
+    linq_dir = artifacts / "linq" / bad_id
     replies = [
         json.loads(line)
         for line in (linq_dir / "replies.jsonl").read_text().splitlines()
     ]
 
+    assert collect.status_code == 200
+    assert collect.json()["collecting"] is True
     assert response.status_code == 200
     assert response.json()["parse_error"] is True
     assert replies[0]["kind"] == "error"
-    assert "Couldn't parse that." in replies[0]["text"]
+    assert replies[0]["text"].startswith("Call failed:")
     assert not (linq_dir / "kickoff.json").exists()
     assert not (artifacts / "stub-call-0001").exists()
+    assert not pending_collect_path(artifacts, INBOUND_CHAT_ID).exists()
 
 
 def test_linq_webhook_live_host_guard_does_not_dial(
@@ -548,7 +634,7 @@ def test_linq_webhook_live_host_guard_does_not_dial(
         "PUBLIC_WEBHOOK_URL", "https://hidden-beacon-080.fly.dev"
     )
     event_id = "kickoff-route-host"
-    body = kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, event_id)
+    body = kickoff_inbound_bytes(ONESHOT_BOOK_TEXT, event_id)
     with TestClient(app) as client:
         response = client.post(
             "/linq/webhook",

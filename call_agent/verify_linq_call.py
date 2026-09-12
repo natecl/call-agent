@@ -20,12 +20,14 @@ from .domain import (
     UserId,
 )
 from .kickoff import (
-    BOOK_USAGE,
-    KickoffMalformed,
+    PHONE_ASK_TEXT,
+    KickoffCollecting,
+    KickoffFailed,
     KickoffParsed,
     KickoffSession,
+    failed_reply_text,
+    intake_kickoff,
     make_session,
-    malformed_reply_text,
     parse_kickoff,
     run_kickoff,
 )
@@ -37,14 +39,19 @@ from .verify_message import (
     INBOUND_SENDER,
 )
 
-BOOK_KICKOFF_TEXT = (
+NATURAL_BOOK_TEXT = (
+    "can you make a reservation with this restaurant at 7:30 "
+    "for a party of two?"
+)
+BOOK_KICKOFF_TEXT = NATURAL_BOOK_TEXT
+ONESHOT_BOOK_TEXT = (
     "book +14155552671 party 2 at Friday 7pm name Nathan "
     "notes outdoor if possible"
 )
 ASK_KICKOFF_TEXT = "ask +14155552671 hours name Nathan"
-BAD_KICKOFF_TEXT = "book +14155552671 party two"
+BAD_FOLLOWUP_TEXT = "nope"
+PHONE_FOLLOWUP_TEXT = "+14155552671"
 BOOK_EVENT_ID = "kickoff-book-0001"
-ASK_EVENT_ID = "kickoff-ask-0001"
 BAD_EVENT_ID = "kickoff-bad-0001"
 STUB_FROM = E164("+15555550100")
 
@@ -54,11 +61,12 @@ class LinqCallVerifyInput(BaseModel):
 
     from_did: E164 = STUB_FROM
     to: E164 = E164("+14155552671")
-    text: str = BOOK_KICKOFF_TEXT
+    text: str = NATURAL_BOOK_TEXT
 
 
 CheckName = Literal[
     "parse_book",
+    "collect_phone",
     "parse_quick_ask",
     "parse_fail_loud",
     "kickoff_reply",
@@ -88,10 +96,16 @@ class LinqCallVerifyReport(BaseModel):
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
+        LinqCallVerifyCheck,
     ]
 
 
-def kickoff_inbound_bytes(text: str, event_id: str) -> bytes:
+def kickoff_inbound_bytes(
+    text: str,
+    event_id: str,
+    *,
+    message_id: str = "kickoff-msg-0001",
+) -> bytes:
     return json.dumps(
         {
             "api_version": "v3",
@@ -100,7 +114,7 @@ def kickoff_inbound_bytes(text: str, event_id: str) -> bytes:
             "event_id": event_id,
             "data": {
                 "chat": {"id": INBOUND_CHAT_ID},
-                "id": "kickoff-msg-0001",
+                "id": message_id,
                 "direction": "inbound",
                 "sender_handle": {
                     "handle": INBOUND_SENDER,
@@ -133,27 +147,53 @@ def verify_linq_call(
         retain_call_artifacts=True,
     )
 
-    book_parsed = parse_kickoff(active.text, settings)
-    expected_book = BookRequest(
-        user_id=UserId("default"),
-        to=active.to,
-        caller=FirstName("Nathan"),
-        mode=Mode.STUB,
-        party_size=2,
-        time_text="Friday 7pm",
-        constraints="outdoor if possible",
-    )
-    book_ok = (
-        isinstance(book_parsed, KickoffParsed)
+    book_parsed = intake_kickoff(active.text, settings)
+    collect_ok = (
+        isinstance(book_parsed, KickoffCollecting)
         and book_parsed.verb == "book"
-        and book_parsed.request == expected_book
+        and book_parsed.reply == PHONE_ASK_TEXT
+        and book_parsed.pending.waiting_for == "to"
+        and book_parsed.pending.party_size == 2
+        and book_parsed.pending.time_text == "7:30"
+        and book_parsed.pending.to is None
+        and not (artifacts / "stub-call-0001").exists()
     )
     book_check = LinqCallVerifyCheck(
         name="parse_book",
-        passed=book_ok,
+        passed=collect_ok,
         detail=(
-            f"verb={getattr(book_parsed, 'verb', None)} "
-            f"to={getattr(getattr(book_parsed, 'request', None), 'to', None)}"
+            f"kind={type(book_parsed).__name__} "
+            f"waiting={getattr(getattr(book_parsed, 'pending', None), 'waiting_for', None)} "
+            f"party={getattr(getattr(book_parsed, 'pending', None), 'party_size', None)} "
+            f"time={getattr(getattr(book_parsed, 'pending', None), 'time_text', None)}"
+        ),
+    )
+
+    phone_parsed = None
+    phone_ok = False
+    if isinstance(book_parsed, KickoffCollecting):
+        phone_parsed = intake_kickoff(
+            str(active.to), settings, pending=book_parsed.pending
+        )
+        expected_book = BookRequest(
+            user_id=UserId("default"),
+            to=active.to,
+            caller=FirstName("Nathan"),
+            mode=Mode.STUB,
+            party_size=2,
+            time_text="7:30",
+        )
+        phone_ok = (
+            isinstance(phone_parsed, KickoffParsed)
+            and phone_parsed.verb == "book"
+            and phone_parsed.request == expected_book
+        )
+    phone_check = LinqCallVerifyCheck(
+        name="collect_phone",
+        passed=phone_ok,
+        detail=(
+            f"kind={type(phone_parsed).__name__} "
+            f"to={getattr(getattr(phone_parsed, 'request', None), 'to', None)}"
         ),
     )
 
@@ -179,32 +219,35 @@ def verify_linq_call(
         ),
     )
 
-    bad_parsed = parse_kickoff(BAD_KICKOFF_TEXT, settings)
-    bad_inbound = parse_inbound(
-        kickoff_inbound_bytes(BAD_KICKOFF_TEXT, BAD_EVENT_ID)
-    )
     fail_ok = False
     fail_detail = "malformed parse did not run"
     try:
-        if not isinstance(bad_parsed, KickoffMalformed) or bad_inbound is None:
-            raise ValueError("expected KickoffMalformed")
+        if not isinstance(book_parsed, KickoffCollecting):
+            raise ValueError("expected first text to collect the phone")
+        fail_parsed = intake_kickoff(
+            BAD_FOLLOWUP_TEXT, settings, pending=book_parsed.pending
+        )
+        fail_inbound = parse_inbound(
+            kickoff_inbound_bytes(BAD_FOLLOWUP_TEXT, BAD_EVENT_ID)
+        )
+        if not isinstance(fail_parsed, KickoffFailed) or fail_inbound is None:
+            raise ValueError("expected KickoffFailed")
         fail_port = StubLinq()
-        fail_session = make_session(bad_inbound, settings, fail_port)
-        help_text = malformed_reply_text(bad_parsed)
+        fail_session = make_session(fail_inbound, settings, fail_port)
+        help_text = failed_reply_text(fail_parsed.reason)
         fail_session.text(help_text, kind="error")
         kickoff_marker = (
             artifacts / "linq" / BAD_EVENT_ID / "kickoff.json"
         )
         fail_ok = (
-            "Couldn't parse that." in help_text
-            and "party" in bad_parsed.missing
-            and BOOK_USAGE.split(" [")[0] in help_text
+            help_text.startswith("Call failed:")
+            and "phone number" in fail_parsed.reason
             and not kickoff_marker.exists()
             and not (artifacts / "stub-call-0001").exists()
             and fail_port.last_path == f"/chats/{INBOUND_CHAT_ID}/messages"
         )
         fail_detail = (
-            f"missing={bad_parsed.missing} kickoff_json="
+            f"reason={fail_parsed.reason} kickoff_json="
             f"{kickoff_marker.exists()}"
         )
     except (OSError, ValueError, TypeError) as error:
@@ -217,7 +260,9 @@ def verify_linq_call(
     )
 
     inbound = parse_inbound(
-        kickoff_inbound_bytes(active.text, BOOK_EVENT_ID)
+        kickoff_inbound_bytes(
+            str(active.to), BOOK_EVENT_ID, message_id="kickoff-msg-phone"
+        )
     )
     reply_ok = False
     call_ok = False
@@ -228,8 +273,8 @@ def verify_linq_call(
     link_detail = "cross-link did not run"
     host_detail = "dial did not run"
     try:
-        if inbound is None or not isinstance(book_parsed, KickoffParsed):
-            raise ValueError("book fixture did not parse")
+        if inbound is None or not isinstance(phone_parsed, KickoffParsed):
+            raise ValueError("phone follow-up did not parse")
         port = StubLinq()
         session = KickoffSession(
             inbound=inbound,
@@ -237,7 +282,7 @@ def verify_linq_call(
             port=port,
             settings=settings,
         )
-        receipt = asyncio.run(run_kickoff(session, book_parsed.request))
+        receipt = asyncio.run(run_kickoff(session, phone_parsed.request))
         rows = _read_jsonl(
             artifacts / "linq" / BOOK_EVENT_ID / "replies.jsonl"
         )
@@ -323,6 +368,7 @@ def verify_linq_call(
 
     checks = (
         book_check,
+        phone_check,
         ask_check,
         fail_check,
         LinqCallVerifyCheck(
@@ -353,7 +399,7 @@ def format_linq_call_report(report: LinqCallVerifyReport) -> str:
         for check in report.checks
     ]
     passed = sum(check.passed for check in report.checks)
-    lines.append(f"{passed}/7 passed")
+    lines.append(f"{passed}/8 passed")
     return "\n".join(lines)
 
 

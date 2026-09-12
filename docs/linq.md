@@ -21,18 +21,19 @@ Stub mode needs none of them. `LiveLinqHttp` fails loud if the token is missing.
 
 ## Inbound
 
-Linq posts to the registered Workers URL. The Worker forwards POST to `APP_BASE_URL/linq/webhook` with the raw body and Standard Webhooks headers. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI in this process verifies HMAC and maps iMessage `message.received` into `InboundMessage`. Non-kickoff chat sends a `Received: {text}` ack on the same chat via MessagingPort (`POST /chats/{chatId}/messages`). Other subscription events (`message.sent`, `message.delivered`, `message.read`, `message.failed`) and SMS are ignored. Processed inbound writes `inbound.json` (inbound text, ids, timing) and `reply.json` under `CALL_AGENT_ARTIFACTS_DIR/linq/<event_id>/` for echo. Kickoff writes `kickoff.json`, `replies.jsonl`, and `call.json` there, plus `<call_control_id>/linq.json` in the call run dir. Missing artifact dir fails loud (500), not `{ok:true}` without a send.
+Linq posts to the registered Workers URL. The Worker forwards POST to `APP_BASE_URL/linq/webhook` with the raw body and Standard Webhooks headers. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. FastAPI in this process verifies HMAC and maps iMessage `message.received` into `InboundMessage`. Non-kickoff chat sends a `Received: {text}` ack on the same chat via MessagingPort (`POST /chats/{chatId}/messages`). Other subscription events (`message.sent`, `message.delivered`, `message.read`, `message.failed`) and SMS are ignored. Processed inbound writes `inbound.json` (inbound text, ids, timing) and `reply.json` under `CALL_AGENT_ARTIFACTS_DIR/linq/<event_id>/` for echo. Collect writes `linq/pending/<chat_id>.json` plus that event's `collect.json` and `replies.jsonl`. Kickoff writes `kickoff.json`, `replies.jsonl`, and `call.json` there, plus `<call_control_id>/linq.json` in the call run dir. Missing artifact dir fails loud (500), not `{ok:true}` without a send.
 
 ## Kickoff
 
-L1 testers text a thin shape on the same chat. Restaurant book is the prove job, not a forked agent.
+L1 testers text a natural book on the same chat. Restaurant book is the prove job, not a forked agent.
 
 ```
-book +14155552671 party 2 at Friday 7pm name Nathan notes outdoor if possible
-ask +14155552671 hours name Nathan
+User: can you make a reservation with this restaurant at 7:30 for a party of two?
+Treena: okay, sounds good. What's the restaurant's phone number?
+User: +14155552671
 ```
 
-`name` may be omitted when `LINQ_KICKOFF_CALLER` is set. Anything else stays on the `Received:` echo. FastAPI returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Mid-call chat is not shipped; clarification needed texts `Call failed:`. qa owns live prove.
+Party and time come from the first text. Treena asks only for the restaurant phone number. A complete one-shot that already includes `+E164` still dials. `name` may be omitted when `LINQ_KICKOFF_CALLER` is set. Anything else stays on the `Received:` echo. Collect replies 200. The number follow-up returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Mid-call chat is not shipped; clarification needed texts `Call failed:`. qa owns live prove.
 
 Prove the stub path:
 
@@ -40,7 +41,7 @@ Prove the stub path:
 call-agent verify-linq-call
 ```
 
-Expect seven `[PASS]` lines and `7/7 passed`.
+Expect eight `[PASS]` lines and `8/8 passed`.
 
 `POST /webhooks/linq` and `POST /linq/webhook` on FastAPI require `LINQ_WEBHOOK_SIGNING_SECRET`. They verify `webhook-id`, `webhook-timestamp`, and `webhook-signature` on the raw body. Missing secret or bad signature is 401. Live reply needs `LINQ_API_TOKEN` and `LINQ_FROM_E164`. Signature checks, parse, stub reply, and artifacts are stub-testable with no public URL and no box secret. Prod `APP_BASE_URL` is the always-on Fly origin `https://hidden-beacon-080.fly.dev` (no path). Nathan's laptop is not that host.
 

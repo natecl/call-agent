@@ -356,9 +356,10 @@ def test_verify_linq_call_stub_exits_zero(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "7/7 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 7
+    assert "8/8 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 8
     assert "[PASS] parse_book" in result.stdout
+    assert "[PASS] collect_phone" in result.stdout
     assert "[PASS] kickoff_reply" in result.stdout
     assert "[PASS] cross_link" in result.stdout
 

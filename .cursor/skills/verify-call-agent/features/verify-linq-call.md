@@ -1,14 +1,15 @@
 # Verify linq-to-call
 
-`verify-linq-call` is the stub lever for iMessage text → parse → `run_call` → Linq result reply with artifact cross-links. It needs no Telnyx, OpenAI, or Linq keys and opens no sockets. It exits `0` only when all seven checks pass.
+`verify-linq-call` is the stub lever for iMessage natural two-step book → collect phone → `run_call` → Linq result reply with artifact cross-links. It needs no Telnyx, OpenAI, or Linq keys and opens no sockets. It exits `0` only when all eight checks pass.
 
 ## Sub-features
 
-- `verify-pass` prints seven `[PASS]` lines and `7/7 passed` in stub mode.
+- `verify-pass` prints eight `[PASS]` lines and `8/8 passed` in stub mode.
 - `verify-exit` exits `0` on pass and `1` on any failure.
-- `parse-book` the book fixture becomes a `BookRequest`.
+- `parse-book` the natural reservation fixture collects party and time and asks for the restaurant phone number. No dial.
+- `collect-phone` the +E164 follow-up becomes a `BookRequest`.
 - `parse-ask` `ask +14155552671 hours name Nathan` becomes a hours `QuickAskRequest`.
-- `parse-fail` `book +14155552671 party two` is malformed, texts usage, writes no `kickoff.json`.
+- `parse-fail` a non-number follow-up while waiting for the phone texts `Call failed:`, writes no `kickoff.json`.
 - `kickoff-reply` two `POST /chats/{chat_id}/messages` sends: ack then `Booked:`.
 - `call-ran` stub call is `booked`, hangup path trail, `hangup.json` present. This lever retains artifacts so it can read them.
 - `cross-link` `linq/<event_id>/call.json` and `<ccid>/linq.json` point at each other.
@@ -26,8 +27,8 @@ Preconditions:
 
 - Baseline env from `README.md`. This verb opens no sockets. It writes under a temp artifacts dir, not the process `CALL_AGENT_ARTIFACTS_DIR`, unless you pass a workspace through pytest.
 
-- **CI command.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Stdout has exactly seven lines that start with `[PASS]`, in this order: `parse_book`, `parse_quick_ask`, `parse_fail_loud`, `kickoff_reply`, `call_ran`, `cross_link`, `same_host_dial`. The last line is `7/7 passed`.
-- **Defaults.** Run `.venv/bin/call-agent verify-linq-call`. Same seven lines, exit code `0`.
+- **CI command.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Stdout has exactly eight lines that start with `[PASS]`, in this order: `parse_book`, `collect_phone`, `parse_quick_ask`, `parse_fail_loud`, `kickoff_reply`, `call_ran`, `cross_link`, `same_host_dial`. The last line is `8/8 passed`.
+- **Defaults.** Run `.venv/bin/call-agent verify-linq-call`. Same eight lines, exit code `0`.
 - **Proof.** Save stdout as `verify-linq-call.txt` in the evidence directory.
 
 ## Gotchas

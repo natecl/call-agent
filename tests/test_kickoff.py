@@ -16,24 +16,32 @@ from call_agent.domain import (
     UserId,
 )
 from call_agent.kickoff import (
-    ASK_USAGE,
-    BOOK_USAGE,
-    KickoffMalformed,
+    PHONE_ASK_TEXT,
+    TIME_ASK_TEXT,
+    KickoffCollecting,
+    KickoffFailed,
     KickoffParsed,
     KickoffSession,
+    collect_reply_text,
+    failed_reply_text,
+    intake_kickoff,
     kickoff_ack_text,
     kickoff_host_mismatch,
+    load_pending_collect,
     make_session,
-    malformed_reply_text,
     parse_kickoff,
+    pending_collect_path,
     result_reply_text,
     run_kickoff,
+    save_pending_collect,
 )
 from call_agent.linq import StubLinq, parse_inbound
 from call_agent.messaging import IMESSAGE
 from call_agent.verify_linq_call import (
     ASK_KICKOFF_TEXT,
-    BOOK_KICKOFF_TEXT,
+    NATURAL_BOOK_TEXT,
+    ONESHOT_BOOK_TEXT,
+    PHONE_FOLLOWUP_TEXT,
     kickoff_inbound_bytes,
     verify_linq_call,
 )
@@ -47,9 +55,6 @@ def _settings(tmp_path: Path, **updates: object) -> Settings:
         linq_from_e164="+15555550100",
         call_agent_db_path=tmp_path / "ledger.sqlite3",
         call_agent_artifacts_dir=tmp_path / "artifacts",
-        hangup_trailing_silence_s=0,
-        public_base_url="https://stub.invalid",
-        quick_ask_live=False,
     )
     values.update(updates)
     settings = Settings(**values)
@@ -57,9 +62,45 @@ def _settings(tmp_path: Path, **updates: object) -> Settings:
     return settings
 
 
-def test_parse_book_literal_shape(tmp_path: Path) -> None:
+def test_parse_natural_book_asks_only_for_phone(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    parsed = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.reply == PHONE_ASK_TEXT
+    assert parsed.reply == (
+        "okay, sounds good. What's the restaurant's phone number?"
+    )
+    assert parsed.pending.waiting_for == "to"
+    assert parsed.pending.party_size == 2
+    assert parsed.pending.time_text == "7:30"
+    assert parsed.pending.to is None
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+
+
+def test_phone_followup_completes_book_request(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+
+    parsed = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+
+    assert isinstance(parsed, KickoffParsed)
+    assert parsed.request == BookRequest(
+        user_id=UserId("default"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="7:30",
+    )
+
+
+def test_parse_complete_oneshot_still_dials(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    parsed = parse_kickoff(BOOK_KICKOFF_TEXT, settings)
+    parsed = parse_kickoff(ONESHOT_BOOK_TEXT, settings)
 
     assert isinstance(parsed, KickoffParsed)
     assert parsed.verb == "book"
@@ -110,39 +151,117 @@ def test_parse_uses_kickoff_caller_when_name_omitted(tmp_path: Path) -> None:
     assert parsed.request.caller == FirstName("Nathan")
 
 
-def test_parse_missing_name_is_malformed(tmp_path: Path) -> None:
+def test_parse_missing_name_fails_loud(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     parsed = parse_kickoff(
         "book +14155552671 party 2 at Friday 7pm", settings
     )
 
-    assert isinstance(parsed, KickoffMalformed)
-    assert parsed.missing == ("name",)
-    assert "Couldn't parse that." in malformed_reply_text(parsed)
-    assert BOOK_USAGE in malformed_reply_text(parsed)
+    assert isinstance(parsed, KickoffFailed)
+    assert parsed.reason == "missing caller name"
+    assert failed_reply_text(parsed.reason) == "Call failed: missing caller name"
 
 
-def test_parse_bad_party_is_malformed(tmp_path: Path) -> None:
+def test_missing_time_asks_for_time_not_phone(tmp_path: Path) -> None:
     settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
-    parsed = parse_kickoff("book +14155552671 party two", settings)
+    parsed = intake_kickoff(
+        "can you make a reservation for a party of two?", settings
+    )
 
-    assert isinstance(parsed, KickoffMalformed)
-    assert "party" in parsed.missing
-    assert "at" in parsed.missing
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.reply == TIME_ASK_TEXT
+    assert parsed.pending.waiting_for == "time"
+    assert parsed.pending.party_size == 2
+    assert parsed.reply != PHONE_ASK_TEXT
+
+
+def test_missing_party_and_time_does_not_ask_for_phone(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    parsed = intake_kickoff("can you make a reservation?", settings)
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "party_and_time"
+    assert parsed.reply == collect_reply_text("party_and_time")
+    assert parsed.reply != PHONE_ASK_TEXT
+
+
+def test_time_then_phone_collect_order(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(
+        "can you make a reservation for a party of two?", settings
+    )
+    assert isinstance(first, KickoffCollecting)
+    second = intake_kickoff("7:30", settings, pending=first.pending)
+    assert isinstance(second, KickoffCollecting)
+    assert second.reply == PHONE_ASK_TEXT
+    assert second.pending.time_text == "7:30"
+    third = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=second.pending
+    )
+    assert isinstance(third, KickoffParsed)
+    assert isinstance(third.request, BookRequest)
+    assert third.request.party_size == 2
+    assert third.request.time_text == "7:30"
+
+
+def test_bad_phone_followup_fails_loud(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    parsed = intake_kickoff("nope", settings, pending=first.pending)
+
+    assert isinstance(parsed, KickoffFailed)
+    assert "phone number" in parsed.reason
+    assert failed_reply_text(parsed.reason).startswith("Call failed:")
+
+
+def test_us_phone_followup_normalizes_to_e164(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    parsed = intake_kickoff("415-555-2671", settings, pending=first.pending)
+
+    assert isinstance(parsed, KickoffParsed)
+    assert parsed.request.to == E164("+14155552671")
 
 
 def test_parse_non_kickoff_is_none(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     assert parse_kickoff("hello there", settings) is None
     assert parse_kickoff("reply", settings) is None
+    assert parse_kickoff(PHONE_FOLLOWUP_TEXT, settings) is None
 
 
-def test_parse_ask_missing_item_is_malformed(tmp_path: Path) -> None:
+def test_parse_ask_missing_item_collects_item(tmp_path: Path) -> None:
     settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
     parsed = parse_kickoff("ask +14155552671 stock", settings)
 
-    assert isinstance(parsed, KickoffMalformed)
-    assert parsed.usage == ASK_USAGE
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "item"
+
+
+def test_pending_collect_roundtrip_on_chat(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    inbound = parse_inbound(
+        kickoff_inbound_bytes(NATURAL_BOOK_TEXT, "evt-pending-1")
+    )
+    assert inbound is not None
+    save_pending_collect(
+        settings.call_agent_artifacts_dir,
+        inbound.chat_id,
+        first.pending,
+        inbound=inbound,
+    )
+
+    loaded = load_pending_collect(
+        settings.call_agent_artifacts_dir, inbound.chat_id
+    )
+    assert loaded == first.pending
+    assert pending_collect_path(
+        settings.call_agent_artifacts_dir, inbound.chat_id
+    ).is_file()
 
 
 def test_result_reply_text_covers_statuses() -> None:
@@ -223,12 +342,16 @@ def test_kickoff_host_mismatch_names_hosts() -> None:
 
 
 async def test_run_kickoff_cross_links_and_replies(tmp_path: Path) -> None:
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
     inbound = parse_inbound(
-        kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, "evt-book-1")
+        kickoff_inbound_bytes(PHONE_FOLLOWUP_TEXT, "evt-book-1")
     )
     assert inbound is not None
-    parsed = parse_kickoff(BOOK_KICKOFF_TEXT, settings)
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    parsed = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
     assert isinstance(parsed, KickoffParsed)
     port = StubLinq()
     session = make_session(inbound, settings, port)
@@ -265,6 +388,7 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
 ) -> None:
     settings = _settings(
         tmp_path,
+        linq_kickoff_caller="Nathan",
         quick_ask_live=True,
         telnyx_api_key="k",
         telnyx_connection_id="c",
@@ -273,7 +397,7 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
         public_webhook_url=None,
     )
     inbound = parse_inbound(
-        kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, "evt-live-1")
+        kickoff_inbound_bytes(PHONE_FOLLOWUP_TEXT, "evt-live-1")
     )
     assert inbound is not None
     request = BookRequest(
@@ -282,7 +406,7 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
         caller=FirstName("Nathan"),
         mode=Mode.LIVE,
         party_size=2,
-        time_text="Friday 7pm",
+        time_text="7:30",
     )
     port = StubLinq()
     session = make_session(inbound, settings, port)
@@ -300,7 +424,7 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
 async def test_kickoff_session_ask_is_reserved(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     inbound = parse_inbound(
-        kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, "evt-ask-seam")
+        kickoff_inbound_bytes(NATURAL_BOOK_TEXT, "evt-ask-seam")
     )
     assert inbound is not None
     session = make_session(inbound, settings, StubLinq())
@@ -324,12 +448,16 @@ class _RecordingPort:
 
 
 async def test_run_kickoff_uses_session_text(tmp_path: Path) -> None:
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path, linq_kickoff_caller="Nathan")
     inbound = parse_inbound(
-        kickoff_inbound_bytes(BOOK_KICKOFF_TEXT, "evt-session-text")
+        kickoff_inbound_bytes(PHONE_FOLLOWUP_TEXT, "evt-session-text")
     )
     assert inbound is not None
-    parsed = parse_kickoff(BOOK_KICKOFF_TEXT, settings)
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    parsed = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
     assert isinstance(parsed, KickoffParsed)
     port = _RecordingPort()
     session = KickoffSession(
@@ -352,6 +480,7 @@ def test_verify_linq_call_passes() -> None:
     assert report.passed
     assert [check.name for check in report.checks] == [
         "parse_book",
+        "collect_phone",
         "parse_quick_ask",
         "parse_fail_loud",
         "kickoff_reply",
