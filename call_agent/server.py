@@ -14,7 +14,13 @@ from fastapi import (
 
 from .config import Settings
 from .domain import MediaStartEvent, MediaStopEvent
-from .linq import LinqWebhookAuthError, parse_inbound, verify_linq_signature
+from .linq import (
+    LinqConfigError,
+    LinqWebhookAuthError,
+    handle_inbound,
+    messaging_port,
+    verify_linq_signature,
+)
 from .runtime import BOOK
 from .telnyx import LiveTelnyxMedia, parse_media_frame, parse_webhook
 
@@ -38,7 +44,7 @@ async def telnyx_webhook(request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
-async def process_linq_webhook(request: Request) -> dict[str, bool]:
+async def process_linq_webhook(request: Request) -> dict[str, bool | str]:
     body = await request.body()
     settings = Settings()
     if not settings.linq_webhook_signing_secret:
@@ -51,10 +57,22 @@ async def process_linq_webhook(request: Request) -> dict[str, bool]:
         )
     except LinqWebhookAuthError as error:
         raise HTTPException(status_code=401, detail="unauthorized") from error
-    inbound = parse_inbound(body)
+    port = messaging_port(settings)
+    inbound = port.receive(body)
     if inbound is None:
         return {"ok": True, "ignored": True}
-    return {"ok": True}
+    try:
+        receipt = handle_inbound(inbound, settings, port)
+    except (LinqConfigError, OSError) as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    if receipt is None:
+        return {"ok": True, "ignored": True}
+    return {
+        "ok": True,
+        "replied": True,
+        "chat_id": str(receipt.chat_id),
+        "message_id": str(receipt.message_id),
+    }
 
 
 app.add_api_route("/webhooks/linq", process_linq_webhook, methods=["POST"])

@@ -10,9 +10,9 @@ Day 1 ships quick-ask and restaurant book. Closed alpha includes iMessage inboun
 
 Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inbound path. Builder can register it now. No Nathan click. SMS stays off.
 
-`https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
+`https://call-agent-webhooks.usetreena.workers.dev/linq/webhook`
 
-`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC. The Worker does not send SMS. Prod FastAPI is the always-on Fly app `hidden-beacon-080`. Set Worker `APP_BASE_URL` to `https://hidden-beacon-080.fly.dev` (no path). Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.usetreena.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.usetreena.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC and replies on iMessage `message.received` via MessagingPort. The Worker does not send SMS. Prod FastAPI is the always-on Fly app `hidden-beacon-080`. Set Worker `APP_BASE_URL` to `https://hidden-beacon-080.fly.dev` (no path). Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Deploy FastAPI on Fly Machines
 
@@ -23,7 +23,7 @@ fly secrets set LINQ_WEBHOOK_SIGNING_SECRET=...
 fly deploy
 ```
 
-`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. Set `LINQ_API_TOKEN` on this process only if it will live-send or register. HMAC inbound does not need it.
+`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset.
 
 Then point the Worker at the Fly origin (no path) and deploy the Worker:
 
@@ -72,7 +72,7 @@ Stub messaging (no Linq token, no public URL):
 call-agent verify-message
 ```
 
-You should see five `[PASS]` lines and `5/5 passed`. The checks are stub send shape, inbound `message.received` mapping, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
+You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send shape, inbound `message.received` mapping, inbound reply + artifact text, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
 
 `call-agent verify-persistence` checks the Neon and R2 ports. With those vars unset it uses SQLite and a local directory, prints three `[PASS]` lines, and exits 0. If some `R2_*` vars are set and others are not, or if `NEON_DATABASE_URL` is not a `postgresql://` URL, it exits 2 and names the problem. CI runs it with the vars unset. It never opens Neon or R2.
 
@@ -103,7 +103,7 @@ Start with `call_report.json`. It names the call (`call_control_id`, `run_id`, `
 Live mode places a real call. It is gated so that no test or CI run can reach the network by accident.
 
 1. Copy `.env.example` to `.env` and fill in `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, and `OPENAI_API_KEY`. Keep `.env` out of git.
-2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx opens the media socket at that host on `/media-stream`. For local-only webhook tests you can leave `PUBLIC_WEBHOOK_URL` empty so Telnyx also posts to `PUBLIC_BASE_URL/webhooks/telnyx`. Production webhooks use the always-on Worker at `https://call-agent-webhooks.blossom-linen.workers.dev`. Set `PUBLIC_WEBHOOK_URL` and the Telnyx Call Control application webhook to `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Linq registers `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` (alias `/webhooks/linq`). The Worker does not terminate media. A request to `/media-stream` on the Worker returns 501. See [workers/webhooks/README.md](workers/webhooks/README.md).
+2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000`, and put its `https://` URL in `PUBLIC_BASE_URL`. Telnyx opens the media socket at that host on `/media-stream`. For local-only webhook tests you can leave `PUBLIC_WEBHOOK_URL` empty so Telnyx also posts to `PUBLIC_BASE_URL/webhooks/telnyx`. Production webhooks use the always-on Worker at `https://call-agent-webhooks.usetreena.workers.dev`. Set `PUBLIC_WEBHOOK_URL` and the Telnyx Call Control application webhook to `https://call-agent-webhooks.usetreena.workers.dev/webhooks/telnyx`. Linq registers `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook` (alias `/webhooks/linq`). The Worker does not terminate media. A request to `/media-stream` on the Worker returns 501. See [workers/webhooks/README.md](workers/webhooks/README.md).
 3. Set `QUICK_ASK_LIVE=1`.
 4. Provision a real number once with `call-agent did provision --user default --live`. The Numbers API orders a voice-capable US number and records it in the ledger. Without `--live` the verb records a stub number.
 5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends. `call-agent book --to +1... --name Nathan --party 2 --time "Friday 7pm" --live` is the same path with a `BookRequest`. The later live target for book is `+17272701288`. Do not dial it until the tunnel and keys above are set. This PR does not place that call.
@@ -119,12 +119,12 @@ call-agent verify-webhooks
 You should see five `[PASS]` lines and `5/5 passed`. Against a deployed Worker:
 
 ```bash
-call-agent verify-webhooks --url https://call-agent-webhooks.blossom-linen.workers.dev
+call-agent verify-webhooks --url https://call-agent-webhooks.usetreena.workers.dev
 ```
 
 Unsigned Telnyx POSTs must be 401. If they are 200, signature verification is unwired and the lever fails.
 
-The live path is written to the recipe but has not been exercised against Telnyx or OpenAI from this repository. The things it needs that this repository cannot supply are the Telnyx keys, the OpenAI key with GPT-Live access, and a public media `wss://` host. The always-on webhook Worker is already at `https://call-agent-webhooks.blossom-linen.workers.dev`.
+The live path is written to the recipe but has not been exercised against Telnyx or OpenAI from this repository. The things it needs that this repository cannot supply are the Telnyx keys, the OpenAI key with GPT-Live access, and a public media `wss://` host. The always-on webhook Worker is already at `https://call-agent-webhooks.usetreena.workers.dev`.
 
 ## Model routing for agents
 

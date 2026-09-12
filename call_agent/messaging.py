@@ -55,7 +55,7 @@ class OutboundChat(FrozenModel):
 
     @model_validator(mode="after")
     def _recipients_and_parts(self) -> OutboundChat:
-        if not self.to:
+        if self.chat_id is None and not self.to:
             raise ValueError("outbound chat needs at least one recipient")
         if not self.parts:
             raise ValueError("outbound chat needs at least one text part")
@@ -87,4 +87,30 @@ def text_chat(from_did: E164, to: E164, text: str) -> OutboundChat:
         from_did=from_did,
         to=(to,),
         parts=(TextPart(value=text),),
+    )
+
+
+def inbound_plain_text(inbound: InboundMessage) -> str:
+    return " ".join(part.value for part in inbound.parts)
+
+
+def ack_reply_text(inbound: InboundMessage) -> str:
+    return f"Received: {inbound_plain_text(inbound)}"
+
+
+def followup_chat(
+    from_did: E164,
+    inbound: InboundMessage,
+    text: str,
+) -> OutboundChat:
+    to: tuple[E164, ...] = ()
+    try:
+        to = (E164(str(inbound.sender)),)
+    except ValueError:
+        to = ()
+    return OutboundChat(
+        from_did=from_did,
+        to=to,
+        parts=(TextPart(value=text),),
+        chat_id=inbound.chat_id,
     )

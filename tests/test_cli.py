@@ -279,10 +279,11 @@ def test_verify_message_stub_exits_zero(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "5/5 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 5
+    assert "6/6 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 6
     assert "[PASS] stub_send" in result.stdout
     assert "[PASS] inbound_map" in result.stdout
+    assert "[PASS] inbound_reply" in result.stdout
 
 
 def test_linq_register_webhook_fails_without_token(

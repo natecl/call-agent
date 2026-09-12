@@ -6,6 +6,8 @@ import hmac
 import json
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,9 +23,13 @@ from .messaging import (
     Handle,
     InboundMessage,
     MessageId,
+    MessagingPort,
     OutboundChat,
     SendReceipt,
     TextPart,
+    ack_reply_text,
+    followup_chat,
+    inbound_plain_text,
     text_chat,
 )
 
@@ -148,6 +154,11 @@ def parse_inbound(raw: bytes) -> InboundMessage | None:
         service = nested.get("service")
     if service != IMESSAGE:
         return None
+    direction = data.get("direction")
+    if direction is None and isinstance(nested, dict):
+        direction = nested.get("direction")
+    if direction is not None and direction != "inbound":
+        return None
     event_id = envelope.get("event_id")
     if not isinstance(event_id, str):
         return None
@@ -252,7 +263,10 @@ class StubLinq:
     def send(self, message: OutboundChat) -> SendReceipt:
         self.last_path = outbound_path(message)
         self.last_payload = serialize_outbound(message)
-        return SendReceipt(chat_id=STUB_CHAT_ID, message_id=STUB_MESSAGE_ID)
+        return SendReceipt(
+            chat_id=message.chat_id or STUB_CHAT_ID,
+            message_id=STUB_MESSAGE_ID,
+        )
 
     def receive(self, raw: bytes) -> InboundMessage | None:
         return parse_inbound(raw)
@@ -314,6 +328,101 @@ def linq_from(settings: Settings) -> E164:
     if not raw:
         raise LinqConfigError("live Linq send requires LINQ_FROM_E164")
     return E164(raw)
+
+
+STUB_FROM_DID = E164("+15555550100")
+
+
+def reply_from_did(settings: Settings) -> E164:
+    if settings.linq_from_e164:
+        return E164(settings.linq_from_e164)
+    if settings.linq_api_token:
+        raise LinqConfigError("live Linq send requires LINQ_FROM_E164")
+    return STUB_FROM_DID
+
+
+def messaging_port(settings: Settings) -> MessagingPort:
+    token = settings.linq_api_token
+    if token:
+        return LiveLinqHttp(token)
+    return StubLinq()
+
+
+def linq_artifact_dir(root: Path, event_id: EventId | str) -> Path:
+    if not root.exists():
+        raise FileNotFoundError(f"CALL_AGENT_ARTIFACTS_DIR is missing: {root}")
+    if not root.is_dir():
+        raise NotADirectoryError(
+            f"CALL_AGENT_ARTIFACTS_DIR is not a directory: {root}"
+        )
+    path = root / "linq" / str(event_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def write_linq_message_artifacts(
+    root: Path,
+    inbound: InboundMessage,
+    outbound: OutboundChat,
+    receipt: SendReceipt,
+    *,
+    received_at: datetime,
+    sent_at: datetime,
+) -> Path:
+    path = linq_artifact_dir(root, inbound.event_id)
+    inbound_text = inbound_plain_text(inbound)
+    reply_text = " ".join(part.value for part in outbound.parts)
+    inbound_payload = {
+        "event_id": str(inbound.event_id),
+        "chat_id": str(inbound.chat_id),
+        "message_id": str(inbound.message_id),
+        "sender": str(inbound.sender),
+        "service": inbound.service,
+        "parts": [part.model_dump(mode="json") for part in inbound.parts],
+        "text": inbound_text,
+        "received_at": received_at.isoformat(),
+    }
+    reply_payload = {
+        "chat_id": str(receipt.chat_id),
+        "message_id": str(receipt.message_id),
+        "inbound_message_id": str(inbound.message_id),
+        "outbound_path": outbound_path(outbound),
+        "preferred_service": IMESSAGE,
+        "parts": [part.model_dump(mode="json") for part in outbound.parts],
+        "text": reply_text,
+        "sent_at": sent_at.isoformat(),
+    }
+    (path / "inbound.json").write_text(
+        json.dumps(inbound_payload, indent=2, sort_keys=True) + "\n"
+    )
+    (path / "reply.json").write_text(
+        json.dumps(reply_payload, indent=2, sort_keys=True) + "\n"
+    )
+    return path
+
+
+def handle_inbound(
+    inbound: InboundMessage,
+    settings: Settings,
+    port: MessagingPort | None = None,
+) -> SendReceipt | None:
+    from_did = reply_from_did(settings)
+    if str(inbound.sender) == str(from_did):
+        return None
+    active = port or messaging_port(settings)
+    outbound = followup_chat(from_did, inbound, ack_reply_text(inbound))
+    received_at = datetime.now(UTC)
+    receipt = active.send(outbound)
+    sent_at = datetime.now(UTC)
+    write_linq_message_artifacts(
+        settings.call_agent_artifacts_dir,
+        inbound,
+        outbound,
+        receipt,
+        received_at=received_at,
+        sent_at=sent_at,
+    )
+    return receipt
 
 
 def kickoff_from_settings(settings: Settings, to: E164, text: str) -> OutboundChat:
