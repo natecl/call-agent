@@ -41,7 +41,7 @@ Each `quick-ask` run writes one run directory.
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | run directory | shipped | Writes `dial.json`, `session_start.json`, `events.jsonl`, `transcript.json`, `audio/inbound.wav`, `audio/outbound.wav`, `hangup.json`, `result.json`, `call_report.json`, and `call_report.redacted.json` under `CALL_AGENT_ARTIFACTS_DIR` in a directory named for `call_control_id`. | `call_agent/runtime.py` `RunDir`. `README.md`. `docs/design.md` Shape, "Artifacts are the proof." |
-| `CallReport` | shipped | Records `timing_ms`, `hangup.path` as trail, drain_timeout, failure, or far_party, `counts.marks_sent`, and refs, and `result_artifact` checks that `CallReport` and those refs exist. | `call_agent/report.py` `CallReport` `HangupSummary.path` `Counts.marks_sent`. `call_agent/verify.py` `result_artifact`. `tests/test_verify_quick_ask.py` |
+| `CallReport` | shipped | Records `timing_ms`, `hangup.path` as trail, drain_timeout, failure, or far_party, `counts.marks_sent`, and refs. `status` includes `booked`. `result_artifact` checks that `CallReport` and those refs exist. | `call_agent/report.py` `CallReport` `HangupSummary.path` `Counts.marks_sent`. `call_agent/verify.py` `result_artifact`. `tests/test_verify_quick_ask.py`. `tests/test_verify_book.py` |
 | `call_report.redacted.json` | shipped | Writes a `RedactedCallReport` sibling from `redact_call_report` after `call_report.json`. Phone fields are `[phone]`. The caller field is `[name]` or `None`. | `call_agent/report.py` `redact_call_report`. `call_agent/runtime.py` `RunDir.finish`. `tests/test_report.py` |
 
 ## verify-quick-ask
@@ -55,21 +55,23 @@ CLI verb `verify-quick-ask` calls `verify_quick_ask`.
 
 ## verify-call-agent
 
-The Cursor skill drives the stub CLI verbs and never sets live keys or Neon and R2 vars.
+The Cursor skill drives the CLI verbs in stub mode and never sets live keys or Neon and R2 vars.
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode or sets Neon and R2 vars. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `verify-message`, `webhooks`, `linq-inbound`, `verify-webhooks`, and `verify-persistence` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `webhooks`, `linq-inbound`, `verify-webhooks`, and `verify-persistence` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
 | `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ACK ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
 | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
 | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the five stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` |
+| `.cursor/skills/verify-call-agent/features/book.md` | shipped | Covers stub book, decline is via verify-book, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/book.md` |
+| `.cursor/skills/verify-call-agent/features/verify-book.md` | shipped | Covers the six stub checks, defaults, the live gate, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-book.md` |
 | `.cursor/skills/verify-call-agent/features/verify-message.md` | shipped | Covers the five MessagingPort checks and the register-webhook gate. | `.cursor/skills/verify-call-agent/features/verify-message.md` |
 | `.cursor/skills/verify-call-agent/features/verify-persistence.md` | shipped | Covers the three stub checks, the SQLite and local fallback, and the misconfig exit. | `.cursor/skills/verify-call-agent/features/verify-persistence.md` |
-| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-message`, `verify-webhooks`, `verify-persistence`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
+| `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` | shipped | Runs one isolated stub drive of those recipes, including `verify-book`, `verify-message`, `verify-webhooks`, `verify-persistence`, and `linq register-webhook` exit 2 without a token. | `.cursor/skills/verify-call-agent/scripts/verify_stub.sh` |
 
 ## Always-on webhooks
 
@@ -115,18 +117,38 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever. `verify-persistence` is the later port lever. It is listed under Durable persistence.
+`docs/design.md` Usage shows `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `book`, and `verify-book`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever. `verify-persistence` is the later port lever. It is listed under Durable persistence.
 
-`README.md` states booking, hold queues, and packaging stay out of scope. SMS stays off. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook.
+`README.md` states hold queues, packaging, and SMS stay out of scope. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook. Restaurant book is shipped in stub. This repository has not dialed live book. Neon and R2 ports are shipped with sqlite and local fallback. Live Neon and R2 stay gated on env.
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
+
+## book
+
+CLI verb `book` drives `run_call` with a `BookRequest`.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `book` | shipped | Runs one outbound booking call through `run_call` with `--to`, `--name`, `--party`, `--time`, and optional `--notes`. Stub `StubGptLive` walks party, time, and constraints, then a booked or declined close. | `call_agent/cli.py` `book`. `call_agent/runtime.py` `run_call`. `call_agent/domain.py` `BookRequest` `assess_book`. `tests/test_cli.py` `test_book_stub_prints_booked_result`. `.cursor/skills/verify-call-agent/features/book.md` |
+| `book --live` | gated | Same live gate as `quick-ask --live`. Hosts FastAPI routes and runs `run_call` when `--live` is set and `_require_live_gate` passes. This repository has not dialed live book. | `call_agent/cli.py` `_run_request` `_require_live_gate`. `call_agent/server.py` `serve_in_process`. `.cursor/skills/verify-call-agent/features/book.md` |
+| `BookRequest` | shipped | Holds `party_size` (>= 1), `time_text`, and optional `constraints`. `Call.request` is `QuickAskRequest \| BookRequest`. | `call_agent/domain.py` `BookRequest` `Call.request`. `tests/test_domain.py` `test_book_result_is_discriminated_and_confirmation_is_nonempty` |
+| `BookResult` | shipped | Discriminated union on `status`: `booked` requires `confirmation_text`, `declined` / `no_answer` / `failed` pin it absent. | `call_agent/domain.py` `Booked` `BookResult`. `tests/test_domain.py` `test_assess_book_waits_for_closing_then_books_or_declines` |
+| `assess_book` | shipped | Pure. Needs `CLOSING_LINE`, then booked needles or decline needles. Decline wins when both match (`fully booked` contains `booked`). A close without either needle is not a verdict. | `call_agent/domain.py` `assess_book` `BOOK_NEEDLES` `DECLINE_BOOK_NEEDLES`. `tests/test_domain.py` `test_assess_book_waits_for_closing_then_books_or_declines` |
+
+## verify-book
+
+CLI verb `verify-book` calls `verify_book`.
+
+| name | status | does | proof |
+| --- | --- | --- | --- |
+| `verify-book` | shipped | Runs six checks: `did_in_ledger`, `dial_payload`, `disclosure_first`, `clean_hangup` (`booked` or `declined`), `result_artifact`, and `multi_turn_booking`. A one-shot stub fails `multi_turn_booking`. | `call_agent/cli.py` `verify_book_command`. `call_agent/verify.py` `verify_book`. `tests/test_verify_book.py`. `tests/test_cli.py` `test_verify_book_stub_exits_zero`. `.github/workflows/ci.yml`. `.cursor/skills/verify-call-agent/features/verify-book.md` |
+| `verify-book --mode live` | gated | The CLI exits 2 unless `QUICK_ASK_LIVE=1`. `verify_book` still provisions with `StubTelnyxHttp` and does not call `serve_in_process`. | `call_agent/cli.py` `verify_book_command`. `tests/test_cli.py` `test_verify_book_live_requires_gate` |
 
 ## Not shipped
 
 | name | status | does | proof |
 | --- | --- | --- | --- |
-| `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
-| hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
+| hold queues | not shipped | Named out of scope in `README.md`. `build_book_instructions` says never join a hold or waitlist. `build_instructions` for quick-ask still says never book. | `README.md`. `call_agent/domain.py` `build_book_instructions` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
 | Worker→app Linq forward | not shipped | Worker ACKs `POST /linq/webhook`. FastAPI `process_linq_webhook` is the process path. No bridge yet. | `workers/webhooks/src/handler.ts`. `call_agent/server.py` `process_linq_webhook` |
 | Linq SMS | not shipped | Worker exposes `POST /linq/webhook` with `implemented: false`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |

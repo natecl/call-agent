@@ -7,13 +7,15 @@ import typer
 
 from .config import Settings
 from .domain import (
+    BookRequest,
+    CallRequest,
+    CallResult,
     E164,
     FirstName,
     Mode,
     Question,
     QuestionType,
     QuickAskRequest,
-    QuickAskResult,
     UserId,
 )
 from .ledger import open_ledger
@@ -24,10 +26,16 @@ from .linq import (
     validate_linq_live_token,
 )
 from .persistence import PersistenceConfigError
-from .runtime import run_quick_ask, validate_live
+from .runtime import run_call, validate_live
 from .server import serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
-from .verify import VerifyInput, format_report, verify_quick_ask
+from .verify import (
+    BookVerifyInput,
+    VerifyInput,
+    format_report,
+    verify_book,
+    verify_quick_ask,
+)
 from .verify_message import (
     MessageVerifyInput,
     format_message_report,
@@ -137,6 +145,39 @@ def quick_ask(
     typer.echo(json.dumps(result.model_dump(mode="json")))
 
 
+@app.command("book")
+def book(
+    to: str = typer.Option(..., "--to"),
+    name: str = typer.Option(..., "--name"),
+    party: int = typer.Option(..., "--party"),
+    time: str = typer.Option(..., "--time"),
+    notes: str | None = typer.Option(None, "--notes"),
+    user: str = typer.Option("default", "--user"),
+    live: bool = typer.Option(False, "--live"),
+) -> None:
+    settings = Settings()
+    if live:
+        _require_live_gate(settings)
+    try:
+        request = BookRequest(
+            user_id=UserId(user),
+            to=E164(to),
+            caller=FirstName(name),
+            mode=Mode.LIVE if live else Mode.STUB,
+            party_size=party,
+            time_text=time,
+            constraints=notes,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    try:
+        result = asyncio.run(_run_request(request, settings))
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(json.dumps(result.model_dump(mode="json")))
+
+
 @app.command("verify-quick-ask")
 def verify_quick_ask_command(
     to: str = typer.Option("+14155552671", "--to"),
@@ -165,6 +206,40 @@ def verify_quick_ask_command(
             user_id=UserId(user),
         )
         report = verify_quick_ask(verify_input)
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(format_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("verify-book")
+def verify_book_command(
+    to: str = typer.Option("+14155552671", "--to"),
+    name: str = typer.Option("Nathan", "--name"),
+    party: int = typer.Option(2, "--party"),
+    time: str = typer.Option("Friday 7pm", "--time"),
+    notes: str | None = typer.Option("outdoor if possible", "--notes"),
+    from_did: str = typer.Option("+15555550100", "--from-did"),
+    mode: Mode = typer.Option(Mode.STUB, "--mode"),
+    user: str = typer.Option("verify", "--user"),
+) -> None:
+    settings = Settings()
+    if mode is Mode.LIVE:
+        _require_live_gate(settings)
+    try:
+        verify_input = BookVerifyInput(
+            to=E164(to),
+            caller_first_name=FirstName(name),
+            party_size=party,
+            time_text=time,
+            constraints=notes,
+            from_did=E164(from_did),
+            mode=mode,
+            user_id=UserId(user),
+        )
+        report = verify_book(verify_input)
     except ValueError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
@@ -252,6 +327,7 @@ def verify_persistence_command() -> None:
         raise typer.Exit(code=1)
 
 
+
 def _require_live_gate(settings: Settings) -> None:
     if not settings.quick_ask_live:
         typer.echo(LIVE_GATE_MESSAGE, err=True)
@@ -259,12 +335,12 @@ def _require_live_gate(settings: Settings) -> None:
 
 
 async def _run_request(
-    request: QuickAskRequest, settings: Settings
-) -> QuickAskResult:
+    request: CallRequest, settings: Settings
+) -> CallResult:
     if request.mode is Mode.STUB:
-        return await run_quick_ask(request, settings)
+        return await run_call(request, settings)
     running = await serve_in_process(settings)
     try:
-        return await run_quick_ask(request, settings)
+        return await run_call(request, settings)
     finally:
         await running.stop()
