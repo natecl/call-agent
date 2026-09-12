@@ -2,7 +2,7 @@
 
 ## Problem
 
-A CLI user pastes a business's E.164 number and asks one question (`hours`, `stock`, or `aisle`). The app dials from a Telnyx number that belongs to that user, says whose behalf it calls on, captures the answer, hangs up, and writes a result plus transcript and audio. Three transports feed one call and arrive in no fixed order: Telnyx Call Control webhooks, the Telnyx media WebSocket, and the OpenAI GPT-Live WebSocket. CI has no network and no keys, yet a stub run must exercise the same call logic a live run uses. The stack is fixed: Python 3.12, Pydantic v2, Typer, FastAPI for two routes, SQLite, pytest. The bridge mirrors [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live).
+A CLI user pastes a business's E.164 number and asks one question (`hours`, `stock`, or `aisle`). The app dials from a Telnyx number that belongs to that user, says whose behalf it calls on, captures the answer, hangs up, and writes a result plus transcript and audio. Three transports feed one call and arrive in no fixed order: Telnyx Call Control webhooks, the Telnyx media WebSocket, and the OpenAI GPT-Live WebSocket. CI has no network and no keys, yet a stub run must exercise the same call logic a live run uses. The stack is fixed: Python 3.12, Pydantic v2, Typer, FastAPI for two routes, SQLite, pytest. The bridge mirrors [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live). How it prompts GPT-Live is in [gpt-live-prompting.md](gpt-live-prompting.md).
 
 ## Usage (caller's view)
 
