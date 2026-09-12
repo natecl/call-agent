@@ -143,7 +143,7 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 
 `docs/design.md` Usage shows `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, `book`, and `verify-book`. Messaging is a sibling port. See [linq.md](linq.md). Prod webhook ingress is the Worker inbox. `verify-webhooks` is the Worker lever. `verify-message` is the MessagingPort lever. `verify-persistence` is the later port lever. It is listed under Durable persistence.
 
-`README.md` states hold queues, packaging, and SMS stay out of scope. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook. Restaurant book is shipped in stub. This repository has not dialed live book. Neon and R2 ports are shipped with sqlite and local fallback. Live Neon and R2 stay gated on env.
+`README.md` states hold queues, packaging, and SMS are out of scope. Closed alpha includes iMessage through MessagingPort in this process and ACK-only ingress on the Linq Worker hook. Restaurant book is shipped in stub. This repository has not dialed live book. Neon and R2 ports are shipped with sqlite and local fallback. Live Neon and R2 stay gated on env.
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
 
