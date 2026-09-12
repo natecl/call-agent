@@ -1,6 +1,6 @@
 # Always-on webhooks versus local tunnel
 
-Production Telnyx Call Control posts go to the Cloudflare Worker inbox. The laptop tunnel is the local-dev path and the media host. `verify-webhooks` is the lever for the Worker. This file is the map of the two paths. Update it when the Worker routes, the env split, or the Linq hook change. There is no `call-agent-web` map in this repository.
+Production Telnyx Call Control posts go to the Cloudflare Worker inbox. Closed alpha iMessage inbound uses the same Worker at `POST /linq/webhook`. The laptop tunnel is the local-dev path and the media host. `verify-webhooks` is the lever for the Worker. This file is the map of the two paths. Update it when the Worker routes, the env split, or the Linq hook change. There is no `call-agent-web` map in this repository.
 
 ## Sub-features
 

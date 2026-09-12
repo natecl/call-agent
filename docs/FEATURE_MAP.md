@@ -62,6 +62,7 @@ The Cursor skill drives the CLI verbs in stub mode and never sets live keys.
 | `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode. | `.cursor/skills/verify-call-agent/SKILL.md` |
 | `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `webhooks`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
 | `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
+| `.cursor/skills/verify-call-agent/features/linq-inbound.md` | shipped | Maps closed-alpha iMessage ingress at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`. SMS stays off. | `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
 | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
@@ -76,7 +77,7 @@ The Worker is the production HTTPS inbox. The laptop tunnel is the local-dev pat
 | --- | --- | --- | --- |
 | `POST /webhooks/telnyx` Worker | shipped | Cloudflare Worker `call-agent-webhooks` verifies Telnyx Ed25519, claims `data.id`, returns 2xx on first seen and on duplicate, and 401 when the signature is missing or wrong. Laptop-off still ACKs. | `workers/webhooks/src/handler.ts` `receiveTelnyx`. `workers/webhooks/test/webhook.test.ts`. `call-agent verify-webhooks` `signature` `idempotency` |
 | `GET /health` Worker | shipped | Returns `{"ok":true}`. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `health` |
-| `POST /webhooks/linq` hook | shipped | Returns 200 `{"ok":true,"provider":"linq","implemented":false}` at `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` and `/webhooks/linq`. Does not send SMS. Builder registers the `/linq/webhook` URL now. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `linq_hook`. `workers/webhooks/README.md` |
+| Linq inbound (closed alpha) | shipped | L1 testers text Treena through Linq. Ingress is `POST https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook` (alias `/webhooks/linq`). GET on those paths returns the same 200. Body is `{"ok":true,"provider":"linq","implemented":false}`. No SMS. Builder registers the `/linq/webhook` URL now. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `linq_hook`. `.cursor/skills/verify-call-agent/features/linq-inbound.md` |
 | Worker `/media-stream` | shipped | Returns 501 `media_not_terminated_here`. The Worker does not terminate Telnyx media. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `media_gap` |
 | `verify-webhooks` | shipped | Headless five-check lever for parse, signature, idempotency, the Linq hook, and the media gap. Stub drives `createHandler` in-process. `--url` hits a deployed Worker and fails loud if unsigned Telnyx POST is 200. | `call_agent/verify_webhooks.py` `verify_webhooks`. `call_agent/cli.py` `verify_webhooks_command`. `workers/webhooks/scripts/verify.mjs`. `tests/test_verify_webhooks.py`. `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `PUBLIC_WEBHOOK_URL` | shipped | Dial `webhook_url` uses this origin when set. `stream_url` still comes from `PUBLIC_BASE_URL`. Empty keeps today's single-origin tunnel. | `call_agent/runtime.py` `webhook_and_stream_urls`. `tests/test_verify_webhooks.py` `test_webhook_url_splits_from_media_origin` |
@@ -95,7 +96,7 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 
 `docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Prod webhook ingress is the Worker inbox. `verify-webhooks` is the lever.
 
-`README.md` states "Day 1 ships quick-ask only. Booking, hold queues, packaging, and iMessage are out of scope."
+`README.md` states "Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook. Booking, hold queues, packaging, and SMS are out of scope."
 
 `docs/design.md` Shape has "The hangup waits for the goodbye." and "Artifacts are the proof."
 
@@ -106,6 +107,6 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 | `book_table` | not shipped | Raises `NotImplementedError` with `restaurant booking is phase 2` and has no CLI verb. | `call_agent/booking.py` `book_table` |
 | hold queues | not shipped | Named out of scope in `README.md`, with no hold-queue module, and `build_instructions` includes `Never book, reserve, or hold anything.`. | `README.md`. `call_agent/domain.py` `build_instructions` |
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
-| iMessage | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
-| Linq SMS | not shipped | Worker exposes `POST /webhooks/linq` with `implemented: false`. No MessagingPort and no SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |
+| iMessage processing | not shipped | Closed alpha inbound is the Linq hook only. No MessagingPort, no iMessage send, no transcript of the text. | `README.md`. `workers/webhooks/src/handler.ts` |
+| Linq SMS | not shipped | Worker exposes `POST /linq/webhook` with `implemented: false`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |

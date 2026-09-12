@@ -109,16 +109,20 @@ async function inProcessChecks(missingKey = false) {
   const linqBody = await readJson(linqRes);
   const aliasRes = await fetchH("/linq/webhook", { method: "POST", body: "{}" });
   const aliasBody = await readJson(aliasRes);
+  const pingRes = await fetchH("/linq/webhook", { method: "GET" });
+  const pingBody = await readJson(pingRes);
   const linq_hook = {
     name: "linq_hook",
     passed:
       linqRes.status === 200 &&
       linqBody.implemented === false &&
       aliasRes.status === 200 &&
-      aliasBody.implemented === false,
+      aliasBody.implemented === false &&
+      pingRes.status === 200 &&
+      pingBody.implemented === false,
     detail:
       `linq=${linqRes.status} implemented=${linqBody.implemented} ` +
-      `alias=${aliasRes.status}`,
+      `alias=${aliasRes.status} ping=${pingRes.status}`,
   };
 
   const mediaRes = await fetchH("/media-stream", { method: "GET" });
@@ -146,9 +150,6 @@ async function remoteChecks(base) {
   }
 }
 
-const REMOTE_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
-
 function challengeDetail(path, response, body) {
   const mitigated = response.headers.get("cf-mitigated");
   if (mitigated === "challenge") {
@@ -161,9 +162,7 @@ function challengeDetail(path, response, body) {
 }
 
 async function remoteFetch(origin, path, init = {}) {
-  const headers = new Headers(init.headers);
-  headers.set("User-Agent", REMOTE_UA);
-  return fetch(`${origin}${path}`, { ...init, headers });
+  return fetch(`${origin}${path}`, init);
 }
 
 async function remoteChecksAgainst(origin) {
@@ -228,20 +227,25 @@ async function remoteChecksAgainst(origin) {
     body: "{}",
   });
   const aliasBody = await readJson(aliasRes);
+  const pingRes = await remoteFetch(origin, "/linq/webhook");
+  const pingBody = await readJson(pingRes);
   const linqChallenge =
     challengeDetail("/webhooks/linq", linqRes, linqBody) ??
-    challengeDetail("/linq/webhook", aliasRes, aliasBody);
+    challengeDetail("/linq/webhook", aliasRes, aliasBody) ??
+    challengeDetail("/linq/webhook", pingRes, pingBody);
   const linq_hook = {
     name: "linq_hook",
     passed:
       linqRes.status === 200 &&
       linqBody.implemented === false &&
       aliasRes.status === 200 &&
-      aliasBody.implemented === false,
+      aliasBody.implemented === false &&
+      pingRes.status === 200 &&
+      pingBody.implemented === false,
     detail:
       linqChallenge ??
       `linq=${linqRes.status} implemented=${linqBody.implemented} ` +
-        `alias=${aliasRes.status}`,
+        `alias=${aliasRes.status} ping=${pingRes.status}`,
   };
 
   const mediaRes = await remoteFetch(origin, "/media-stream");

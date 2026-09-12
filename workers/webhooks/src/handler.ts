@@ -74,7 +74,7 @@ export function createHandler(env: Env, seen: SeenStore) {
         return json(501, { ok: false, reason: "media_not_terminated_here" });
       }
       if (
-        request.method === "POST" &&
+        (request.method === "POST" || request.method === "GET") &&
         (url.pathname === "/webhooks/linq" || url.pathname === "/linq/webhook")
       ) {
         return json(200, {

@@ -4,15 +4,15 @@ A phone agent that calls a business on your behalf, asks one quick question, and
 
 The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a SQLite ledger of numbers. The design and its rationale are in [docs/design.md](docs/design.md). What `main` implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md).
 
-Day 1 ships quick-ask only. Booking, hold queues, packaging, and iMessage are out of scope.
+Day 1 ships quick-ask. Closed alpha includes iMessage inbound through the Linq Worker hook. Booking, hold queues, packaging, and SMS are out of scope.
 
 ## Public webhook URL (Linq, register now)
 
-The always-on Worker is live. Builder can register this Linq webhook now. No Nathan click.
+Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inbound path. Builder can register it now. No Nathan click. SMS stays off.
 
 `https://call-agent-webhooks.blossom-linen.workers.dev/linq/webhook`
 
-`POST` returns `{"ok":true,"provider":"linq","implemented":false}` and does not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx uses `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+`POST` (and `GET`) return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Alias `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`. Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Run the stub verification
 

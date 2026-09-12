@@ -69,6 +69,17 @@ def test_feature_maps_record_always_on_versus_tunnel() -> None:
     ).read_text()
     assert "./webhooks.md" in index
     assert "./verify-webhooks.md" in index
+    assert "./linq-inbound.md" in index
+    linq_inbound = (
+        REPO
+        / ".cursor"
+        / "skills"
+        / "verify-call-agent"
+        / "features"
+        / "linq-inbound.md"
+    ).read_text()
+    assert "Linq inbound (closed alpha)" in linq_inbound
+    assert "does not send SMS" in linq_inbound or "does not send or receive SMS" in linq_inbound
     webhooks = (
         REPO
         / ".cursor"
@@ -86,7 +97,10 @@ def test_feature_maps_record_always_on_versus_tunnel() -> None:
     )
     assert linq_url in feature_map
     assert linq_url in webhooks
+    assert linq_url in linq_inbound
     readme = (REPO / "README.md").read_text()
     worker_readme = (REPO / "workers" / "webhooks" / "README.md").read_text()
     assert linq_url in readme
     assert linq_url in worker_readme
+    assert "Closed alpha includes iMessage inbound" in readme
+    assert "SMS are out of scope" in readme

@@ -11,7 +11,7 @@ Live Worker origin on the current wrangler preview account (Blossom Linen):
 - Telnyx. `https://call-agent-webhooks.blossom-linen.workers.dev/webhooks/telnyx`
 - Health. `https://call-agent-webhooks.blossom-linen.workers.dev/health`
 
-Builder can register the Linq URL now. `POST /linq/webhook` returns `{"ok":true,"provider":"linq","implemented":false}` and does not send SMS.
+Closed alpha L1 testers text Treena through Linq. Builder can register the Linq URL now. `POST` and `GET /linq/webhook` return `{"ok":true,"provider":"linq","implemented":false}` and do not send SMS. Telnyx always-on stays on `/webhooks/telnyx`.
 
 Put the Telnyx URL on the Call Control application and on `PUBLIC_WEBHOOK_URL`. The laptop tunnel is interim only. This Worker origin is the prod webhook path.
 

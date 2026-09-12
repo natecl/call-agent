@@ -161,6 +161,17 @@ test("createHandler verifies, claims, and fails media loud", async () => {
     implemented: false,
   });
 
+  const linqAlias = await handler.fetch(
+    new Request(`${origin}/linq/webhook`, { method: "GET" }),
+    env,
+  );
+  assert.equal(linqAlias.status, 200);
+  assert.deepEqual(await linqAlias.json(), {
+    ok: true,
+    provider: "linq",
+    implemented: false,
+  });
+
   const media = await handler.fetch(
     new Request(`${origin}/media-stream`),
     env,
