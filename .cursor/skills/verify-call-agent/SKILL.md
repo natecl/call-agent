@@ -5,7 +5,7 @@ description: Drive the call-agent CLI in stub mode the way a user does and keep 
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is four verbs: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. There is no server to keep alive in stub mode. Each drive is one process that reads env, touches a SQLite ledger, writes one artifacts directory, and exits. The FastAPI routes exist only for live mode and are not driven here.
+call-agent is a CLI. Its user surface is five verbs: `did provision`, `did list`, `quick-ask`, `verify-quick-ask`, and `verify-webhooks`. Stub drives of the first four need no server. Each of those reads env, touches a SQLite ledger, writes one artifacts directory, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist only for live mode and are not driven here.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -36,7 +36,7 @@ Run before driving whenever anything looks off. All three must hold.
 
 ```bash
 .venv/bin/python -c "import call_agent; print('import ok')"
-.venv/bin/call-agent --help | grep verify-quick-ask
+.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-webhooks'
 [ "${QUICK_ASK_LIVE:-0}" = "0" ] && echo "stub mode"
 ```
 
