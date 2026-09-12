@@ -1,6 +1,3 @@
-# `app` is a placeholder (`call-agent`). If Builder already created the
-# Fly app, keep that name. Do not fly launch a second app. No secrets here.
-
 app = "call-agent"
 primary_region = "iad"
 
