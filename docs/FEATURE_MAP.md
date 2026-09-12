@@ -1,6 +1,6 @@
 # Feature map
 
-This file lists what `main` implements today. It is not a plan. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md).
+This file lists what `main` implements today. It is not a plan. It is a standing map. Each implementation updates its own rows here and its file under `.cursor/skills/verify-call-agent/features/`. How to run the CLI is in [README.md](../README.md). Why the call is a six-track reducer is in [design.md](design.md). There is no `call-agent-web` map in this repository.
 
 ## Status
 
@@ -60,7 +60,8 @@ The Cursor skill drives the CLI verbs in stub mode and never sets live keys.
 | name | status | does | proof |
 | --- | --- | --- | --- |
 | `.cursor/skills/verify-call-agent/SKILL.md` | shipped | States stub drive rules and that the skill never drives live mode. | `.cursor/skills/verify-call-agent/SKILL.md` |
-| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/README.md` | shipped | Indexes `did-provision`, `quick-ask`, `verify-quick-ask`, `webhooks`, and `verify-webhooks` recipes. | `.cursor/skills/verify-call-agent/features/README.md` |
+| `.cursor/skills/verify-call-agent/features/webhooks.md` | shipped | Maps always-on Worker versus local tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook. | `.cursor/skills/verify-call-agent/features/webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` | shipped | Covers the Worker inbox stub checks, `--url` wiring, and exit codes. | `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `.cursor/skills/verify-call-agent/features/did-provision.md` | shipped | Covers first provision, repeat provision, a second user, and `did list`. | `.cursor/skills/verify-call-agent/features/did-provision.md` |
 | `.cursor/skills/verify-call-agent/features/quick-ask.md` | shipped | Covers hours, stock, aisle, missing `--item`, artifacts, and the live gate. | `.cursor/skills/verify-call-agent/features/quick-ask.md` |
@@ -79,7 +80,7 @@ The Worker is the production HTTPS inbox. The laptop tunnel is the local-dev pat
 | Worker `/media-stream` | shipped | Returns 501 `media_not_terminated_here`. The Worker does not terminate Telnyx media. | `workers/webhooks/src/handler.ts`. `call-agent verify-webhooks` `media_gap` |
 | `verify-webhooks` | shipped | Headless five-check lever for parse, signature, idempotency, the Linq hook, and the media gap. Stub drives `createHandler` in-process. `--url` hits a deployed Worker and fails loud if unsigned Telnyx POST is 200. | `call_agent/verify_webhooks.py` `verify_webhooks`. `call_agent/cli.py` `verify_webhooks_command`. `workers/webhooks/scripts/verify.mjs`. `tests/test_verify_webhooks.py`. `.cursor/skills/verify-call-agent/features/verify-webhooks.md` |
 | `PUBLIC_WEBHOOK_URL` | shipped | Dial `webhook_url` uses this origin when set. `stream_url` still comes from `PUBLIC_BASE_URL`. Empty keeps today's single-origin tunnel. | `call_agent/runtime.py` `webhook_and_stream_urls`. `tests/test_verify_webhooks.py` `test_webhook_url_splits_from_media_origin` |
-| local FastAPI tunnel | gated | `quick-ask --live` still hosts `/webhooks/telnyx` and `/media-stream` in-process for laptop dev. Prod Call Control webhook URL is the Worker, not the tunnel. | `call_agent/server.py`. `README.md`. `docs/FEATURE_MAP.md` quick-ask `--live` |
+| local FastAPI tunnel | gated | `quick-ask --live` still hosts `/webhooks/telnyx` and `/media-stream` in-process for laptop dev. Prod Call Control webhook URL is the Worker, not the tunnel. | `call_agent/server.py`. `README.md`. `.cursor/skills/verify-call-agent/features/webhooks.md` |
 | wrangler deploy | gated | `workers/webhooks/README.md` documents `wrangler secret put TELNYX_PUBLIC_KEY` and `wrangler deploy`. This repository does not store the live workers.dev hostname. | `workers/webhooks/wrangler.jsonc`. `workers/webhooks/README.md` |
 
 ## Live adapters
@@ -92,7 +93,7 @@ Live mode uses `LiveTelnyxHttp`, `LiveTelnyxMedia`, and `LiveGptLive`.
 
 ## Design
 
-`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`.
+`docs/design.md` Usage shows Day 1 quick-ask: `did provision`, `did list`, `quick-ask`, and `verify-quick-ask`. Prod webhook ingress is the Worker inbox. `verify-webhooks` is the lever.
 
 `README.md` states "Day 1 ships quick-ask only. Booking, hold queues, packaging, and iMessage are out of scope."
 
