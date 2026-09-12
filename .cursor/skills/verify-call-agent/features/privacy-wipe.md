@@ -13,7 +13,7 @@ Each call writes audio, transcript, and call-history files under the run directo
 
 - Place a stub `quick-ask` or `book` with baseline env. After the JSON result prints, the run directory no longer holds audio, transcript, or history files.
 - Set `RETAIN_CALL_ARTIFACTS=1` (or pass `retain_call_artifacts=True` on the request) to keep those files.
-- Account opt-in UI is call-agent-web TRE-20. This tree does not look up web accounts.
+- Account opt-in UI is out of scope on this tree. This climb does not look up web accounts.
 
 ## Driving it with call-agent
 

@@ -187,7 +187,7 @@ Closed-alpha testers text Treena on this Linq path. The sending line is the sand
 | packaging | not shipped | Named out of scope in `README.md` and has no code. | `README.md` |
 | Linq SMS | not shipped | Worker exposes `POST /linq/webhook`. No SMS send or receive. | `workers/webhooks/src/handler.ts`. `README.md` |
 | host and providers | not shipped | No host or providers module exists under `call_agent/`. | `call_agent/` |
-| privacy page | not shipped | Account-level retention opt-in (default off) lives on accounts in call-agent-web TRE-20. This tree implements default wipe and does not claim the privacy page live. qa owns live prove. | `docs/FEATURE_MAP.md` default wipe. TRE-21 / TRE-23. `.cursor/skills/verify-call-agent/features/privacy-wipe.md` |
+| privacy page | not shipped | TRE-23 is default wipe in this tree. The privacy page and account opt-in UI are not in this repository. Do not claim the privacy page live. qa owns live prove. | `docs/FEATURE_MAP.md` default wipe. TRE-23. `.cursor/skills/verify-call-agent/features/privacy-wipe.md` |
 
 ## Durable persistence
 
