@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -259,13 +260,17 @@ class StubLinq:
     def __init__(self) -> None:
         self.last_path: str | None = None
         self.last_payload: dict[str, Any] | None = None
+        self.sent: list[tuple[str, dict[str, Any]]] = []
+        self._n = 0
 
     def send(self, message: OutboundChat) -> SendReceipt:
+        self._n += 1
         self.last_path = outbound_path(message)
         self.last_payload = serialize_outbound(message)
+        self.sent.append((self.last_path, dict(self.last_payload)))
         return SendReceipt(
             chat_id=message.chat_id or STUB_CHAT_ID,
-            message_id=STUB_MESSAGE_ID,
+            message_id=MessageId(f"stub-msg-{self._n:04d}"),
         )
 
     def receive(self, raw: bytes) -> InboundMessage | None:
@@ -360,6 +365,40 @@ def linq_artifact_dir(root: Path, event_id: EventId | str) -> Path:
     return path
 
 
+def claim_path(path: Path, payload: dict[str, Any]) -> bool:
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        fd = os.open(path, flags, 0o644)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as handle:
+        handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return True
+
+
+def write_inbound_artifact(
+    root: Path,
+    inbound: InboundMessage,
+    *,
+    received_at: datetime,
+) -> Path:
+    path = linq_artifact_dir(root, inbound.event_id)
+    inbound_payload = {
+        "event_id": str(inbound.event_id),
+        "chat_id": str(inbound.chat_id),
+        "message_id": str(inbound.message_id),
+        "sender": str(inbound.sender),
+        "service": inbound.service,
+        "parts": [part.model_dump(mode="json") for part in inbound.parts],
+        "text": inbound_plain_text(inbound),
+        "received_at": received_at.isoformat(),
+    }
+    (path / "inbound.json").write_text(
+        json.dumps(inbound_payload, indent=2, sort_keys=True) + "\n"
+    )
+    return path
+
+
 def write_linq_message_artifacts(
     root: Path,
     inbound: InboundMessage,
@@ -369,19 +408,8 @@ def write_linq_message_artifacts(
     received_at: datetime,
     sent_at: datetime,
 ) -> Path:
-    path = linq_artifact_dir(root, inbound.event_id)
-    inbound_text = inbound_plain_text(inbound)
+    path = write_inbound_artifact(root, inbound, received_at=received_at)
     reply_text = " ".join(part.value for part in outbound.parts)
-    inbound_payload = {
-        "event_id": str(inbound.event_id),
-        "chat_id": str(inbound.chat_id),
-        "message_id": str(inbound.message_id),
-        "sender": str(inbound.sender),
-        "service": inbound.service,
-        "parts": [part.model_dump(mode="json") for part in inbound.parts],
-        "text": inbound_text,
-        "received_at": received_at.isoformat(),
-    }
     reply_payload = {
         "chat_id": str(receipt.chat_id),
         "message_id": str(receipt.message_id),
@@ -392,9 +420,6 @@ def write_linq_message_artifacts(
         "text": reply_text,
         "sent_at": sent_at.isoformat(),
     }
-    (path / "inbound.json").write_text(
-        json.dumps(inbound_payload, indent=2, sort_keys=True) + "\n"
-    )
     (path / "reply.json").write_text(
         json.dumps(reply_payload, indent=2, sort_keys=True) + "\n"
     )

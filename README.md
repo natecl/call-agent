@@ -12,7 +12,7 @@ Closed alpha L1 testers text Treena through Linq. This Worker URL is on that inb
 
 `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook`
 
-`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.usetreena.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.usetreena.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC and replies on iMessage `message.received` via MessagingPort. The Worker does not send SMS. Prod FastAPI is the always-on Fly app `hidden-beacon-080`. Set Worker `APP_BASE_URL` to `https://hidden-beacon-080.fly.dev` (no path). Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
+`GET /linq/webhook` returns `{"ok":true,"provider":"linq"}`. `POST` forwards the raw body and Standard Webhooks headers to `APP_BASE_URL/linq/webhook`. Unset `APP_BASE_URL` is 501 `missing_app_base_url`. Alias `https://call-agent-webhooks.usetreena.workers.dev/webhooks/linq`. Telnyx stays on `https://call-agent-webhooks.usetreena.workers.dev/webhooks/telnyx`. FastAPI `POST /linq/webhook` verifies HMAC and replies on iMessage `message.received` via MessagingPort. Non-kickoff chat echoes `Received: {text}`. A `book` or `ask` line returns 202 and this process places the call, then texts the result on the same chat. The Worker does not send SMS. Prod FastAPI is the always-on Fly app `hidden-beacon-080`. Set Worker `APP_BASE_URL` to `https://hidden-beacon-080.fly.dev` (no path). Details are in [workers/webhooks/README.md](workers/webhooks/README.md).
 
 ## Deploy FastAPI on Fly Machines
 
@@ -73,6 +73,8 @@ call-agent verify-message
 ```
 
 You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send shape, inbound `message.received` mapping, inbound reply + artifact text, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
+
+`call-agent verify-linq-call` proves iMessage `book`/`ask` text → stub `run_call` → result reply on the same chat, plus artifact cross-links. Seven `[PASS]` lines and `7/7 passed`. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
 
 `call-agent verify-persistence` checks the Neon and R2 ports. With those vars unset it uses SQLite and a local directory, prints three `[PASS]` lines, and exits 0. If some `R2_*` vars are set and others are not, or if `NEON_DATABASE_URL` is not a `postgresql://` URL, it exits 2 and names the problem. CI runs it with the vars unset. It never opens Neon or R2.
 
