@@ -118,6 +118,39 @@ def speaking_call() -> Call:
     )
 
 
+def speaking_book_call(business_text: str = "Yes, we can do that.") -> Call:
+    request = BookRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="Friday 7:30pm",
+    )
+    return Call(
+        run_id=RunId("run-1"),
+        request=request,
+        from_did=E164("+15555550100"),
+        dial=DialPlaced(
+            call_control_id="call-1",
+            call_leg_id="leg-1",
+            call_session_id="session-1",
+        ),
+        telnyx=TelnyxAnswered(),
+        media=MediaStreaming(
+            stream_id=StreamId("stream-1"),
+            codec=Codec.L16,
+            sample_rate=16000,
+        ),
+        live=LiveActive(session_id=LiveSessionId("live-1")),
+        conversation=ConversationOpen(
+            transcript=Transcript().append_delta(
+                Speaker.BUSINESS, business_text
+            )
+        ),
+    )
+
+
 def mark_echo(name: str):
     return parse_media_frame(
         json.dumps(
@@ -438,6 +471,87 @@ def test_split_closing_turns_still_verdict_and_enter_hangup_drain(
         },
         {"kind": "close_live"},
     ]
+
+
+def test_book_closing_line_enters_hangup_drain_without_a_booked_verdict(
+    reduce_settings: ReduceSettings,
+) -> None:
+    split_closing = Transcript(
+        turns=(
+            Turn(speaker=Speaker.BUSINESS, text="Yes, we can do that."),
+            Turn(speaker=Speaker.AGENT, text="Thanks,"),
+            Turn(
+                speaker=Speaker.AGENT,
+                text=" that's all I needed. Goodbye.",
+            ),
+        )
+    )
+
+    verdict = assess_book(split_closing)
+    call, before_close = reduce(
+        speaking_book_call(),
+        LiveOutputTranscriptEvent(delta="Thanks,"),
+        reduce_settings,
+    )
+    call, effects = reduce(
+        call,
+        LiveOutputTranscriptEvent(delta=" that's all I needed. Goodbye."),
+        reduce_settings,
+    )
+
+    assert verdict is None
+    assert before_close == ()
+    assert isinstance(call.conversation, ConversationOpen)
+    assert call.hangup == HangupDraining()
+    assert call.live == LiveClosing()
+    assert [effect.model_dump(mode="json") for effect in effects] == [
+        {
+            "kind": "schedule",
+            "delay_s": 10.0,
+            "event": {"kind": "hangup_drain_timeout"},
+        },
+        {"kind": "close_live"},
+    ]
+
+
+def test_book_closing_line_hangs_up_through_the_trail_not_far_party(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, _ = reduce(
+        speaking_book_call(),
+        LiveOutputTranscriptEvent(delta=CLOSING_LINE),
+        reduce_settings,
+    )
+    call, closed_effects = reduce(call, LiveClosedEvent(), reduce_settings)
+    call, echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
+    call, trail_effects = reduce(
+        call, echo_effects[0].event, reduce_settings
+    )
+
+    assert assess_book(call.conversation.transcript) is None
+    assert isinstance(call.conversation, ConversationOpen)
+    assert closed_effects == (MarkEffect(name="hangup"),)
+    assert trail_effects == (HangupEffect(call_control_id="call-1"),)
+    assert call.hangup == HangupRequested(via="trail")
+    assert call.live == LiveClosed()
+
+
+def test_book_booked_verdict_still_enters_hangup_drain(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_book_call("You're booked. We'll see you Friday."),
+        LiveOutputTranscriptEvent(delta=CLOSING_LINE),
+        reduce_settings,
+    )
+
+    assert isinstance(call.conversation, ConversationTerminal)
+    assert call.conversation.verdict == Booked(
+        confirmation_text="You're booked. We'll see you Friday."
+    )
+    assert call.hangup == HangupDraining()
+    assert call.live == LiveClosing()
+    assert [effect.kind for effect in effects] == ["schedule", "close_live"]
 
 
 def test_assess_transcript_waits_for_closing_then_answers_or_declines() -> None:

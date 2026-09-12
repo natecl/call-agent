@@ -10,6 +10,7 @@ import pytest
 from call_agent.config import Settings
 from call_agent.domain import (
     CLOSING_LINE,
+    BookRequest,
     Call,
     CallEvent,
     ClientState,
@@ -138,6 +139,64 @@ def speaking_handle(settings: Settings) -> tuple[CallHandle, HeldMarks]:
     return handle, media
 
 
+def speaking_book_handle(settings: Settings) -> tuple[CallHandle, HeldMarks]:
+    request = BookRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="Friday 7:30pm",
+    )
+    call = Call(
+        run_id=RunId("run-1"),
+        request=request,
+        from_did=E164("+15555550100"),
+        dial=DialPlaced(
+            call_control_id="v3:abc",
+            call_leg_id="leg-1",
+            call_session_id="session-1",
+        ),
+        telnyx=TelnyxAnswered(),
+        media=MediaStreaming(
+            stream_id=StreamId("stream-1"),
+            codec=Codec.L16,
+            sample_rate=16000,
+        ),
+        live=LiveActive(session_id=LiveSessionId("live-1")),
+        conversation=ConversationOpen(
+            transcript=Transcript().append_delta(
+                Speaker.BUSINESS, "Yes, we can do that."
+            )
+        ),
+    )
+    queue: asyncio.Queue[CallEvent] = asyncio.Queue()
+    media = HeldMarks(queue.put_nowait)
+    handle = CallHandle(
+        call=call,
+        queue=queue,
+        ports=Ports(
+            telnyx_http=StubTelnyxHttp(submit=queue.put_nowait),
+            telnyx_media=media,
+            gpt_live=StubGptLive(submit=queue.put_nowait),
+        ),
+        run_dir=RunDir(settings.call_agent_artifacts_dir, "v3:abc"),
+        settings=settings,
+        dial_spec=DialSpec(
+            connection_id="connection-1",
+            to=request.to,
+            from_did=call.from_did,
+            stream_url="wss://calls.example.test/media-stream",
+            webhook_url="https://calls.example.test/webhooks/telnyx",
+            codec=Codec.L16,
+            client_state=ClientState(
+                run_id=call.run_id, user_id=request.user_id
+            ),
+        ),
+    )
+    return handle, media
+
+
 async def drain_queue(handle: CallHandle) -> None:
     while not handle.queue.empty():
         await handle._process_event(handle.queue.get_nowait())
@@ -218,6 +277,40 @@ async def test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail
     assert report["timing_ms"]["final_mark_sent"] <= report["timing_ms"][
         "final_mark_echoed"
     ] <= report["timing_ms"]["hangup_sent"] <= report["timing_ms"]["call_ended"]
+
+
+async def test_book_goodbye_without_booked_needle_hangs_up_through_the_trail(
+    settings: Settings,
+) -> None:
+    handle, media = speaking_book_handle(settings)
+    hangup_json = handle.run_dir.path / "hangup.json"
+
+    await handle._process_event(LiveOutputTranscriptEvent(delta=CLOSING_LINE))
+    await drain_queue(handle)
+    marks_after_live_closed = list(media.marks)
+    media.echo("hangup")
+    await handle._process_event(handle.queue.get_nowait())
+    trail = await asyncio.wait_for(handle.queue.get(), 1)
+    await handle._process_event(trail)
+    while not handle.call.finished:
+        await handle._process_event(handle.queue.get_nowait())
+    result = json.loads((handle.run_dir.path / "result.json").read_text())
+    report = json.loads(
+        (handle.run_dir.path / "call_report.json").read_text()
+    )
+
+    assert marks_after_live_closed == ["hangup"]
+    assert hangup_json.is_file()
+    assert trail.model_dump(mode="json") == {"kind": "hangup_trail_elapsed"}
+    assert handle.call.hangup.model_dump(mode="json") == {
+        "kind": "hangup_confirmed",
+        "via": "trail",
+    }
+    assert result["status"] == "failed"
+    assert report["hangup"]["path"] == "trail"
+    assert report["counts"]["marks_sent"] == 1
+    assert report["timing_ms"]["hangup_sent"] is not None
+    assert report["timing_ms"].get("verdict") is None
 
 
 async def test_drain_timeout_hangs_up_anyway_and_journals_the_timeout(
