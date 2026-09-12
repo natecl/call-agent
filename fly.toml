@@ -1,4 +1,4 @@
-app = "call-agent"
+app = "hidden-beacon-080"
 primary_region = "iad"
 
 [http_service]
