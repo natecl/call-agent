@@ -20,3 +20,15 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
       - run: call-agent verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode stub
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workers/webhooks/package-lock.json
+      - run: npm ci
+        working-directory: workers/webhooks
+      - run: npm test
+        working-directory: workers/webhooks
+      - run: npm run verify
+        working-directory: workers/webhooks
+      - run: call-agent verify-webhooks
