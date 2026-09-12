@@ -33,14 +33,10 @@ export class CacheSeenStore implements SeenStore {
 }
 
 function resolveCache(): Cache | null {
-  try {
-    if (typeof caches !== "undefined" && "default" in caches) {
-      return caches.default;
-    }
-  } catch {
-    // Node and wrangler local have no caches.default. Isolate memory is enough for Telnyx retries.
+  if (typeof caches === "undefined" || !("default" in caches)) {
+    return null;
   }
-  return null;
+  return caches.default;
 }
 
 export function makeSeen(): SeenStore {
