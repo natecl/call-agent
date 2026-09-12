@@ -471,12 +471,36 @@ def test_build_instructions_puts_disclosure_before_ask() -> None:
 
     instructions = build_instructions(FirstName("Nathan"), question)
 
+    assert instructions == (
+        "You are a calm, friendly phone assistant calling a business "
+        "on behalf of Nathan. Speak warmly and naturally at an unhurried "
+        "pace, be clear and direct rather than overly cheerful, and if they "
+        "are frustrated acknowledge it briefly then take the next helpful step.\n"
+        "Hi, I'm calling on behalf of Nathan. I have one quick question.\n"
+        "Do you carry whole milk?\n"
+        "When you have the answer, or if they clearly cannot help, "
+        "say exactly: Thanks, that's all I needed. Goodbye.\n"
+        "Never book, reserve, or hold anything. "
+        "Keep every turn under two sentences.\n"
+        "Delegation policy:\n"
+        "Backend tools:\n"
+        "- None. This session has no tool-calling backend.\n"
+        "Delegate to the backend when:\n"
+        "- Never. There is no backend to hand work to.\n"
+        "Do not delegate to the backend when:\n"
+        "- The other party greets you, repeats a result, or needs a brief clarification.\n"
+        "- You can continue from these instructions and what they have already said.\n"
+        "Do not guess or promise a result the other party has not said."
+    )
     assert instructions.index("on behalf of Nathan") < instructions.index(
         "Do you carry whole milk?"
     )
     assert instructions.splitlines()[1] == (
         "Hi, I'm calling on behalf of Nathan. I have one quick question."
     )
+    assert instructions.splitlines()[2] == "Do you carry whole milk?"
+    assert "Backchannel policy:" not in instructions
+    assert "Interruption policy:" not in instructions
 
 
 def test_quick_ask_result_is_discriminated_and_answer_is_nonempty() -> None:
@@ -563,14 +587,50 @@ def test_build_book_instructions_puts_disclosure_before_facts() -> None:
         FirstName("Nathan"), 2, "Friday 7pm", "outdoor if possible"
     )
 
+    assert instructions == (
+        "You are a calm, friendly phone assistant calling a restaurant "
+        "on behalf of Nathan. Speak warmly and naturally at an unhurried "
+        "pace, be clear and direct rather than overly cheerful, and if they "
+        "are frustrated acknowledge it briefly then take the next helpful step.\n"
+        "Hi, I'm calling on behalf of Nathan. I'd like to book a table.\n"
+        "Party size: 2. Requested time: Friday 7pm. "
+        "Constraints: outdoor if possible.\n"
+        "Work with the restaurant on party, time, and constraints. "
+        "Reason about alternatives they offer. "
+        "Do not read a fixed list of questions.\n"
+        "Never join a hold queue or waitlist. "
+        "If they cannot seat this party at this time, accept the decline.\n"
+        "When the table is booked, or they clearly cannot take "
+        "the reservation, "
+        "say exactly: Thanks, that's all I needed. Goodbye.\n"
+        "Keep every turn under two sentences.\n"
+        "Delegation policy:\n"
+        "Backend tools:\n"
+        "- None. This session has no tool-calling backend.\n"
+        "Delegate to the backend when:\n"
+        "- Never. There is no backend to hand work to.\n"
+        "Do not delegate to the backend when:\n"
+        "- The other party greets you, repeats a result, or needs a brief clarification.\n"
+        "- You can continue from these instructions and what they have already said.\n"
+        "Do not guess or promise a result the other party has not said."
+    )
     assert instructions.index("on behalf of Nathan") < instructions.index(
         "I'd like to book a table"
+    )
+    assert instructions.splitlines()[1] == (
+        "Hi, I'm calling on behalf of Nathan. I'd like to book a table."
+    )
+    assert instructions.splitlines()[2] == (
+        "Party size: 2. Requested time: Friday 7pm. "
+        "Constraints: outdoor if possible."
     )
     assert "Party size: 2." in instructions
     assert "Requested time: Friday 7pm." in instructions
     assert "Constraints: outdoor if possible." in instructions
     assert "hold queue" in instructions
     assert "Never book, reserve, or hold anything." not in instructions
+    assert "Backchannel policy:" not in instructions
+    assert "Interruption policy:" not in instructions
 
 
 def test_book_result_is_discriminated_and_confirmation_is_nonempty() -> None:

@@ -125,6 +125,23 @@ def serialize_session_start(spec: LiveSessionSpec) -> dict[str, Any]:
     return payload.model_dump(mode="json")
 
 
+def speak_first_frames(line: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    return (
+        {
+            "type": "session.instructions.append",
+            "delegation_id": None,
+            "content": (
+                f"Speak first, then listen. Your first spoken line is: {line}"
+            ),
+        },
+        {
+            "type": "session.commentary.append",
+            "delegation_id": None,
+            "content": line,
+        },
+    )
+
+
 def parse_event(raw: str) -> CallEvent | None:
     decoded = json.loads(raw)
     event_type = decoded.get("type")
@@ -210,20 +227,8 @@ class LiveGptLive:
         self._reader_task = asyncio.create_task(self._read_events())
 
     async def speak_first(self, line: str) -> None:
-        await self._send(
-            {
-                "type": "session.instructions.append",
-                "delegation_id": None,
-                "content": f"Your first spoken line is, verbatim: {line}",
-            }
-        )
-        await self._send(
-            {
-                "type": "session.commentary.append",
-                "delegation_id": None,
-                "content": line,
-            }
-        )
+        for frame in speak_first_frames(line):
+            await self._send(frame)
 
     async def append_audio(self, payload_b64: str) -> None:
         await self._send(

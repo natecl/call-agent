@@ -30,6 +30,20 @@ def test_feature_map_lists_shipped_book_rows() -> None:
     assert missing == []
 
 
+def test_feature_map_lists_live_prompt_rows() -> None:
+    required_rows = (
+        "| live prompt | shipped |",
+        "| speak_first | shipped |",
+        "| Realtime reject | shipped |",
+        "| no tool-delegation | shipped |",
+    )
+
+    missing = [row for row in required_rows if row not in INVENTORY]
+
+    assert missing == []
+    assert "(./gpt-live-prompt.md)" in RECIPES
+
+
 def test_feature_map_keeps_book_with_the_other_levers() -> None:
     book_at = _heading_index(INVENTORY, "book")
     verify_book_at = _heading_index(INVENTORY, "verify-book")
@@ -65,7 +79,7 @@ def test_book_feature_recipes_use_the_entry_contract() -> None:
         "## Gotchas",
     )
 
-    for name in ("book.md", "verify-book.md"):
+    for name in ("book.md", "verify-book.md", "gpt-live-prompt.md"):
         text = (features / name).read_text()
         positions = [text.find(section) for section in required]
         assert all(index != -1 for index in positions), name
