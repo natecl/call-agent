@@ -26,7 +26,12 @@ from call_agent.domain import (
     UserId,
     WebhookEvent,
 )
-from call_agent.gpt_live import LiveGptLive, parse_event, serialize_session_start
+from call_agent.gpt_live import (
+    LiveGptLive,
+    parse_event,
+    serialize_session_start,
+    speak_first_frames,
+)
 from call_agent.telnyx import (
     parse_media_frame,
     parse_webhook,
@@ -320,6 +325,7 @@ def test_serialize_session_start_matches_gpt_live_payload() -> None:
             },
         },
     }
+    assert "delegation" not in payload["session"]
 
 
 def test_parse_gpt_live_events_returns_domain_events() -> None:
@@ -449,8 +455,97 @@ def test_parse_gpt_live_rejects_realtime_and_ignores_usage() -> None:
     with pytest.raises(ValueError, match="Realtime event"):
         parse_event(json.dumps({"type": "session.update"}))
     with pytest.raises(ValueError, match="Realtime event"):
+        parse_event(json.dumps({"type": "session.created"}))
+    with pytest.raises(ValueError, match="Realtime event"):
         parse_event(json.dumps({"type": "conversation.item.create"}))
     with pytest.raises(ValueError, match="Realtime event"):
         parse_event(json.dumps({"type": "response.create"}))
+    with pytest.raises(ValueError, match="Realtime event"):
+        parse_event(json.dumps({"type": "input_audio_buffer.append"}))
+    with pytest.raises(ValueError, match="Realtime event"):
+        parse_event(json.dumps({"type": "input_audio_buffer.commit"}))
 
     assert parse_event(json.dumps({"type": "session.usage.updated"})) is None
+
+
+def test_speak_first_frames_are_instructions_then_commentary() -> None:
+    line = "Hi, I'm calling on behalf of Nathan. I have one quick question."
+
+    frames = speak_first_frames(line)
+
+    assert frames == (
+        {
+            "type": "session.instructions.append",
+            "delegation_id": None,
+            "content": (
+                "Speak first, then listen. Your first spoken line is: "
+                "Hi, I'm calling on behalf of Nathan. I have one quick question."
+            ),
+        },
+        {
+            "type": "session.commentary.append",
+            "delegation_id": None,
+            "content": (
+                "Hi, I'm calling on behalf of Nathan. I have one quick question."
+            ),
+        },
+    )
+    assert "verbatim" not in frames[0]["content"]
+    assert "verbatim" not in frames[1]["content"]
+
+
+async def test_live_gpt_live_speak_first_sends_append_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FlushingLiveSocket([])
+
+    async def fake_connect(endpoint: str, additional_headers: dict[str, str]):
+        return socket
+
+    monkeypatch.setattr("call_agent.gpt_live.connect", fake_connect)
+    live = LiveGptLive(
+        endpoint="wss://live.example.test/v1/live/sessions",
+        api_key="key",
+        extra_headers=None,
+        submit=lambda event: None,
+    )
+    line = "Hi, I'm calling on behalf of Nathan. I have one quick question."
+
+    await live.start(
+        LiveSessionSpec(
+            model="gpt-live-1",
+            instructions="Call on behalf of Nathan.",
+            audio=LiveAudioFormat(type="audio/pcm", rate=16000),
+            voice="marin",
+        )
+    )
+    await live.speak_first(line)
+
+    assert socket.sent == [
+        {
+            "type": "session.start",
+            "session": {
+                "model": "gpt-live-1",
+                "instructions": "Call on behalf of Nathan.",
+                "audio": {
+                    "format": {"type": "audio/pcm", "rate": 16000},
+                    "output": {"voice": "marin"},
+                },
+            },
+        },
+        {
+            "type": "session.instructions.append",
+            "delegation_id": None,
+            "content": (
+                "Speak first, then listen. Your first spoken line is: "
+                "Hi, I'm calling on behalf of Nathan. I have one quick question."
+            ),
+        },
+        {
+            "type": "session.commentary.append",
+            "delegation_id": None,
+            "content": (
+                "Hi, I'm calling on behalf of Nathan. I have one quick question."
+            ),
+        },
+    ]
