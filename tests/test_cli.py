@@ -14,6 +14,8 @@ def environment(tmp_path: Path) -> dict[str, str]:
         "CALL_AGENT_DB_PATH": str(tmp_path / "call-agent.sqlite3"),
         "CALL_AGENT_ARTIFACTS_DIR": str(tmp_path / "artifacts"),
         "QUICK_ASK_LIVE": "0",
+        "NO_COLOR": "1",
+        "TERM": "dumb",
     }
 
 
