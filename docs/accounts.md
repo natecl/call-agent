@@ -2,7 +2,11 @@
 
 This is the contract for the follow-up **call-agent-web** PR. This repository (`call-agent`) owns the `users` table and is the sole writer. Stripe stays checkout and billing. Do not treat a Stripe Customer as the runtime account Fly reads. Neon is out of scope on the website today (TRE-20); the website must not open `NEON_DATABASE_URL`.
 
-This tree does not contain `call-agent-web`. Builder’s second climb implements the POST. This tree does not claim that writer live.
+Name is collected on website `/start`. After signup that copy is in account settings. Fly `users.first_name` is that name (website POSTs `/accounts/sync`). Kickoff never collects a name over iMessage.
+
+`POST /accounts/sync` and `GET /accounts/dashboard` are **intended** Fly routes on `https://hidden-beacon-080.fly.dev`, not accidental. Dashboard UI stays on Pages (web). This tree does not `fly deploy`.
+
+This tree does not contain `call-agent-web`. Builder’s second climb implements the POST. This tree does not claim that writer live. `call-agent verify-accounts` proves the in-process handlers.
 
 ## Runtime account
 

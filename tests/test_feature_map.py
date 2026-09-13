@@ -82,6 +82,7 @@ def test_feature_map_lists_account_rows() -> None:
         "| `account list` | shipped |",
         "| `POST /accounts/sync` | shipped |",
         "| `GET /accounts/dashboard` | shipped |",
+        "| `verify-accounts` | shipped |",
         "| `Stripe → users sync` | gated |",
         "| `minutes ledger` | not shipped |",
         "| `kickoff account lookup` | shipped |",
@@ -176,6 +177,52 @@ def test_feature_map_lists_default_wipe_and_keeps_privacy_page_unshipped() -> No
     positions = [text.find(section) for section in required]
     assert all(index != -1 for index in positions)
     assert positions == sorted(positions)
+    assert "Prove-retain override OFF, wipe-unless-opted-in is the live default." in INVENTORY
+    assert "Prove-retain override OFF, wipe-unless-opted-in is the live default." in text
+    assert "RETAIN_CALL_ARTIFACTS=1 still on Fly" not in INVENTORY
+    assert "RETAIN_CALL_ARTIFACTS=1 still on Fly" not in text
+
+
+def test_feature_map_recipe_counts_match_levers() -> None:
+    readme = (REPO / "README.md").read_text()
+    skill = (
+        REPO / ".cursor" / "skills" / "verify-call-agent" / "SKILL.md"
+    ).read_text()
+    assert "five stub checks" not in INVENTORY
+    assert "seven stub checks" not in INVENTORY
+    assert "three stub checks" not in INVENTORY
+    assert "prints three `[PASS]`" not in readme
+    assert "prints four `[PASS]`" in readme
+    assert "8/8 passed" in readme
+    assert "10/10 passed" in readme
+    assert "4/4 passed" in skill
+    assert "| `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the eight stub checks" in INVENTORY
+    assert "| `.cursor/skills/verify-call-agent/features/verify-book.md` | shipped | Covers the ten stub checks" in INVENTORY
+    assert "| `.cursor/skills/verify-call-agent/features/verify-persistence.md` | shipped | Covers the four stub checks" in INVENTORY
+    assert "(./verify-accounts.md)" in RECIPES
+
+
+def test_feature_map_records_cap_locks() -> None:
+    agents = (REPO / "AGENTS.md").read_text()
+    plan = (REPO / "docs" / "WAVE1_HOLD_FEATURE_MAP_PLAN.md").read_text()
+    assert "| privacy wipe (hangup wipe) | shipped |" in INVENTORY
+    assert "| L1 iMessage | shipped |" in INVENTORY
+    assert "live-prove: PASS (#34)" in INVENTORY
+    assert "qa owns live-prove sign-off (TRE-19)" in INVENTORY
+    assert "| live voice | gated |" in INVENTORY
+    assert "| hangup | shipped |" in INVENTORY
+    assert "| landing unfreeze | pending web |" in INVENTORY
+    assert "TRE-22 unfreeze ordered" in INVENTORY
+    assert "Dashboard UI stays on Pages" in INVENTORY
+    assert "Intended Fly route" in INVENTORY
+    assert "missing_public_key" in INVENTORY
+    assert "bad_signature" in INVENTORY
+    assert "website `/start`" in INVENTORY
+    assert "AGENTS.md" in INVENTORY
+    assert "WAVE1_HOLD_FEATURE_MAP_PLAN.md" in INVENTORY
+    assert "verify-accounts" in agents
+    assert "Prove-retain override OFF" in plan
+    assert "wipe-unless-opted-in is the live default" in plan
 
 
 def test_book_feature_recipes_use_the_entry_contract() -> None:
@@ -196,6 +243,7 @@ def test_book_feature_recipes_use_the_entry_contract() -> None:
         "linq-to-call.md",
         "verify-linq-call.md",
         "accounts.md",
+        "verify-accounts.md",
     ):
         text = (features / name).read_text()
         positions = [text.find(section) for section in required]

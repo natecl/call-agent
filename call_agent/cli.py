@@ -51,6 +51,7 @@ from .verify_message import (
     format_message_report,
     verify_message,
 )
+from .verify_accounts import format_accounts_report, verify_accounts
 from .verify_persistence import format_persistence_report, verify_persistence
 from .verify_webhooks import (
     VerifyWebhooksInput,
@@ -444,6 +445,14 @@ def verify_persistence_command() -> None:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
     typer.echo(format_persistence_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("verify-accounts")
+def verify_accounts_command() -> None:
+    report = verify_accounts()
+    typer.echo(format_accounts_report(report))
     if not report.passed:
         raise typer.Exit(code=1)
 

@@ -37,7 +37,8 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 ## Features
 
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
-- [Accounts](./accounts.md) covers `users` row seed (`account upsert --from-did` / `get` / `list`), omit-preserve on signed Fly sync, and signed `GET /accounts/dashboard`.
+- [Accounts](./accounts.md) covers `users` row seed (`account upsert --from-did` / `get` / `list`), omit-preserve on signed Fly sync, signed `GET /accounts/dashboard`, and `/start` name in settings.
+- [Verify accounts](./verify-accounts.md) covers the five-check `users` lever in stub mode and its exit codes.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
 - [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, Responses delegation, `speak_first` append frames, and Realtime reject.
 - [Verify quick-ask](./verify-quick-ask.md) covers the eight-check lever in stub mode and its exit codes.
@@ -50,4 +51,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Verify linq-to-call](./verify-linq-call.md) covers the fourteen-check stub lever for that path.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.
 - [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, and the misconfig exit.
-- [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. The privacy page stays not shipped.
+- [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. Live Fly: prove-retain override OFF; wipe-unless-opted-in is the live default. The privacy page stays not shipped.

@@ -370,6 +370,23 @@ def test_verify_linq_call_stub_exits_zero(tmp_path: Path) -> None:
     assert "[PASS] no_number_order" in result.stdout
 
 
+def test_verify_accounts_stub_exits_zero(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["verify-accounts"],
+        env=environment(tmp_path),
+    )
+
+    assert result.exit_code == 0
+    assert "5/5 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 5
+    assert "[PASS] cli_roundtrip" in result.stdout
+    assert "[PASS] omit_preserve" in result.stdout
+    assert "[PASS] sync_hmac" in result.stdout
+    assert "[PASS] dashboard_get" in result.stdout
+    assert "[PASS] no_name_column" in result.stdout
+
+
 def test_book_live_without_from_did_exits_two_before_any_socket(
     tmp_path: Path,
 ) -> None:
