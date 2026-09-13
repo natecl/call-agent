@@ -29,7 +29,11 @@ from .accounts import (
     verify_account_sync_signature,
 )
 from .config import Settings
-from .domain import MediaStartEvent, MediaStopEvent
+from .dashboard import (
+    build_account_dashboard,
+    dashboard_signature_payload,
+)
+from .domain import E164, MediaStartEvent, MediaStopEvent
 from .kickoff import (
     KickoffBlocked,
     KickoffCollecting,
@@ -111,6 +115,36 @@ async def accounts_sync(request: Request) -> dict[str, bool | str]:
         "skipped": result.skipped,
         "created": result.created,
     }
+
+
+@app.get("/accounts/dashboard")
+async def accounts_dashboard(request: Request) -> dict[str, object]:
+    settings = Settings()
+    secret = settings.account_sync_secret or ""
+    if not secret.strip():
+        raise HTTPException(status_code=401, detail="unauthorized")
+    phone_raw = (request.query_params.get("phone") or "").strip()
+    if not phone_raw:
+        raise HTTPException(status_code=400, detail="phone is required")
+    try:
+        verify_account_sync_signature(
+            secret,
+            dashboard_signature_payload(phone_raw),
+            request.headers,
+        )
+        phone = E164(phone_raw)
+        record = open_accounts(settings).get_by_phone(phone)
+        return build_account_dashboard(
+            record=record,
+            artifacts_dir=settings.call_agent_artifacts_dir,
+            phone=phone,
+        )
+    except AccountSyncAuthError as error:
+        raise HTTPException(status_code=401, detail="unauthorized") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except PersistenceConfigError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
 
 
 @app.post("/webhooks/telnyx")

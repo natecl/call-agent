@@ -130,14 +130,23 @@ class AccountWrite(BaseModel):
     stripe_customer_id: str | None = None
     plan: str | None = None
     minutes_included: int = 0
-    minutes_used: int = 0
+    minutes_used: int | None = None
     retain_call_artifacts: bool = False
-    prefs: dict[str, str] = Field(default_factory=dict)
+    prefs: dict[str, str] | None = None
     stripe_event_created: str | None = None
 
-    @field_validator("minutes_included", "minutes_used")
+    @field_validator("minutes_included")
     @classmethod
-    def _minutes_non_negative(cls, value: int) -> int:
+    def _minutes_included_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("minutes cannot be negative")
+        return value
+
+    @field_validator("minutes_used")
+    @classmethod
+    def _minutes_used_non_negative(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
         if value < 0:
             raise ValueError("minutes cannot be negative")
         return value
@@ -163,7 +172,11 @@ class AccountWrite(BaseModel):
 
     @field_validator("prefs")
     @classmethod
-    def _string_prefs(cls, value: dict[str, str]) -> dict[str, str]:
+    def _string_prefs(
+        cls, value: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if value is None:
+            return None
         cleaned: dict[str, str] = {}
         for key, item in value.items():
             if not isinstance(key, str) or not isinstance(item, str):
@@ -281,9 +294,9 @@ def upsert_account(
             stripe_customer_id=write.stripe_customer_id,
             plan=write.plan,
             minutes_included=write.minutes_included,
-            minutes_used=write.minutes_used,
+            minutes_used=_keep(write.minutes_used, 0),
             retain_call_artifacts=write.retain_call_artifacts,
-            prefs=write.prefs,
+            prefs=_keep(write.prefs, {}),
             stripe_synced_at=synced_at,
             created_at=stamp,
             updated_at=stamp,
@@ -296,18 +309,16 @@ def upsert_account(
     record = UserRecord(
         user_id=target.user_id,
         phone=write.phone,
-        first_name=write.first_name,
-        from_did=(
-            write.from_did if write.from_did is not None else target.from_did
-        ),
+        first_name=_keep(write.first_name, target.first_name),
+        from_did=_keep(write.from_did, target.from_did),
         stripe_customer_id=(
             write.stripe_customer_id or target.stripe_customer_id
         ),
         plan=write.plan if write.plan is not None else target.plan,
         minutes_included=write.minutes_included,
-        minutes_used=write.minutes_used,
+        minutes_used=_keep(write.minutes_used, target.minutes_used),
         retain_call_artifacts=write.retain_call_artifacts,
-        prefs=write.prefs,
+        prefs=_keep(write.prefs, target.prefs),
         stripe_synced_at=synced_at or target.stripe_synced_at,
         created_at=target.created_at,
         updated_at=stamp,
@@ -377,6 +388,10 @@ def _parse_iso(value: str | None) -> datetime | None:
 
 def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
+
+
+def _keep(incoming: Any, existing: Any) -> Any:
+    return incoming if incoming is not None else existing
 
 
 def _header(headers: Mapping[str, str], name: str) -> str:

@@ -81,6 +81,7 @@ def test_feature_map_lists_account_rows() -> None:
         "| `account get` | shipped |",
         "| `account list` | shipped |",
         "| `POST /accounts/sync` | shipped |",
+        "| `GET /accounts/dashboard` | shipped |",
         "| `Stripe → users sync` | gated |",
         "| `minutes ledger` | not shipped |",
         "| `kickoff account lookup` | shipped |",

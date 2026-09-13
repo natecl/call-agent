@@ -12,12 +12,14 @@ from call_agent.accounts import (
     AccountWrite,
     Accounts,
     NeonAccounts,
+    USERS_SCHEMA,
     generate_user_id,
     open_accounts,
     sign_account_sync,
 )
 from call_agent.cli import app
 from call_agent.config import Settings
+from call_agent.dashboard import dashboard_signature_payload
 from call_agent.domain import E164, UserId
 from call_agent.server import app as fastapi_app
 
@@ -531,4 +533,344 @@ def test_accounts_sync_without_from_did_preserves_seeded_did(
     record = open_accounts(settings).get_by_phone(E164("+14155552671"))
     assert record is not None
     assert record.from_did == E164("+15555550188")
+
+
+def test_users_schema_has_no_name_column(tmp_path: Path) -> None:
+    assert "\n    name TEXT" not in USERS_SCHEMA
+    assert "first_name TEXT" in USERS_SCHEMA
+    store = Accounts(tmp_path / "ledger.sqlite3")
+    store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            prefs={"full_name": "Nathan Tester"},
+        )
+    )
+    connection = sqlite3.connect(tmp_path / "ledger.sqlite3")
+    columns = [
+        row[1] for row in connection.execute("PRAGMA table_info(users)")
+    ]
+    connection.close()
+    assert "name" not in columns
+    assert "first_name" in columns
+    assert "prefs" in columns
+
+
+def test_upsert_keeps_first_name_prefs_and_minutes_used_when_omitted(
+    tmp_path: Path,
+) -> None:
+    store = Accounts(tmp_path / "ledger.sqlite3")
+    first = store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+            minutes_used=7,
+            prefs={"full_name": "Nathan Tester"},
+        )
+    )
+    second = store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            stripe_customer_id="cus_123",
+        )
+    )
+    zeroed = store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            minutes_used=0,
+            stripe_event_created="2026-09-13T14:00:00+00:00",
+        )
+    )
+
+    assert first.record.first_name == "Nathan"
+    assert first.record.prefs == {"full_name": "Nathan Tester"}
+    assert first.record.minutes_used == 7
+    assert second.record.first_name == "Nathan"
+    assert second.record.prefs == {"full_name": "Nathan Tester"}
+    assert second.record.minutes_used == 7
+    assert second.record.stripe_customer_id == "cus_123"
+    assert zeroed.record.minutes_used == 0
+    assert zeroed.record.first_name == "Nathan"
+    assert zeroed.record.prefs == {"full_name": "Nathan Tester"}
+
+
+def test_accounts_sync_without_name_prefs_or_minutes_used_preserves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sync-secret"
+    monkeypatch.setenv("ACCOUNT_SYNC_SECRET", secret)
+    monkeypatch.setenv("CALL_AGENT_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    settings = _settings(tmp_path)
+    open_accounts(settings).upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+            minutes_used=4,
+            prefs={"full_name": "Nathan Tester"},
+        )
+    )
+    body = json.dumps(
+        {
+            "phone": "+14155552671",
+            "stripe_customer_id": "cus_123",
+            "stripe_event_created": "2026-09-13T12:00:00+00:00",
+        }
+    ).encode()
+    with TestClient(fastapi_app) as client:
+        response = client.post(
+            "/accounts/sync",
+            content=body,
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(secret, body)
+            },
+        )
+
+    assert response.status_code == 200
+    record = open_accounts(settings).get_by_phone(E164("+14155552671"))
+    assert record is not None
+    assert record.first_name == "Nathan"
+    assert record.prefs == {"full_name": "Nathan Tester"}
+    assert record.minutes_used == 4
+    assert record.stripe_customer_id == "cus_123"
+
+
+def test_accounts_dashboard_empty_for_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sync-secret"
+    monkeypatch.setenv("ACCOUNT_SYNC_SECRET", secret)
+    monkeypatch.setenv("CALL_AGENT_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    phone = "+14155552671"
+    signed = dashboard_signature_payload(phone)
+    with TestClient(fastapi_app) as client:
+        denied = client.get(
+            "/accounts/dashboard",
+            params={"phone": phone},
+        )
+        missing_phone = client.get(
+            "/accounts/dashboard",
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(
+                    secret, signed
+                )
+            },
+        )
+        unknown = client.get(
+            "/accounts/dashboard",
+            params={"phone": phone},
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(
+                    secret, signed
+                )
+            },
+        )
+
+    assert denied.status_code == 401
+    assert missing_phone.status_code == 400
+    assert unknown.status_code == 200
+    payload = unknown.json()
+    assert payload["ok"] is True
+    assert payload["user"] is None
+    assert payload["threads"] == []
+    assert payload["calls"] == []
+
+
+def test_accounts_dashboard_includes_retained_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sync-secret"
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("ACCOUNT_SYNC_SECRET", secret)
+    monkeypatch.setenv("CALL_AGENT_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(artifacts))
+    settings = _settings(tmp_path)
+    open_accounts(settings).upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+            prefs={"full_name": "Nathan Tester"},
+            retain_call_artifacts=True,
+        )
+    )
+    event_id = "evt-retain-1"
+    call_control_id = "ccid-retain-1"
+    other_event = "evt-other"
+    wiped_event = "evt-wiped"
+    _write_json(
+        artifacts / "linq" / event_id / "inbound.json",
+        {
+            "event_id": event_id,
+            "chat_id": "chat-1",
+            "sender": "+14155552671",
+            "text": "book poke palace",
+        },
+    )
+    _write_json(
+        artifacts / "linq" / event_id / "kickoff.json",
+        {
+            "event_id": event_id,
+            "chat_id": "chat-1",
+            "sender": "+14155552671",
+            "verb": "book",
+            "account": {
+                "user_id": "acctnathan",
+                "phone": "+14155552671",
+                "minutes_used": 0,
+            },
+        },
+    )
+    _write_json(
+        artifacts / "linq" / event_id / "call.json",
+        {
+            "call_control_id": call_control_id,
+            "status": "booked",
+            "call_report_ref": f"{call_control_id}/call_report.json",
+        },
+    )
+    _write_json(
+        artifacts / call_control_id / "call_report.json",
+        {
+            "call_control_id": call_control_id,
+            "status": "booked",
+            "duration_ms": 8000,
+            "started_at": "2026-09-13T12:00:00+00:00",
+            "ended_at": "2026-09-13T12:00:08+00:00",
+            "answer_text": "Table for two at 7:30.",
+            "hangup": {"path": "tool", "confirmed": True},
+            "counts": {"marks_sent": 1},
+            "timing_ms": {},
+            "task": {"outcome": "booked"},
+        },
+    )
+    _write_json(
+        artifacts / call_control_id / "transcript.json",
+        {"turns": [{"role": "agent", "text": "Thanks, that's all I needed."}]},
+    )
+    _write_json(
+        artifacts / "linq" / other_event / "inbound.json",
+        {
+            "event_id": other_event,
+            "chat_id": "chat-2",
+            "sender": "+15555550199",
+        },
+    )
+    _write_json(
+        artifacts / "linq" / wiped_event / "inbound.json",
+        {
+            "event_id": wiped_event,
+            "chat_id": "chat-1",
+            "sender": "+14155552671",
+        },
+    )
+    _write_json(
+        artifacts / "linq" / wiped_event / "call.json",
+        {
+            "call_control_id": "ccid-wiped",
+            "status": "booked",
+            "call_report_ref": "ccid-wiped/call_report.json",
+        },
+    )
+    phone = "+14155552671"
+    signed = dashboard_signature_payload(phone)
+    with TestClient(fastapi_app) as client:
+        response = client.get(
+            "/accounts/dashboard",
+            params={"phone": phone},
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(
+                    secret, signed
+                )
+            },
+        )
+        no_calls = client.get(
+            "/accounts/dashboard",
+            params={"phone": "+15555550188"},
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(
+                    secret, dashboard_signature_payload("+15555550188")
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["user"]["user_id"] == "acctnathan"
+    assert payload["user"]["first_name"] == "Nathan"
+    assert payload["user"]["prefs"]["full_name"] == "Nathan Tester"
+    assert payload["user"]["name"] == {
+        "first_name": "Nathan",
+        "full_name": "Nathan Tester",
+    }
+    event_ids = [thread["event_id"] for thread in payload["threads"]]
+    assert event_ids == [event_id, wiped_event]
+    assert other_event not in event_ids
+    assert len(payload["calls"]) == 1
+    call = payload["calls"][0]
+    assert call["call_control_id"] == call_control_id
+    assert call["call_report"]["status"] == "booked"
+    assert call["observability"]["hangup_path"] == "tool"
+    assert call["transcript"]["turns"][0]["role"] == "agent"
+    assert no_calls.status_code == 200
+    empty = no_calls.json()
+    assert empty["user"] is None
+    assert empty["threads"] == []
+    assert empty["calls"] == []
+
+
+def test_cli_account_upsert_omitted_name_preserves(
+    tmp_path: Path,
+) -> None:
+    env = {
+        "CALL_AGENT_DB_PATH": str(tmp_path / "ledger.sqlite3"),
+        "CALL_AGENT_ARTIFACTS_DIR": str(tmp_path / "artifacts"),
+        "QUICK_ASK_LIVE": "0",
+        "NO_COLOR": "1",
+        "TERM": "dumb",
+        "COLUMNS": "120",
+    }
+    first = runner.invoke(
+        app,
+        [
+            "account",
+            "upsert",
+            "--phone",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--user",
+            "acctnathan",
+        ],
+        env=env,
+    )
+    store = Accounts(tmp_path / "ledger.sqlite3")
+    store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            minutes_used=3,
+            prefs={"full_name": "Nathan Tester"},
+        )
+    )
+    second = runner.invoke(
+        app,
+        ["account", "upsert", "--phone", "+14155552671"],
+        env=env,
+    )
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    record = json.loads(second.stdout)
+    assert record["first_name"] == "Nathan"
+    assert record["prefs"] == {"full_name": "Nathan Tester"}
+    assert record["minutes_used"] == 3
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
