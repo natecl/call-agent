@@ -28,8 +28,8 @@ def test_verify_quick_ask_stub_exits_zero(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "5/5 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 5
+    assert "8/8 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 8
 
 
 def test_verify_quick_ask_live_requires_gate(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_verify_quick_ask_live_names_missing_keys(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert (
         "live mode requires: TELNYX_API_KEY, TELNYX_CONNECTION_ID, "
-        "OPENAI_API_KEY, PUBLIC_BASE_URL"
+        "OPENAI_API_KEY, OPENAI_RESPONSES_MODEL, PUBLIC_BASE_URL"
     ) in result.output
 
 
@@ -69,7 +69,7 @@ def test_verify_quick_ask_wrong_did_exits_one_with_fail_lines(
     assert result.exit_code == 1
     assert "[FAIL] did_in_ledger" in result.stdout
     assert "expected from_did +15555559999" in result.stdout
-    assert "3/5 passed" in result.stdout
+    assert "6/8 passed" in result.stdout
 
 
 def test_quick_ask_stub_prints_answered_result(
@@ -246,8 +246,8 @@ def test_verify_book_stub_exits_zero(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "7/7 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 7
+    assert "10/10 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 10
 
 
 def test_verify_book_live_requires_gate(tmp_path: Path) -> None:
@@ -272,7 +272,7 @@ def test_verify_book_wrong_did_exits_one_with_fail_lines(
 
     assert result.exit_code == 1
     assert "[FAIL] did_in_ledger" in result.stdout
-    assert "5/7 passed" in result.stdout
+    assert "8/10 passed" in result.stdout
 
 
 def test_did_provision_twice_prints_same_did(
@@ -392,6 +392,7 @@ def test_book_live_without_from_did_exits_two_before_any_socket(
             "TELNYX_API_KEY": "k",
             "TELNYX_CONNECTION_ID": "c",
             "OPENAI_API_KEY": "o",
+            "OPENAI_RESPONSES_MODEL": "gpt-5.6-terra",
             "PUBLIC_BASE_URL": "https://example.test",
             "PUBLIC_WEBHOOK_URL": "https://example.test",
         },

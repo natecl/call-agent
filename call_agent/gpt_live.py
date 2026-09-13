@@ -20,10 +20,13 @@ from .domain import (
     LiveNoteEvent,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
+    LiveResponseEvent,
     LiveSessionSpec,
     LiveStartedEvent,
+    LiveToolCallEvent,
     SampleRate,
 )
+from .tools import SESSION_TOOLS
 
 
 class _WireModel(BaseModel):
@@ -55,10 +58,32 @@ class _SessionAudio(_WireModel):
     output: _AudioOutput
 
 
+class _FunctionTool(_WireModel):
+    type: Literal["function"] = "function"
+    name: str
+    description: str
+    strict: bool = True
+    parameters: dict[str, Any]
+
+
+class _ResponsesConfig(_WireModel):
+    model: str
+    instructions: str
+    tools: tuple[_FunctionTool, ...]
+    tool_choice: Literal["auto"] = "auto"
+    parallel_tool_calls: Literal[False] = False
+
+
+class _Delegation(_WireModel):
+    type: Literal["responses"] = "responses"
+    responses: _ResponsesConfig
+
+
 class _SessionConfig(_WireModel):
     model: str
     instructions: str
     audio: _SessionAudio
+    delegation: _Delegation
 
 
 class _SessionStart(_WireModel):
@@ -114,14 +139,19 @@ class GptLive(Protocol):
         self, delegation_id: str, thinking: str, commentary: str
     ) -> None: ...
 
-    async def nudge(
-        self, instructions: str, commentary: str, event_id: str
+    async def send_tool_result(
+        self, call_id: str, output: str, event_id: str
     ) -> None: ...
+
+    async def continue_response(self, event_id: str) -> None: ...
+
+    async def steer(self, instructions: str, event_id: str) -> None: ...
 
     async def close(self) -> None: ...
 
 
 def serialize_session_start(spec: LiveSessionSpec) -> dict[str, Any]:
+    tools = spec.tools or SESSION_TOOLS
     payload = _SessionStart(
         session=_SessionConfig(
             model=spec.model,
@@ -129,6 +159,16 @@ def serialize_session_start(spec: LiveSessionSpec) -> dict[str, Any]:
             audio=_SessionAudio(
                 format=spec.audio.model_dump(),
                 output=_AudioOutput(voice=spec.voice),
+            ),
+            delegation=_Delegation(
+                responses=_ResponsesConfig(
+                    model=spec.responses_model,
+                    instructions=spec.backend_instructions,
+                    tools=tuple(
+                        _FunctionTool.model_validate(tool.model_dump())
+                        for tool in tools
+                    ),
+                )
             ),
         )
     )
@@ -184,7 +224,17 @@ def parse_event(raw: str) -> CallEvent | None:
         delegation_id = delegation.get("id")
         if not isinstance(delegation_id, str) or not delegation_id.strip():
             raise ValueError("GPT-Live delegation has no id")
-        return LiveDelegationEvent(delegation_id=delegation_id)
+        target = delegation.get("target")
+        if target not in {"client", "responses"}:
+            raise ValueError("GPT-Live delegation has no target")
+        response_id = delegation.get("response_id")
+        return LiveDelegationEvent(
+            delegation_id=delegation_id,
+            target=target,
+            response_id=response_id if isinstance(response_id, str) else None,
+        )
+    if event_type == "response.event":
+        return _parse_response_event(decoded)
     if (
         event_type in {"session.update", "session.created"}
         or event_type.startswith("conversation.item.")
@@ -205,6 +255,64 @@ def parse_event(raw: str) -> CallEvent | None:
         ),
         usage_seconds=usage_seconds,
     )
+
+
+def _parse_response_event(decoded: dict[str, Any]) -> CallEvent:
+    inner = decoded.get("event")
+    if not isinstance(inner, dict):
+        raise ValueError("GPT-Live response.event has no event")
+    inner_type = inner.get("type")
+    if not isinstance(inner_type, str):
+        raise ValueError("GPT-Live response.event has no event type")
+    delegation_id = decoded.get("delegation_id")
+    if not isinstance(delegation_id, str) or not delegation_id.strip():
+        raise ValueError("GPT-Live response.event has no delegation_id")
+    response_id = None
+    inner_response = inner.get("response")
+    if isinstance(inner_response, dict) and isinstance(
+        inner_response.get("id"), str
+    ):
+        response_id = inner_response["id"]
+    elif isinstance(inner.get("response_id"), str):
+        response_id = inner["response_id"]
+    if inner_type == "response.output_item.done":
+        item = inner.get("item")
+        if isinstance(item, dict) and item.get("type") == "function_call":
+            call_id = item.get("call_id")
+            name = item.get("name")
+            arguments = item.get("arguments")
+            if isinstance(call_id, str) and isinstance(name, str):
+                if isinstance(arguments, str):
+                    arguments_json = arguments
+                elif arguments is None:
+                    arguments_json = "{}"
+                else:
+                    arguments_json = json.dumps(arguments)
+                return LiveToolCallEvent(
+                    delegation_id=delegation_id,
+                    response_id=response_id,
+                    call_id=call_id,
+                    name=name,
+                    arguments_json=arguments_json,
+                )
+        return LiveNoteEvent(event_type=f"response.event/{inner_type}")
+    if inner_type == "response.created":
+        return LiveResponseEvent(
+            response_kind="created",
+            delegation_id=delegation_id,
+            response_id=response_id,
+        )
+    if inner_type in {
+        "response.completed",
+        "response.failed",
+        "response.incomplete",
+    }:
+        return LiveResponseEvent(
+            response_kind=inner_type.removeprefix("response."),
+            delegation_id=delegation_id,
+            response_id=response_id,
+        )
+    return LiveNoteEvent(event_type=f"response.event/{inner_type}")
 
 
 Submit = Callable[[CallEvent], None]
@@ -288,23 +396,36 @@ class LiveGptLive:
             }
         )
 
-    async def nudge(
-        self, instructions: str, commentary: str, event_id: str
+    async def send_tool_result(
+        self, call_id: str, output: str, event_id: str
     ) -> None:
         await self._send(
             {
-                "type": "session.instructions.append",
-                "event_id": f"{event_id}-instructions",
-                "delegation_id": None,
-                "content": instructions,
+                "type": "response.item.create",
+                "event_id": event_id,
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": output,
+                },
             }
         )
+
+    async def continue_response(self, event_id: str) -> None:
         await self._send(
             {
-                "type": "session.commentary.append",
-                "event_id": f"{event_id}-commentary",
+                "type": "response.create",
+                "event_id": event_id,
+            }
+        )
+
+    async def steer(self, instructions: str, event_id: str) -> None:
+        await self._send(
+            {
+                "type": "session.instructions.append",
+                "event_id": event_id,
                 "delegation_id": None,
-                "content": commentary,
+                "content": instructions,
             }
         )
 
@@ -367,6 +488,9 @@ class StubScenario(BaseModel):
     stall_after_time_turn: bool = False
     never_resumes: bool = False
     media_drops_before_hangup: bool = False
+    tool_args_invalid: bool = False
+    skips_end_call: bool = False
+    client_delegation: bool = False
 
 
 class StubGptLive:
@@ -383,8 +507,11 @@ class StubGptLive:
         self.appended_audio: list[str] = []
         self.spoken_lines: list[str] = []
         self.replied_delegations: list[tuple[str, str, str]] = []
-        self.nudges: list[tuple[str, str, str]] = []
+        self.tool_results: list[tuple[str, str, str]] = []
+        self.continues: list[str] = []
+        self.steers: list[tuple[str, str]] = []
         self._resume_booking: Callable[[], None] | None = None
+        self._retried_invalid_tool = False
 
     async def start(self, spec: LiveSessionSpec) -> None:
         self._write_json(
@@ -413,8 +540,12 @@ class StubGptLive:
         answer = self._scenario.canned_answer or self._answer_for(ask)
         self._emit_input(answer)
         self._emit_audio(2)
-        self._emit_closing()
-        self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+        self._emit_task_tools(
+            name="quick-ask",
+            outcome="answered",
+            summary=answer,
+            answer_text=answer,
+        )
 
     async def speak_first(self, line: str) -> None:
         self.spoken_lines.append(line)
@@ -428,10 +559,17 @@ class StubGptLive:
         self.replied_delegations.append((delegation_id, thinking, commentary))
         self._resume_if_waiting()
 
-    async def nudge(
-        self, instructions: str, commentary: str, event_id: str
+    async def send_tool_result(
+        self, call_id: str, output: str, event_id: str
     ) -> None:
-        self.nudges.append((instructions, commentary, event_id))
+        self.tool_results.append((call_id, output, event_id))
+
+    async def continue_response(self, event_id: str) -> None:
+        self.continues.append(event_id)
+        self._resume_if_waiting()
+
+    async def steer(self, instructions: str, event_id: str) -> None:
+        self.steers.append((instructions, event_id))
         self._resume_if_waiting()
 
     async def close(self) -> None:
@@ -470,22 +608,44 @@ class StubGptLive:
         self._emit_input(f"{facts} works for us.")
         if self._scenario.never_resumes:
             return
-        if self._scenario.stall_after_time_turn:
+        if self._scenario.client_delegation:
+            self._submit(
+                self._parse(
+                    {
+                        "type": "session.delegation.created",
+                        "delegation": {
+                            "id": "stub-delegation-0001",
+                            "type": "delegation",
+                            "target": "client",
+                        },
+                    }
+                )
+            )
             self._resume_booking = lambda: self._finish_booking(facts)
             return
-        self._submit(
-            self._parse(
-                {
-                    "type": "session.delegation.created",
-                    "delegation": {
-                        "id": "stub-delegation-0001",
-                        "type": "delegation",
-                        "target": "client",
-                    },
-                }
+        outcome = "declined" if self._scenario.decline_booking else "confirmed"
+        summary = (
+            self._scenario.canned_answer
+            or (
+                "We're fully booked. We can't take that reservation."
+                if self._scenario.decline_booking
+                else (
+                    f"You're booked. We'll see you then. "
+                    f"Reservation confirmed. {facts}"
+                )
             )
         )
-        self._resume_booking = lambda: self._finish_booking(facts)
+        if self._scenario.decline_booking:
+            self._emit_input(
+                self._scenario.canned_answer
+                or "We're fully booked. We can't take that reservation."
+            )
+        self._emit_task_tools(
+            name="book",
+            outcome=outcome,
+            summary=summary,
+            facts=facts,
+        )
 
     def _finish_booking(self, facts: str) -> None:
         self._emit_output(f"Any issue with the constraints in {facts}?")
@@ -505,6 +665,138 @@ class StubGptLive:
         self._emit_audio(2)
         self._emit_closing()
         self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+
+    def _emit_task_tools(
+        self,
+        *,
+        name: str,
+        outcome: str,
+        summary: str,
+        answer_text: str | None = None,
+        facts: str | None = None,
+    ) -> None:
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.delegation.created",
+                    "delegation": {
+                        "id": "stub-delegation-0001",
+                        "type": "delegation",
+                        "target": "responses",
+                        "response_id": "stub-response-0001",
+                    },
+                }
+            )
+        )
+        self._submit(
+            self._parse(
+                {
+                    "type": "response.event",
+                    "event_id": "event_response_created",
+                    "delegation_id": "stub-delegation-0001",
+                    "event": {
+                        "type": "response.created",
+                        "response": {"id": "stub-response-0001"},
+                    },
+                }
+            )
+        )
+        record_outcome = "booked" if self._scenario.tool_args_invalid else outcome
+        arguments = {
+            "outcome": record_outcome,
+            "summary": summary,
+            "confirmed_fields": {
+                "party_size": 2 if name == "book" else None,
+                "time_text": "Friday 7pm" if name == "book" else None,
+                "name_on_record": "Nathan" if name == "book" else None,
+                "answer_text": answer_text,
+            },
+        }
+        if facts and "Party size:" in facts:
+            # keep party/time from the live prompt facts line
+            pass
+        self._submit(self._function_call("call_record_1", "record_task_result", arguments))
+        self._resume_booking = lambda: self._after_record(name, outcome, summary, facts)
+
+    def _after_record(
+        self,
+        name: str,
+        outcome: str,
+        summary: str,
+        facts: str | None,
+    ) -> None:
+        if self._scenario.tool_args_invalid and not self._retried_invalid_tool:
+            self._retried_invalid_tool = True
+            arguments = {
+                "outcome": outcome,
+                "summary": summary,
+                "confirmed_fields": {
+                    "party_size": 2 if name == "book" else None,
+                    "time_text": "Friday 7pm" if name == "book" else None,
+                    "name_on_record": "Nathan" if name == "book" else None,
+                    "answer_text": None if name == "book" else summary,
+                },
+            }
+            self._submit(
+                self._function_call(
+                    "call_record_2", "record_task_result", arguments
+                )
+            )
+            self._resume_booking = lambda: self._after_record(
+                name, outcome, summary, facts
+            )
+            return
+        self._emit_output(f"I'll wrap this up. {summary}")
+        if self._scenario.skips_end_call:
+            self._emit_closing()
+            self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+            return
+        reason = "declined" if outcome == "declined" else "task_done"
+        self._submit(
+            self._function_call(
+                "call_end_1",
+                "end_call",
+                {"reason": reason},
+            )
+        )
+        self._resume_booking = lambda: self._after_end_call()
+
+    def _after_end_call(self) -> None:
+        self._submit(
+            self._parse(
+                {
+                    "type": "response.event",
+                    "event_id": "event_response_completed",
+                    "delegation_id": "stub-delegation-0001",
+                    "event": {
+                        "type": "response.completed",
+                        "response": {"id": "stub-response-0001", "output": []},
+                    },
+                }
+            )
+        )
+        self._emit_closing()
+        self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+
+    def _function_call(
+        self, call_id: str, name: str, arguments: dict[str, Any]
+    ) -> CallEvent:
+        return self._parse(
+            {
+                "type": "response.event",
+                "event_id": f"event_{call_id}",
+                "delegation_id": "stub-delegation-0001",
+                "event": {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": json.dumps(arguments),
+                    },
+                },
+            }
+        )
 
     def _emit_closing(self) -> None:
         self._submit(

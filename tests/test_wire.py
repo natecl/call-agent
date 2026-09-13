@@ -18,8 +18,10 @@ from call_agent.domain import (
     LiveNoteEvent,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
+    LiveResponseEvent,
     LiveSessionSpec,
     LiveStartedEvent,
+    LiveToolCallEvent,
     MediaChunkEvent,
     MediaStartEvent,
     MediaStopEvent,
@@ -312,22 +314,34 @@ def test_serialize_session_start_matches_gpt_live_payload() -> None:
         instructions="Call on behalf of Nathan.",
         audio=LiveAudioFormat(type="audio/pcm", rate=16000),
         voice="marin",
+        backend_instructions="Backend brief.",
+        responses_model="gpt-5.6-terra",
     )
 
     payload = serialize_session_start(spec)
+    session = payload["session"]
+    responses = session["delegation"]["responses"]
 
-    assert payload == {
-        "type": "session.start",
-        "session": {
-            "model": "gpt-live-1",
-            "instructions": "Call on behalf of Nathan.",
-            "audio": {
-                "format": {"type": "audio/pcm", "rate": 16000},
-                "output": {"voice": "marin"},
-            },
-        },
+    assert payload["type"] == "session.start"
+    assert session["model"] == "gpt-live-1"
+    assert session["instructions"] == "Call on behalf of Nathan."
+    assert session["audio"] == {
+        "format": {"type": "audio/pcm", "rate": 16000},
+        "output": {"voice": "marin"},
     }
-    assert "delegation" not in payload["session"]
+    assert session["delegation"]["type"] == "responses"
+    assert responses["model"] == "gpt-5.6-terra"
+    assert responses["instructions"] == "Backend brief."
+    assert [tool["name"] for tool in responses["tools"]] == [
+        "record_task_result",
+        "end_call",
+    ]
+    assert responses["tool_choice"] == "auto"
+    assert responses["parallel_tool_calls"] is False
+    assert "turn_detection" not in session
+    assert "modalities" not in session
+    assert "tools" not in session
+    assert "tool_choice" not in session
 
 
 def test_parse_gpt_live_events_returns_domain_events() -> None:
@@ -493,7 +507,65 @@ def test_parse_gpt_live_rejects_realtime_and_ignores_usage() -> None:
                 },
             }
         )
-    ) == LiveDelegationEvent(delegation_id="item_abc")
+    ) == LiveDelegationEvent(delegation_id="item_abc", target="client")
+    assert parse_event(
+        json.dumps(
+            {
+                "type": "session.delegation.created",
+                "delegation": {
+                    "id": "item_resp",
+                    "type": "delegation",
+                    "target": "responses",
+                    "response_id": "resp_1",
+                },
+            }
+        )
+    ) == LiveDelegationEvent(
+        delegation_id="item_resp",
+        target="responses",
+        response_id="resp_1",
+    )
+    function_call = parse_event(
+        json.dumps(
+            {
+                "type": "response.event",
+                "event_id": "event_tool",
+                "delegation_id": "item_resp",
+                "event": {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "record_task_result",
+                        "arguments": '{"outcome":"answered"}',
+                    },
+                },
+            }
+        )
+    )
+    assert function_call == LiveToolCallEvent(
+        delegation_id="item_resp",
+        call_id="call_1",
+        name="record_task_result",
+        arguments_json='{"outcome":"answered"}',
+    )
+    assert parse_event(
+        json.dumps(
+            {
+                "type": "response.event",
+                "event_id": "event_created",
+                "delegation_id": "item_resp",
+                "event": {
+                    "type": "response.created",
+                    "response": {"id": "resp_1"},
+                },
+            }
+        )
+    ) == LiveResponseEvent(
+        response_kind="created",
+        delegation_id="item_resp",
+        response_id="resp_1",
+    )
 
 
 def test_speak_first_frames_are_instructions_then_commentary() -> None:
@@ -551,18 +623,9 @@ async def test_live_gpt_live_speak_first_sends_append_frames(
     )
     await live.speak_first(line)
 
-    assert socket.sent == [
-        {
-            "type": "session.start",
-            "session": {
-                "model": "gpt-live-1",
-                "instructions": "Call on behalf of Nathan.",
-                "audio": {
-                    "format": {"type": "audio/pcm", "rate": 16000},
-                    "output": {"voice": "marin"},
-                },
-            },
-        },
+    assert socket.sent[0]["type"] == "session.start"
+    assert socket.sent[0]["session"]["delegation"]["type"] == "responses"
+    assert socket.sent[1:] == [
         {
             "type": "session.instructions.append",
             "event_id": "speak-first-1",
@@ -583,7 +646,7 @@ async def test_live_gpt_live_speak_first_sends_append_frames(
     ]
 
 
-async def test_live_gpt_live_nudge_and_reply_delegation_send_append_frames(
+async def test_live_gpt_live_steer_tool_result_and_reply_delegation_send_frames(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     socket = FlushingLiveSocket([])
@@ -609,18 +672,34 @@ async def test_live_gpt_live_nudge_and_reply_delegation_send_append_frames(
     await live.reply_delegation(
         "item_abc", "thinking text", "Please confirm Friday."
     )
-    await live.nudge("Continue now.", "Can you confirm?", "nudge-1")
+    await live.send_tool_result("call_1", '{"ok":true}', "tool-result-call_1")
+    await live.continue_response("continue-call_1")
+    await live.steer("Wrap up politely and say goodbye.", "silence-failsafe")
 
     types = [message["type"] for message in socket.sent]
     assert types == [
         "session.start",
         "session.thinking.append",
         "session.commentary.append",
+        "response.item.create",
+        "response.create",
         "session.instructions.append",
-        "session.commentary.append",
     ]
     assert socket.sent[1]["event_id"] == "delegation-item_abc-thinking"
     assert socket.sent[1]["delegation_id"] == "item_abc"
-    assert socket.sent[3]["event_id"] == "nudge-1-instructions"
-    assert socket.sent[3]["delegation_id"] is None
+    assert socket.sent[3] == {
+        "type": "response.item.create",
+        "event_id": "tool-result-call_1",
+        "item": {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": '{"ok":true}',
+        },
+    }
+    assert socket.sent[4] == {
+        "type": "response.create",
+        "event_id": "continue-call_1",
+    }
+    assert socket.sent[5]["event_id"] == "silence-failsafe"
+    assert socket.sent[5]["delegation_id"] is None
 
