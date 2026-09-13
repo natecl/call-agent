@@ -612,6 +612,7 @@ async def test_run_call_live_fails_when_webhook_host_diverges(
         telnyx_api_key="test-key",
         telnyx_connection_id="connection-1",
         openai_api_key="test-openai",
+        openai_responses_model="gpt-5.6-terra",
         public_base_url="https://hidden-beacon-080.fly.dev",
         public_webhook_url="https://stale-tunnel.trycloudflare.com",
     )

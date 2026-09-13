@@ -111,7 +111,7 @@ async def test_hangup_keeps_call_artifacts_when_settings_opt_in(
     assert (run_dir / "audio" / "inbound.wav").is_file()
     assert (run_dir / "hangup.json").is_file()
     report = json.loads((run_dir / "call_report.json").read_text())
-    assert report["hangup"]["path"] == "trail"
+    assert report["hangup"]["path"] == "tool"
 
 
 @pytest.mark.asyncio

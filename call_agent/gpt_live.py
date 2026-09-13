@@ -623,6 +623,7 @@ class StubGptLive:
             )
             self._resume_booking = lambda: self._finish_booking(facts)
             return
+        self._emit_output(f"Any issue with the constraints in {facts}?")
         outcome = "declined" if self._scenario.decline_booking else "confirmed"
         summary = (
             self._scenario.canned_answer
