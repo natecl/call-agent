@@ -311,12 +311,15 @@ app.add_api_route(
 async def media_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     handle = None
+    stream_id = None
+    saw_stop = False
     try:
         while True:
             event = parse_media_frame(await websocket.receive_text())
             if event is None:
                 continue
             if isinstance(event, MediaStartEvent):
+                stream_id = event.stream_id
                 try:
                     handle = BOOK.by_call_control_id(
                         event.call_control_id
@@ -330,9 +333,13 @@ async def media_stream(websocket: WebSocket) -> None:
                 return
             handle.submit(event)
             if isinstance(event, MediaStopEvent):
+                saw_stop = True
                 return
     except WebSocketDisconnect:
         return
+    finally:
+        if handle is not None and not saw_stop and stream_id is not None:
+            handle.submit(MediaStopEvent(stream_id=stream_id))
 
 
 class RunningServer(NamedTuple):

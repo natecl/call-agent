@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 from call_agent.config import Settings
 from call_agent.domain import (
@@ -105,7 +106,11 @@ def speaking_handle(settings: Settings) -> tuple[CallHandle, HeldMarks]:
             codec=Codec.L16,
             sample_rate=16000,
         ),
-        live=LiveActive(session_id=LiveSessionId("live-1")),
+        live=LiveActive(
+            session_id=LiveSessionId("live-1"),
+            stall_check_pending=True,
+            activity_seq=1,
+        ),
         conversation=ConversationOpen(
             transcript=Transcript().append_delta(
                 Speaker.BUSINESS, "We're open 9 to 5."
@@ -163,7 +168,11 @@ def speaking_book_handle(settings: Settings) -> tuple[CallHandle, HeldMarks]:
             codec=Codec.L16,
             sample_rate=16000,
         ),
-        live=LiveActive(session_id=LiveSessionId("live-1")),
+        live=LiveActive(
+            session_id=LiveSessionId("live-1"),
+            stall_check_pending=True,
+            activity_seq=1,
+        ),
         conversation=ConversationOpen(
             transcript=Transcript().append_delta(
                 Speaker.BUSINESS, "Yes, we can do that."
@@ -264,11 +273,12 @@ async def test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail
     }
     assert result["status"] == "answered"
     assert result["answer_text"] == "We're open 9 to 5."
-    assert [row["effect"] for row in rows if "effect" in row][-5:] == [
+    assert [row["effect"] for row in rows if "effect" in row][-6:] == [
         "play_audio",
         "mark",
         "schedule",
         "hangup",
+        "schedule",
         "finish",
     ]
     assert report["hangup"]["path"] == "trail"
@@ -421,6 +431,16 @@ class SilentGptLive:
         return None
 
     async def append_audio(self, payload_b64: str) -> None:
+        return None
+
+    async def reply_delegation(
+        self, delegation_id: str, thinking: str, commentary: str
+    ) -> None:
+        return None
+
+    async def nudge(
+        self, instructions: str, commentary: str, event_id: str
+    ) -> None:
         return None
 
     async def close(self) -> None:
@@ -647,4 +667,108 @@ def test_dial_path_source_has_no_provision() -> None:
         assert "search_and_order_number" not in text, name
         assert "number_orders" not in text, name
         assert "open_ledger" not in text, name
+
+
+class DroppingMedia:
+    def __init__(self) -> None:
+        self.played: list[str] = []
+        self.marks: list[str] = []
+
+    async def play(self, payload_b64: str) -> None:
+        self.played.append(payload_b64)
+        raise WebSocketDisconnect(code=1006)
+
+    async def mark(self, name: str) -> None:
+        self.marks.append(name)
+        raise WebSocketDisconnect(code=1006)
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_play_into_dead_media_is_non_fatal_and_leaves_the_call_open(
+    settings: Settings,
+) -> None:
+    handle, _ = speaking_handle(settings)
+    handle.ports.telnyx_media = DroppingMedia()
+
+    await handle._process_event(LiveOutputAudioEvent(delta_b64=AUDIO))
+    rows = [
+        json.loads(line)
+        for line in (handle.run_dir.path / "events.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+
+    assert handle.call.media.kind == "media_stopped"
+    assert handle.call.finished is False
+    assert any(row.get("kind") == "media_play_failed" for row in rows)
+    assert any(row.get("error_type") == "WebSocketDisconnect" for row in rows)
+
+
+class BoomOnStart(SilentGptLive):
+    async def start(self, spec: object) -> None:
+        raise WebSocketDisconnect(code=1006)
+
+
+async def test_run_loop_empty_websocket_disconnect_fails_with_type_name(
+    settings: Settings,
+) -> None:
+    retained = Settings(
+        _env_file=None,
+        call_agent_db_path=settings.call_agent_db_path,
+        call_agent_artifacts_dir=settings.call_agent_artifacts_dir,
+        retain_call_artifacts=True,
+        hangup_trailing_silence_s=0,
+        event_timeout_s=2,
+    )
+    request = QuickAskRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        question=Question.from_cli(QuestionType.HOURS, None),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+    )
+    call = Call(
+        run_id=RunId("run-boom"),
+        request=request,
+        from_did=E164("+15555550100"),
+    )
+    queue: asyncio.Queue[CallEvent] = asyncio.Queue()
+    telnyx = StubTelnyxHttp(submit=queue.put_nowait)
+    handle = CallHandle(
+        call=call,
+        queue=queue,
+        ports=Ports(
+            telnyx_http=telnyx,
+            telnyx_media=HeldMarks(queue.put_nowait),
+            gpt_live=BoomOnStart(),
+        ),
+        run_dir=RunDir(retained.call_agent_artifacts_dir, "run-boom"),
+        settings=retained,
+        dial_spec=DialSpec(
+            connection_id="connection-1",
+            to=request.to,
+            from_did=call.from_did,
+            stream_url="wss://calls.example.test/media-stream",
+            webhook_url="https://calls.example.test/webhooks/telnyx",
+            codec=Codec.L16,
+            client_state=ClientState(
+                run_id=call.run_id, user_id=request.user_id
+            ),
+        ),
+    )
+
+    result = await handle.run()
+    rows = [
+        json.loads(line)
+        for line in (handle.run_dir.path / "events.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+
+    assert result.status == "failed"
+    assert result.reason == "WebSocketDisconnect"
+    assert result.reason != ""
+    assert any(row.get("kind") == "runtime_failure" for row in rows)
 

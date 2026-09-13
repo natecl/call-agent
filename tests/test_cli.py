@@ -246,8 +246,8 @@ def test_verify_book_stub_exits_zero(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "6/6 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 6
+    assert "7/7 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 7
 
 
 def test_verify_book_live_requires_gate(tmp_path: Path) -> None:
@@ -272,7 +272,7 @@ def test_verify_book_wrong_did_exits_one_with_fail_lines(
 
     assert result.exit_code == 1
     assert "[FAIL] did_in_ledger" in result.stdout
-    assert "4/6 passed" in result.stdout
+    assert "5/7 passed" in result.stdout
 
 
 def test_did_provision_twice_prints_same_did(

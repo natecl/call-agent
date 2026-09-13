@@ -14,8 +14,10 @@ from .domain import (
     CLOSING_LINE,
     CallEvent,
     LiveClosedEvent,
+    LiveDelegationEvent,
     LiveErrorEvent,
     LiveInputTranscriptEvent,
+    LiveNoteEvent,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
     LiveSessionSpec,
@@ -108,6 +110,14 @@ class GptLive(Protocol):
 
     async def append_audio(self, payload_b64: str) -> None: ...
 
+    async def reply_delegation(
+        self, delegation_id: str, thinking: str, commentary: str
+    ) -> None: ...
+
+    async def nudge(
+        self, instructions: str, commentary: str, event_id: str
+    ) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -129,6 +139,7 @@ def speak_first_frames(line: str) -> tuple[dict[str, Any], dict[str, Any]]:
     return (
         {
             "type": "session.instructions.append",
+            "event_id": "speak-first-1",
             "delegation_id": None,
             "content": (
                 f"Speak first, then listen. Your first spoken line is: {line}"
@@ -136,6 +147,7 @@ def speak_first_frames(line: str) -> tuple[dict[str, Any], dict[str, Any]]:
         },
         {
             "type": "session.commentary.append",
+            "event_id": "speak-first-2",
             "delegation_id": None,
             "content": line,
         },
@@ -165,8 +177,14 @@ def parse_event(raw: str) -> CallEvent | None:
     if event_type == "session.closed":
         _SessionClosed.model_validate(decoded)
         return LiveClosedEvent()
-    if event_type == "session.usage.updated":
-        return None
+    if event_type == "session.delegation.created":
+        delegation = decoded.get("delegation")
+        if not isinstance(delegation, dict):
+            raise ValueError("GPT-Live delegation has no object")
+        delegation_id = delegation.get("id")
+        if not isinstance(delegation_id, str) or not delegation_id.strip():
+            raise ValueError("GPT-Live delegation has no id")
+        return LiveDelegationEvent(delegation_id=delegation_id)
     if (
         event_type in {"session.update", "session.created"}
         or event_type.startswith("conversation.item.")
@@ -174,7 +192,19 @@ def parse_event(raw: str) -> CallEvent | None:
         or event_type.startswith("input_audio_buffer.")
     ):
         raise ValueError(f"Realtime event is invalid for GPT-Live: {event_type}")
-    return None
+    usage_seconds = None
+    if event_type == "session.usage.updated":
+        usage = decoded.get("usage")
+        if isinstance(usage, dict) and isinstance(usage.get("seconds"), (int, float)):
+            usage_seconds = float(usage["seconds"])
+    client_event_id = decoded.get("client_event_id")
+    return LiveNoteEvent(
+        event_type=event_type,
+        client_event_id=(
+            client_event_id if isinstance(client_event_id, str) else None
+        ),
+        usage_seconds=usage_seconds,
+    )
 
 
 Submit = Callable[[CallEvent], None]
@@ -238,6 +268,46 @@ class LiveGptLive:
             }
         )
 
+    async def reply_delegation(
+        self, delegation_id: str, thinking: str, commentary: str
+    ) -> None:
+        await self._send(
+            {
+                "type": "session.thinking.append",
+                "event_id": f"delegation-{delegation_id}-thinking",
+                "delegation_id": delegation_id,
+                "content": thinking,
+            }
+        )
+        await self._send(
+            {
+                "type": "session.commentary.append",
+                "event_id": f"delegation-{delegation_id}-commentary",
+                "delegation_id": delegation_id,
+                "content": commentary,
+            }
+        )
+
+    async def nudge(
+        self, instructions: str, commentary: str, event_id: str
+    ) -> None:
+        await self._send(
+            {
+                "type": "session.instructions.append",
+                "event_id": f"{event_id}-instructions",
+                "delegation_id": None,
+                "content": instructions,
+            }
+        )
+        await self._send(
+            {
+                "type": "session.commentary.append",
+                "event_id": f"{event_id}-commentary",
+                "delegation_id": None,
+                "content": commentary,
+            }
+        )
+
     async def close(self) -> None:
         if self._connection is None or self._closing:
             return
@@ -294,6 +364,9 @@ class StubScenario(BaseModel):
     audio_chunks_after_closing_line: int = Field(default=2, ge=0)
     decline_booking: bool = False
     one_shot_booking: bool = False
+    stall_after_time_turn: bool = False
+    never_resumes: bool = False
+    media_drops_before_hangup: bool = False
 
 
 class StubGptLive:
@@ -309,6 +382,9 @@ class StubGptLive:
         self._closed = False
         self.appended_audio: list[str] = []
         self.spoken_lines: list[str] = []
+        self.replied_delegations: list[tuple[str, str, str]] = []
+        self.nudges: list[tuple[str, str, str]] = []
+        self._resume_booking: Callable[[], None] | None = None
 
     async def start(self, spec: LiveSessionSpec) -> None:
         self._write_json(
@@ -346,12 +422,32 @@ class StubGptLive:
     async def append_audio(self, payload_b64: str) -> None:
         self.appended_audio.append(payload_b64)
 
+    async def reply_delegation(
+        self, delegation_id: str, thinking: str, commentary: str
+    ) -> None:
+        self.replied_delegations.append((delegation_id, thinking, commentary))
+        self._resume_if_waiting()
+
+    async def nudge(
+        self, instructions: str, commentary: str, event_id: str
+    ) -> None:
+        self.nudges.append((instructions, commentary, event_id))
+        self._resume_if_waiting()
+
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
         self._emit_audio(1)
         self._submit(self._parse({"type": "session.closed"}))
+
+    def _resume_if_waiting(self) -> None:
+        if self._scenario.never_resumes:
+            return
+        resume = self._resume_booking
+        self._resume_booking = None
+        if resume is not None:
+            resume()
 
     def _play_booking(self, first_line: str, facts: str) -> None:
         opening = (
@@ -372,6 +468,26 @@ class StubGptLive:
         self._emit_input(f"A table for that party size is fine. {facts}")
         self._emit_output(f"Does {facts} work for the time?")
         self._emit_input(f"{facts} works for us.")
+        if self._scenario.never_resumes:
+            return
+        if self._scenario.stall_after_time_turn:
+            self._resume_booking = lambda: self._finish_booking(facts)
+            return
+        self._submit(
+            self._parse(
+                {
+                    "type": "session.delegation.created",
+                    "delegation": {
+                        "id": "stub-delegation-0001",
+                        "type": "delegation",
+                        "target": "client",
+                    },
+                }
+            )
+        )
+        self._resume_booking = lambda: self._finish_booking(facts)
+
+    def _finish_booking(self, facts: str) -> None:
         self._emit_output(f"Any issue with the constraints in {facts}?")
         if self._scenario.decline_booking:
             self._emit_input(

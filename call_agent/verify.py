@@ -61,6 +61,7 @@ CheckName = Literal[
     "clean_hangup",
     "result_artifact",
     "multi_turn_booking",
+    "keeps_talking",
 ]
 
 
@@ -370,11 +371,17 @@ def verify_book(
 ) -> VerifyReport:
     verify_input = inp or BookVerifyInput()
     active_workspace = workspace or _temporary_workspace("verify-book-")
+    stall_s = 6.0
+    if scenario is not None and (
+        scenario.never_resumes or scenario.stall_after_time_turn
+    ):
+        stall_s = 0.2
     settings = Settings(
         _env_file=None,
         call_agent_db_path=active_workspace.db_path,
         call_agent_artifacts_dir=active_workspace.artifacts_dir,
         retain_call_artifacts=True,
+        live_stall_s=stall_s,
     )
     ledger = Ledger(active_workspace.db_path)
     telnyx = StubTelnyxHttp()
@@ -630,6 +637,54 @@ def verify_book(
         ),
     )
 
+    delegation_sequences = [
+        int(event["seq"])
+        for event in events
+        if event.get("kind") == "live_delegation"
+    ]
+    reply_sequences = [
+        int(row["seq"])
+        for row in event_rows
+        if row.get("effect") == "reply_delegation"
+    ]
+    output_after_reply = bool(
+        reply_sequences
+        and any(
+            event.get("kind") == "live_output_transcript"
+            and int(event["seq"]) > reply_sequences[0]
+            for event in events
+        )
+    )
+    escalate_nudges = any(
+        row.get("effect") == "nudge_live" and row.get("escalate") is True
+        for row in event_rows
+    )
+    keeps_passed = (
+        bool(delegation_sequences)
+        and bool(reply_sequences)
+        and delegation_sequences[0] < reply_sequences[0]
+        and output_after_reply
+        and not escalate_nudges
+        and hangup_path == "trail"
+        and artifact_result.get("status") in {"booked", "declined"}
+    )
+    keeps_check = VerifyCheck(
+        name="keeps_talking",
+        passed=keeps_passed,
+        detail=(
+            f"delegation_seq="
+            f"{delegation_sequences[0] if delegation_sequences else None} "
+            f"reply_seq="
+            f"{reply_sequences[0] if reply_sequences else None} "
+            f"output_after_reply={output_after_reply} "
+            f"escalate_nudges={escalate_nudges} "
+            f"hangup_path={hangup_path} "
+            f"status={artifact_result.get('status')}, "
+            "expected live_delegation then reply_delegation then more "
+            "agent speech, hangup trail, status booked|declined"
+        ),
+    )
+
     checks = (
         did_check,
         dial_check,
@@ -637,6 +692,7 @@ def verify_book(
         clean_hangup_check,
         result_check,
         multi_check,
+        keeps_check,
     )
     return VerifyReport(
         passed=all(check.passed for check in checks),

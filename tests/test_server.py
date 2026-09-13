@@ -24,6 +24,7 @@ from call_agent.domain import (
     FirstName,
     LiveStarting,
     MediaStartEvent,
+    MediaStopEvent,
     MediaStreaming,
     Mode,
     Question,
@@ -156,7 +157,45 @@ def test_media_stream_opens_live_when_connected_precedes_start(
     }
 
 
-def test_media_stream_accepts_8k_l16_start_and_opens_live_at_16k(
+def test_media_stream_disconnect_without_stop_submits_media_stop(
+    answered_handle: CallHandle,
+) -> None:
+    client = TestClient(app)
+    with client.websocket_connect("/media-stream") as websocket:
+        websocket.send_text(
+            json.dumps({"event": "connected", "version": "1.0.0"})
+        )
+        websocket.send_text(
+            json.dumps(
+                {
+                    "event": "start",
+                    "sequence_number": "1",
+                    "stream_id": "stream-1",
+                    "start": {
+                        "call_control_id": str(CALL_CONTROL_ID),
+                        "media_format": {
+                            "encoding": "L16",
+                            "sample_rate": 16000,
+                            "channels": 1,
+                        },
+                    },
+                }
+            )
+        )
+
+    start_event = answered_handle.queue.get_nowait()
+    stop_event = answered_handle.queue.get_nowait()
+
+    assert start_event == MediaStartEvent(
+        stream_id=StreamId("stream-1"),
+        call_control_id=CALL_CONTROL_ID,
+        codec=Codec.L16,
+        sample_rate=16000,
+    )
+    assert stop_event == MediaStopEvent(stream_id=StreamId("stream-1"))
+    with pytest.raises(asyncio.QueueEmpty):
+        answered_handle.queue.get_nowait()
+
     answered_handle: CallHandle,
 ) -> None:
     client = TestClient(app)

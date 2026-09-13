@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal, Protocol, TypeAlias
 
 import httpx
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from .domain import (
@@ -365,10 +366,14 @@ class StubTelnyxMedia:
         submit: Submit = _ignore_event,
         sample_rate: SampleRate = 16000,
         echo_marks: bool = True,
+        drop_after_plays: int | None = None,
     ) -> None:
         self._submit = submit
         self._sample_rate = sample_rate
         self._echo_marks = echo_marks
+        self._drop_after_plays = drop_after_plays
+        self._plays = 0
+        self._dropped = False
 
     def begin(self) -> None:
         self._submit(
@@ -415,7 +420,25 @@ class StubTelnyxMedia:
         )
 
     async def play(self, payload_b64: str) -> None:
-        return None
+        del payload_b64
+        self._plays += 1
+        if (
+            self._drop_after_plays is not None
+            and self._plays >= self._drop_after_plays
+        ):
+            if not self._dropped:
+                self._dropped = True
+                self._submit(
+                    parse_webhook(
+                        StubTelnyxHttp._webhook(
+                            "webhook-hangup-media-drop-0001",
+                            "call.hangup",
+                            hangup_cause="normal_clearing",
+                            hangup_source="callee",
+                        )
+                    )
+                )
+            raise WebSocketDisconnect(code=1006)
 
     async def mark(self, name: str) -> None:
         if not self._echo_marks:

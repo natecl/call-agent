@@ -24,6 +24,7 @@ def test_verify_book_proves_stub_booking_from_artifacts() -> None:
         "clean_hangup",
         "result_artifact",
         "multi_turn_booking",
+        "keeps_talking",
     ]
     assert report.passed is True
     assert report.call_control_id == "stub-call-0001"
@@ -145,3 +146,42 @@ def test_verify_book_passes_on_clear_decline(
     result = json.loads((run_dir / "result.json").read_text())
     assert result["status"] == "declined"
     assert result["answer_text"] is None
+    assert report.checks[6].name == "keeps_talking"
+    assert report.checks[6].passed is True
+
+
+def test_verify_book_fails_never_resumes_keeps_talking(
+    workspace: SimpleNamespace,
+) -> None:
+    report = verify_book(
+        workspace=_workspace(workspace),
+        scenario=StubScenario(never_resumes=True),
+    )
+
+    assert report.passed is False
+    keeps = report.checks[6]
+    assert keeps.name == "keeps_talking"
+    assert keeps.passed is False
+    assert "hangup_path=stall" in keeps.detail
+    run_dir = workspace.artifacts_dir / report.call_control_id
+    call_report = json.loads((run_dir / "call_report.json").read_text())
+    assert call_report["hangup"]["path"] == "stall"
+
+
+def test_verify_book_fails_media_drop_clean_hangup_and_keeps_result(
+    workspace: SimpleNamespace,
+) -> None:
+    report = verify_book(
+        workspace=_workspace(workspace),
+        scenario=StubScenario(media_drops_before_hangup=True),
+    )
+
+    assert report.passed is False
+    assert report.checks[3].name == "clean_hangup"
+    assert report.checks[3].passed is False
+    assert "hangup_path=far_party" in report.checks[3].detail
+    assert report.checks[4].name == "result_artifact"
+    assert report.checks[4].passed is True
+    run_dir = workspace.artifacts_dir / report.call_control_id
+    assert (run_dir / "result.json").is_file()
+    assert (run_dir / "call_report.json").is_file()
