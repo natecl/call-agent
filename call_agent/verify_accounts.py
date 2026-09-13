@@ -94,6 +94,7 @@ def _workspace_env(root: Path, secret: str) -> Iterator[None]:
         "CALL_AGENT_DB_PATH": str(root / "ledger.sqlite3"),
         "CALL_AGENT_ARTIFACTS_DIR": str(artifacts),
         "ACCOUNT_SYNC_SECRET": secret,
+        "LINQ_FROM_E164": "+12138653024",
         "QUICK_ASK_LIVE": "0",
     }
     previous = {key: os.environ.get(key) for key in values}
@@ -241,17 +242,19 @@ def _dashboard_get() -> AccountsCheck:
         and name.get("first_name") == "Nathan"
         and name.get("full_name") == "Nathan Tester"
         and payload.get("threads") == []
+        and payload.get("bot_number") == "+12138653024"
         and unknown.status_code == 200
         and unknown_payload.get("user") is None
         and unknown_payload.get("threads") == []
         and unknown_payload.get("calls") == []
+        and unknown_payload.get("bot_number") == "+12138653024"
     )
     return AccountsCheck(
         name="dashboard_get",
         passed=passed,
         detail=(
             f"unsigned={denied.status_code} signed={signed.status_code} "
-            f"name={name.get('first_name')}"
+            f"name={name.get('first_name')} bot_number={payload.get('bot_number')}"
         ),
     )
 

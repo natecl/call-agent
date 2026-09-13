@@ -328,19 +328,32 @@ def validate_linq_live_token(api_token: str | None) -> None:
         raise LinqConfigError("live Linq requires LINQ_API_TOKEN")
 
 
-def linq_from(settings: Settings) -> E164:
-    raw = settings.linq_from_e164
+def shared_bot_e164(settings: Settings) -> E164 | None:
+    """Sitewide Treena iMessage bot. One number for everyone.
+
+    Driven by `LINQ_FROM_E164`. Not a unique Treena DID per user and not
+    the Telnyx caller ID (`users.from_did`).
+    """
+    raw = (settings.linq_from_e164 or "").strip()
     if not raw:
-        raise LinqConfigError("live Linq send requires LINQ_FROM_E164")
+        return None
     return E164(raw)
+
+
+def linq_from(settings: Settings) -> E164:
+    bot = shared_bot_e164(settings)
+    if bot is None:
+        raise LinqConfigError("live Linq send requires LINQ_FROM_E164")
+    return bot
 
 
 STUB_FROM_DID = E164("+15555550100")
 
 
 def reply_from_did(settings: Settings) -> E164:
-    if settings.linq_from_e164:
-        return E164(settings.linq_from_e164)
+    bot = shared_bot_e164(settings)
+    if bot is not None:
+        return bot
     if settings.linq_api_token:
         raise LinqConfigError("live Linq send requires LINQ_FROM_E164")
     return STUB_FROM_DID

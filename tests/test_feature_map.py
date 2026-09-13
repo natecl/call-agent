@@ -76,6 +76,7 @@ def test_feature_map_lists_account_rows() -> None:
     required_rows = (
         "| `users` | shipped |",
         "| `users.from_did` | shipped |",
+        "| `shared Treena iMessage bot` | shipped |",
         "| `open_accounts` | shipped |",
         "| `account upsert` | shipped |",
         "| `account get` | shipped |",
@@ -215,6 +216,9 @@ def test_feature_map_records_cap_locks() -> None:
     assert "TRE-22 unfreeze ordered" in INVENTORY
     assert "Dashboard UI stays on Pages" in INVENTORY
     assert "Intended Fly route" in INVENTORY
+    assert "shared Treena iMessage bot" in INVENTORY
+    assert "LINQ_FROM_E164" in INVENTORY
+    assert "+12138653024" in INVENTORY
     assert "missing_public_key" in INVENTORY
     assert "bad_signature" in INVENTORY
     assert "website `/start`" in INVENTORY

@@ -342,6 +342,31 @@ def test_upsert_merges_from_did_when_omitted(tmp_path: Path) -> None:
     assert second.record.stripe_customer_id == "cus_123"
 
 
+def test_two_accounts_can_share_the_same_from_did(tmp_path: Path) -> None:
+    store = Accounts(tmp_path / "ledger.sqlite3")
+    shared = E164("+15555550177")
+    first = store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+            from_did=shared,
+        )
+    )
+    second = store.upsert(
+        AccountWrite(
+            phone=E164("+17272701288"),
+            first_name="Cap",
+            user_id=UserId("acctcap"),
+            from_did=shared,
+        )
+    )
+
+    assert first.record.from_did == shared
+    assert second.record.from_did == shared
+    assert first.record.phone != second.record.phone
+
+
 def test_from_did_equal_to_phone_fails_loud(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not the user's own phone"):
         AccountWrite(
@@ -644,6 +669,7 @@ def test_accounts_dashboard_empty_for_unknown(
     monkeypatch.setenv("ACCOUNT_SYNC_SECRET", secret)
     monkeypatch.setenv("CALL_AGENT_DB_PATH", str(tmp_path / "ledger.sqlite3"))
     monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("LINQ_FROM_E164", "")
     phone = "+14155552671"
     signed = dashboard_signature_payload(phone)
     with TestClient(fastapi_app) as client:
@@ -677,6 +703,7 @@ def test_accounts_dashboard_empty_for_unknown(
     assert payload["user"] is None
     assert payload["threads"] == []
     assert payload["calls"] == []
+    assert payload["bot_number"] is None
 
 
 def test_accounts_dashboard_includes_retained_report(
@@ -821,6 +848,35 @@ def test_accounts_dashboard_includes_retained_report(
     assert empty["user"] is None
     assert empty["threads"] == []
     assert empty["calls"] == []
+    assert empty["bot_number"] is None
+
+
+def test_accounts_dashboard_includes_shared_bot_number(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sync-secret"
+    monkeypatch.setenv("ACCOUNT_SYNC_SECRET", secret)
+    monkeypatch.setenv("CALL_AGENT_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("LINQ_FROM_E164", "+12138653024")
+    phone = "+14155552671"
+    signed = dashboard_signature_payload(phone)
+    with TestClient(fastapi_app) as client:
+        response = client.get(
+            "/accounts/dashboard",
+            params={"phone": phone},
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(
+                    secret, signed
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["user"] is None
+    assert payload["bot_number"] == "+12138653024"
 
 
 def test_cli_account_upsert_omitted_name_preserves(

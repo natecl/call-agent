@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     telnyx_public_key: str | None = None
     telnyx_stream_codec: str = "L16"
     linq_api_token: str | None = None
+    # Shared Treena iMessage bot (Cap). One number for everyone.
+    # Sandbox +12138653024 until ~Sep 18. Not a per-user DID.
     linq_from_e164: str | None = None
     linq_webhook_signing_secret: str | None = None
     linq_webhook_url: str | None = None

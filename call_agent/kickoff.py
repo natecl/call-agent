@@ -155,8 +155,9 @@ _AFFIRM_RE = re.compile(
 class KickoffParsed:
     """Confirmed book/ask ready to dial.
 
-    `from_did` is the Telnyx caller ID from the users row. Not
-    `KickoffSession.from_did`, which is the Linq iMessage line.
+    `from_did` is the Telnyx caller ID from `users.from_did`. Not
+    `KickoffSession.from_did`, which is the shared Linq iMessage bot
+    (`LINQ_FROM_E164`).
     """
 
     request: BookRequest | QuickAskRequest

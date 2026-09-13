@@ -18,6 +18,7 @@ from call_agent.linq import (
     kickoff_from_settings,
     parse_inbound,
     serialize_outbound,
+    shared_bot_e164,
     sign_linq_webhook,
     verify_linq_signature,
 )
@@ -199,6 +200,16 @@ def test_live_constructor_fails_without_token() -> None:
         LiveLinqHttp("")
 
 
+def test_shared_bot_e164_is_linq_from_and_not_per_user(
+    settings: Settings,
+) -> None:
+    assert shared_bot_e164(settings) is None
+    filled = settings.model_copy(update={"linq_from_e164": "+12138653024"})
+    assert shared_bot_e164(filled) == E164("+12138653024")
+    other = filled.model_copy()
+    assert shared_bot_e164(other) == shared_bot_e164(filled)
+
+
 def test_kickoff_from_settings_requires_from(settings: Settings) -> None:
     with pytest.raises(LinqConfigError, match="LINQ_FROM_E164"):
         kickoff_from_settings(settings, E164("+14155552671"), "hello")
@@ -206,6 +217,7 @@ def test_kickoff_from_settings_requires_from(settings: Settings) -> None:
     message = kickoff_from_settings(filled, E164("+17272701288"), "hello")
     assert message.from_did == "+12138653024"
     assert serialize_outbound(message)["from"] == "+12138653024"
+    assert shared_bot_e164(filled) == E164("+12138653024")
 
 
 def test_live_send_posts_chats_parts_shape() -> None:

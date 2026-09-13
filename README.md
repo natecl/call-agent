@@ -1,6 +1,6 @@
 # call-agent
 
-A phone agent that calls a business on your behalf, asks one quick question, and writes down the answer. You paste an E.164 number, pick `hours`, `stock`, or `aisle`, and give your first name. The agent dials from a Telnyx number that belongs to you, opens with "I'm calling on behalf of Nathan", gets the answer, hangs up, and leaves a result, a transcript, and the call audio on disk.
+A phone agent that calls a business on your behalf, asks one quick question, and writes down the answer. You paste an E.164 number, pick `hours`, `stock`, or `aisle`, and give your first name. The agent dials from a Telnyx number (`users.from_did`), opens with "I'm calling on behalf of Nathan", gets the answer, hangs up, and leaves a result, a transcript, and the call audio on disk. Closed-alpha testers text one shared Treena iMessage bot (`LINQ_FROM_E164`); each account stores the user's own phone.
 
 The stack is Python 3.12, Pydantic v2, Typer, FastAPI (two routes), Telnyx Call Control with media streaming, an app-owned GPT-Live bridge that follows [Telnyx's outbound GPT-Live recipe](https://telnyx.com/resources/outbound-ai-calls-python-openai-live), and a DID ledger that defaults to SQLite. Set `NEON_DATABASE_URL` to use Neon. Set the four `R2_*` vars to put finished artifacts on R2. The design and its rationale are in [docs/design.md](docs/design.md). How V1 prompts GPT-Live, and the OpenAI page that is the source of truth for it, are in [docs/gpt-live-prompting.md](docs/gpt-live-prompting.md). What this tree implements today is listed in [docs/FEATURE_MAP.md](docs/FEATURE_MAP.md). The standing verification map is [`.cursor/skills/verify-call-agent/features/`](.cursor/skills/verify-call-agent/features/README.md). Both maps update when a lever ships.
 
@@ -24,7 +24,7 @@ fly secrets set ACCOUNT_SYNC_SECRET=...
 fly deploy
 ```
 
-`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan --from-did +1...` until the website PR POSTs sync. `from_did` is the assigned Treena number, not the tester's iMessage phone. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
+`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. `LINQ_FROM_E164` is the one shared Treena iMessage bot (Cap/ops sandbox `+12138653024` until ~Sep 18). HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan --from-did +1...` until the website PR POSTs sync. `--phone` is the user's own number. `from_did` is the Telnyx caller ID, not the shared bot. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
 
 Then point the Worker at the Fly origin (no path) and deploy the Worker:
 

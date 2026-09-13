@@ -21,6 +21,12 @@ from .persistence import NeonLedgerConfig, PersistenceConfigError, SqliteLedgerC
 
 ACCOUNT_SYNC_SIGNATURE_HEADER = "x-account-sync-signature"
 
+# Cap account model: `phone` is the user's own number (unique kickoff
+# key). The Treena iMessage bot is shared sitewide (`LINQ_FROM_E164`),
+# not a unique DID per user. `from_did` is the Telnyx caller ID: nullable,
+# not unique. Kickoff still requires it until Cap names a shared Telnyx
+# from-number. Do not store the shared bot on this column.
+
 USERS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
@@ -63,8 +69,8 @@ USERS_SELECT = """
 def _reject_from_did_equal_to_phone(phone: E164, from_did: E164 | None) -> None:
     if from_did is not None and str(from_did) == str(phone):
         raise ValueError(
-            "from_did must be the assigned Treena number, "
-            "not the user's own phone"
+            "from_did is the Telnyx caller ID, not the user's own phone "
+            "and not the shared iMessage bot"
         )
 
 

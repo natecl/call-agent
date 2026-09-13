@@ -32,4 +32,4 @@ Preconditions:
 - A leftover ledger from a previous run makes the first provision return a number that is not `+15555550100`. Use a fresh `CALL_AGENT_DB_PATH`.
 - Stub numbers are assigned in order of first provision, not by user name.
 - Live provisioning orders a real number and costs money. This skill never runs it.
-- Confirm/dial never calls `Ledger.provision`. `did provision` is an ops verb, not a live-call prerequisite.
+- Confirm/dial never calls `Ledger.provision`. `did provision` is an ops verb, not a live-call prerequisite. Cap account model does not assign a unique Treena iMessage DID per user. Live from-DID is `users.from_did` or CLI `--from-did`.

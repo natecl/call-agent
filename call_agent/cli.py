@@ -479,8 +479,8 @@ def _resolve_from_did(
         return STUB_FROM_DID
     raise ValueError(
         f"no from-DID for user {user_id}: pass --from-did or assign one with "
-        "`call-agent account upsert --phone <iMessage> --from-did "
-        "<Treena DID>`. Live calls never order a number."
+        "`call-agent account upsert --phone <user phone> --from-did "
+        "<Telnyx from>`. Live calls never order a number."
     )
 
 

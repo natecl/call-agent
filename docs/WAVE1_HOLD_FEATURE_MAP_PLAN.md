@@ -26,6 +26,8 @@ This wave is docs + maps + verifiers. No Fly deploy. No L1 redial. No wave 2. No
 - Website writer live (TRE-20) and dashboard GO on Pages.
 - Live book redial (HOLD REDIAL).
 - Minutes ledger (not shipped).
+- Telnyx caller ID: kickoff still requires per-account `users.from_did` (not unique). Cap said no per-user Treena DID. Do not invent a shared Telnyx from-number. The Linq sandbox bot `+12138653024` is the iMessage bot, not Telnyx `from`.
+- Stripe live flip (Cap/ops blocked on Nathan live keys). Not this climb.
 
 ## Out of this wave
 

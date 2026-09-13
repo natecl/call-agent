@@ -1,18 +1,19 @@
 # Accounts (`users` row)
 
-The `users` table is the runtime account record. Kickoff looks it up by inbound phone. Stripe stays checkout and billing. call-agent-web POSTs a signed body to Fly `POST /accounts/sync`; Fly is the sole writer. Those Fly routes (`POST /accounts/sync` and `GET /accounts/dashboard`) are intended, not accidental. Dashboard UI stays on Pages (web). CLI `account upsert --from-did` seeds a row, including the assigned Treena number, until that website PR lands. Name is collected on website `/start` and that copy is in settings after signup. Kickoff reads `users.first_name`. Never collected over iMessage. Display name is `first_name` + `prefs.full_name`. There is no `users.name` column. Signed `GET /accounts/dashboard` packages that row plus linq artifacts so the website does not open Neon or R2. Prove with `call-agent verify-accounts`. This skill never sets `NEON_DATABASE_URL` or `ACCOUNT_SYNC_SECRET`.
+The `users` table is the runtime account record. Cap model: one shared Treena iMessage bot (`LINQ_FROM_E164`); each account stores the user's own phone. Kickoff looks it up by inbound phone. Stripe stays checkout and billing. call-agent-web POSTs a signed body to Fly `POST /accounts/sync`; Fly is the sole writer. Those Fly routes (`POST /accounts/sync` and `GET /accounts/dashboard`) are intended, not accidental. Dashboard UI stays on Pages (web). CLI `account upsert --from-did` seeds a row, including the Telnyx caller ID, until that website PR lands. Name is collected on website `/start` and that copy is in settings after signup. Kickoff reads `users.first_name`. Never collected over iMessage. Display name is `first_name` + `prefs.full_name`. There is no `users.name` column. Signed `GET /accounts/dashboard` packages that row, the sitewide `bot_number`, plus linq artifacts so the website does not open Neon or R2. Prove with `call-agent verify-accounts`. This skill never sets `NEON_DATABASE_URL` or `ACCOUNT_SYNC_SECRET`.
 
 ## Sub-features
 
-- `users-row` one `users` row per phone: `first_name`, phone, assigned Treena `from_did`, minutes, retain, prefs, Stripe ids. No `users.name` column.
-- `from-did` nullable E.164 Telnyx caller ID. Rejected when equal to `phone`. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables.
+- `users-row` one `users` row per phone: `first_name`, the user's own phone, Telnyx `from_did` (not unique), minutes, retain, prefs, Stripe ids. No `users.name` column.
+- `from-did` nullable E.164 Telnyx caller ID. Not unique. Rejected when equal to `phone`. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables. Not the shared iMessage bot.
+- `shared-bot` `LINQ_FROM_E164` is the one Text Treena number (sandbox `+12138653024` until ~Sep 18). Dashboard `bot_number` is that key.
 - `omit-preserve` omitted `first_name`, `prefs`, `minutes_used`, and `from_did` keep the existing values. Explicit `minutes_used` `0` writes 0.
-- `account-upsert` CLI seed without HMAC. `--from-did` sets the Treena number. Omitted `--from-did` and `--name` keep existing values.
+- `account-upsert` CLI seed without HMAC. `--phone` is the user's number. `--from-did` sets the Telnyx from-number. Omitted `--from-did` and `--name` keep existing values.
 - `account-get` read-back of that phone, including `from_did`.
 - `account-list` every row (`USER PHONE NAME FROM_DID MINUTES RETAIN`).
 - `accounts-sync` HMAC `POST /accounts/sync` upserts; Fly is the only writer. Omitted name/prefs/`minutes_used`/`from_did` keep seeded values.
-- `accounts-dashboard` HMAC `GET /accounts/dashboard?phone=` packages `users` + linq thread index + retained `call_report`/transcript. Empty lists when unknown or wiped.
-- `kickoff-lookup` inbound phone → `users.first_name`, `users.user_id`, and `users.from_did` for the call.
+- `accounts-dashboard` HMAC `GET /accounts/dashboard?phone=` packages `users` + `bot_number` + linq thread index + retained `call_report`/transcript. Empty lists when unknown or wiped.
+- `kickoff-lookup` inbound phone → `users.first_name`, `users.user_id`, and `users.from_did` for the Telnyx call.
 
 ## How to get to it (user POV)
 
@@ -20,7 +21,7 @@ The `users` table is the runtime account record. Kickoff looks it up by inbound 
 - Run `call-agent account get --phone +14155552671`.
 - Run `call-agent account list`.
 - Website checkout/settings POST to Fly `/accounts/sync` (intended Fly route). Until the writer is live, CLI seed is the L1 path. Name is collected on website `/start` and copied into settings after signup. The website is not expected to send `from_did` this climb. Stripe events without a name must omit `first_name`.
-- Website dashboard UI stays on Pages. Fly `GET /accounts/dashboard?phone=` with the same HMAC family is the packaged read. Web must not open Neon/R2.
+- Website dashboard UI stays on Pages. Fly `GET /accounts/dashboard?phone=` with the same HMAC family is the packaged read, including `bot_number`. Web must not open Neon/R2.
 
 ## Driving it with call-agent
 
@@ -39,9 +40,9 @@ Preconditions:
 
 - SQLite `users` is the same file as `dids`. On Fly, set `NEON_DATABASE_URL` or the row dies on redeploy.
 - `account upsert` does not need `ACCOUNT_SYNC_SECRET`. The HTTP routes do.
-- Kickoff `BookRequest.user_id` is `users.user_id`. The outbound Telnyx caller ID is `users.from_did`. Confirm/dial never calls `ledger.provision`.
-- `from_did` must not equal `phone`. Personal iMessage number is not the Treena from-number.
+- Kickoff `BookRequest.user_id` is `users.user_id`. The outbound Telnyx caller ID is `users.from_did`. Confirm/dial never calls `ledger.provision`. The iMessage bot is `LINQ_FROM_E164`, not `from_did`.
+- `from_did` must not equal `phone`. Personal number is not the Telnyx from-number. Two accounts may share one `from_did`.
 - Omitted `--from-did` / `--name` (and omitted `from_did` / `first_name` / `prefs` / `minutes_used` on `/accounts/sync`) keep existing values so Stripe sync cannot wipe an ops-seeded DID, name, or minutes count. Explicit `minutes_used` `0` is a write.
-- Dashboard HMAC signs the E.164 `phone` query value, not the URL-encoded query string. Unsigned GET is 401. Unknown phone returns empty lists.
+- Dashboard HMAC signs the E.164 `phone` query value, not the URL-encoded query string. Unsigned GET is 401. Unknown phone returns empty lists. `bot_number` still comes from `LINQ_FROM_E164`.
 - Do not collect a name over iMessage. Name is collected on website `/start` and is in settings after signup. Do not set `LINQ_KICKOFF_CALLER` or `LINQ_KICKOFF_USER_ID`.
 - This skill never POSTs `/accounts/sync` live, never GETs `/accounts/dashboard` live, and never deploys Fly.

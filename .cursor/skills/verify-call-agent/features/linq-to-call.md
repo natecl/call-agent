@@ -12,7 +12,7 @@ Closed alpha testers text Treena on iMessage. A natural book ask on that chat co
 - `parse-fail` A phone follow-up that is not a number, or a confirm follow-up that is not an affirmative, texts a plain intake line. No `Call failed:` / `Call not placed:` prefix. No dial.
 - `account-lookup` Inbound phone must match a `users` row. The call uses that row's first name, `user_id`, and `from_did`.
 - `account-gate` No row, a row with no first name, or a row with no `from_did` texts a plain line. Never `Call failed: missing caller name`. Never `ledger.provision`.
-- `from-did` Confirm/dial uses `users.from_did` as `DialSpec.from_did`. `run_call` takes a required `from_did` kwarg. `KickoffSession.from_did` stays the Linq iMessage line.
+- `from-did` Confirm/dial uses `users.from_did` as `DialSpec.from_did`. `run_call` takes a required `from_did` kwarg. `KickoffSession.from_did` stays the shared Linq iMessage bot (`LINQ_FROM_E164`).
 - `no-number-order` Confirm/dial never calls `ledger.provision`, `search_and_order_number`, or `POST /v2/number_orders`.
 - `echo-else` Any other inbound text stays on `Received: {text}`.
 - `async-b` HMAC verify, parse, event-id dedupe, then 202 `{ok, kicked_off, event_id}` on the approve follow-up. `BackgroundTasks` runs `run_kickoff` in this process.
@@ -22,7 +22,7 @@ Closed alpha testers text Treena on iMessage. A natural book ask on that chat co
 
 ## How to get to it (user POV)
 
-- Have an account (website checkout, or `call-agent account upsert --phone <your iMessage> --name Nathan --from-did <Treena DID>`) with a first name and assigned Treena number.
+- Have an account (website checkout, or `call-agent account upsert --phone <your iMessage> --name Nathan --from-did <Telnyx from>`) with a first name and Telnyx from-number. The number people text is the shared bot `LINQ_FROM_E164`, not a per-user DID.
 - Text Treena `can you make a reservation with this restaurant at 7:30 for a party of two?`.
 - If she asks for time (or party and time), reply with those before the restaurant number.
 - Reply with the restaurant phone number when she asks.
@@ -46,8 +46,8 @@ Preconditions:
 - `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` on Fly must both be `https://hidden-beacon-080.fly.dev`. The Worker does not terminate media.
 - One Fly machine: `BOOK` is process-local. Do not scale this app until that is no longer true.
 - Confirm/dial never provisions a DID. A missing `users.from_did` texts `NO_FROM_DID_TEXT` and does not buy a number.
-- Live kickoff needs a `users` row on Fly's Neon for the tester's iMessage phone, with `from_did` set. Seed with `account upsert --from-did` until call-agent-web POSTs `/accounts/sync`.
-- `KickoffSession.from_did` is the Linq iMessage line. Telnyx caller ID is `KickoffParsed.from_did` / `run_call(from_did=...)`.
+- Live kickoff needs a `users` row on Fly's Neon for the tester's iMessage phone, with Telnyx `from_did` set. Seed with `account upsert --from-did` until call-agent-web POSTs `/accounts/sync`.
+- `KickoffSession.from_did` is the shared Linq iMessage bot (`LINQ_FROM_E164`). Telnyx caller ID is `KickoffParsed.from_did` / `run_call(from_did=...)`.
 - Mid-call iMessage is not shipped. Do not treat a missing pause/resume as a failed L1 kickoff.
 - Pending collect and confirm live at `linq/pending/<chat_id>.json` under artifacts. It is not the live-call pause/resume seam.
 - Do not collect a name in iMessage. Name is collected on website `/start` and is in settings after signup. Do not set `LINQ_KICKOFF_CALLER` or `LINQ_KICKOFF_USER_ID`.
