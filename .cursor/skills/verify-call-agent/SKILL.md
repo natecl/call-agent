@@ -1,11 +1,11 @@
 ---
 name: verify-call-agent
-description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, book, verify-book, verify-message, verify-linq-call, verify-webhooks, or verify-persistence still work. Update features/ in the same change that ships or changes a verb.
+description: Drive the call-agent CLI in stub mode the way a user does and keep the proof. Use after any change under call_agent/, workers/webhooks/, or tests/, before opening or updating a PR, or when asked to prove that did provision, quick-ask, verify-quick-ask, book, verify-book, verify-message, verify-linq-call, verify-webhooks, verify-persistence, or verify-accounts still work. Update features/ in the same change that ships or changes a verb.
 ---
 
 # Verify call-agent
 
-call-agent is a CLI. Its user surface is `did provision`, `did list`, `account upsert`, `account get`, `account list`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `verify-linq-call`, `verify-webhooks`, `linq register-webhook`, and `verify-persistence`. Stub drives of the call and messaging verbs need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call or inbound message runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub `verify-message` proves the MessagingPort echo without hosting those routes. Stub `verify-linq-call` proves text → `run_call` → Linq result reply. The Worker inbox forwards Linq POST to `APP_BASE_URL/linq/webhook` and returns 501 `missing_app_base_url` when that origin is unset. This skill never sets `NEON_DATABASE_URL` or `R2_*`. CLI `--live` hosts CallHandle in the laptop process. Set both `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` to the same tunnel (or other path) to that process for `stream_url` and per-call `webhook_url`. Process env overrides `.env`. The Call Control application webhook can stay on the Worker. Fly `PUBLIC_BASE_URL` alone is not valid for Mac CLI live. A printed trycloudflare URL is not enough until `{PUBLIC_BASE_URL}/health` is HTTP 200. This skill never drives live mode.
+call-agent is a CLI. Its user surface is `did provision`, `did list`, `account upsert`, `account get`, `account list`, `quick-ask`, `verify-quick-ask`, `book`, `verify-book`, `verify-message`, `verify-linq-call`, `verify-webhooks`, `linq register-webhook`, `verify-persistence`, and `verify-accounts`. Stub drives of the call and messaging verbs need no server. Each of those reads env, may touch a SQLite ledger, writes artifacts when a call or inbound message runs, and exits. `verify-webhooks` is the Worker inbox lever. It needs Node and does not place a Telnyx call. The FastAPI routes exist for live Telnyx and Linq inbound processing. Stub `verify-message` proves the MessagingPort echo without hosting those routes. Stub `verify-linq-call` proves text → `run_call` → Linq result reply. Stub `verify-accounts` proves the `users` row and in-process HMAC account routes. The Worker inbox forwards Linq POST to `APP_BASE_URL/linq/webhook` and returns 501 `missing_app_base_url` when that origin is unset. This skill never sets `NEON_DATABASE_URL` or `R2_*`. CLI `--live` hosts CallHandle in the laptop process. Set both `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` to the same tunnel (or other path) to that process for `stream_url` and per-call `webhook_url`. Process env overrides `.env`. The Call Control application webhook can stay on the Worker. Fly `PUBLIC_BASE_URL` alone is not valid for Mac CLI live. A printed trycloudflare URL is not enough until `{PUBLIC_BASE_URL}/health` is HTTP 200. This skill never drives live mode.
 
 Read `features/README.md` before driving. It is the maintained map of user paths and proof.
 
@@ -30,7 +30,7 @@ unset NEON_DATABASE_URL R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_B
 mkdir -p "/tmp/verify-call-agent-$RUN_ID"
 ```
 
-Ready means `.venv/bin/call-agent --help` exits 0 and lists `verify-quick-ask`, `verify-book`, `verify-message`, `verify-linq-call`, `verify-webhooks`, and `verify-persistence`. Two runs with different `RUN_ID` values can run at the same time.
+Ready means `.venv/bin/call-agent --help` exits 0 and lists `verify-quick-ask`, `verify-book`, `verify-message`, `verify-linq-call`, `verify-webhooks`, `verify-persistence`, and `verify-accounts`. Two runs with different `RUN_ID` values can run at the same time.
 
 ## Doctor
 
@@ -38,7 +38,7 @@ Run before driving whenever anything looks off. All three must hold.
 
 ```bash
 .venv/bin/python -c "import call_agent; print('import ok')"
-.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-book|verify-message|verify-linq-call|verify-webhooks|verify-persistence'
+.venv/bin/call-agent --help | grep -E 'verify-quick-ask|verify-book|verify-message|verify-linq-call|verify-webhooks|verify-persistence|verify-accounts'
 [ "${QUICK_ASK_LIVE:-0}" = "0" ] && echo "stub mode"
 ```
 
@@ -69,6 +69,7 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `verify-linq-call.txt`. The fourteen-line linq-to-call checklist and `14/14 passed`.
 - `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
 - `verify-persistence.txt`. The four-line checklist, `sqlite ledger + local artifacts`, and `4/4 passed`. The partial-R2 refusal is in `transcript.txt`.
+- `verify-accounts.txt`. The five-line checklist and `5/5 passed`.
 
 Proof standards. Exercise the real CLI verb, not a Python function. Capture the command and the state it produced, so the result JSON and the files it references, not only the exit code. For a mutation such as `did provision`, prove it with a second read (`did list`), and prove idempotency by running it twice. Stub mode is the only mock, and it sits where production already isolates Telnyx and OpenAI. Confirm it opened no sockets by running with the keys unset, which the script does.
 

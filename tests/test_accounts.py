@@ -579,7 +579,7 @@ def test_upsert_keeps_first_name_prefs_and_minutes_used_when_omitted(
         AccountWrite(
             phone=E164("+14155552671"),
             minutes_used=0,
-            stripe_event_created="2026-09-13T14:00:00+00:00",
+            stripe_event_created="2099-01-01T00:00:00+00:00",
         )
     )
 

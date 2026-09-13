@@ -1,6 +1,6 @@
 # Linq to call (closed alpha)
 
-Closed alpha testers text Treena on iMessage. A natural book ask on that chat collects party and time, then the restaurant phone number, then confirm/approve, then kicks off the same general `run_call` path FastAPI already uses for CLI book and quick-ask. If time is missing, Treena asks for time (or party+time) before the phone number. Caller name, kickoff `user_id`, and Telnyx from-DID come from the `users` row for the inbound phone, not from the chat. The Worker forwards Linq POST to Fly. Collect and confirm reply 200. Approve returns 202, texts `Okay, I'm going to call them now.`, places the call, hangs up, and texts the result on the same Linq chat. The first message never dials. It does not pause the live call for mid-call chat. qa owns live prove.
+Closed alpha testers text Treena on iMessage. A natural book ask on that chat collects party and time, then the restaurant phone number, then confirm/approve, then kicks off the same general `run_call` path FastAPI already uses for CLI book and quick-ask. If time is missing, Treena asks for time (or party+time) before the phone number. Caller name, kickoff `user_id`, and Telnyx from-DID come from the `users` row for the inbound phone, not from the chat. Name is collected on website `/start` and is in settings after signup. The Worker forwards Linq POST to Fly. Collect and confirm reply 200. Approve returns 202, texts `Okay, I'm going to call them now.`, places the call, hangs up, and texts the result on the same Linq chat. The first message never dials. It does not pause the live call for mid-call chat. Cap recorded `live-prove: PASS (#34)`. qa owns live-prove sign-off (TRE-19). This skill does not redial.
 
 ## Sub-features
 
@@ -42,7 +42,7 @@ Preconditions:
 
 ## Gotchas
 
-- This lever never hits Telnyx or Linq live. qa owns the Fly prove.
+- This lever never hits Telnyx or Linq live. Cap recorded `live-prove: PASS (#34)`. qa owns live-prove sign-off (TRE-19). This skill does not redial.
 - `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` on Fly must both be `https://hidden-beacon-080.fly.dev`. The Worker does not terminate media.
 - One Fly machine: `BOOK` is process-local. Do not scale this app until that is no longer true.
 - Confirm/dial never provisions a DID. A missing `users.from_did` texts `NO_FROM_DID_TEXT` and does not buy a number.
@@ -50,4 +50,4 @@ Preconditions:
 - `KickoffSession.from_did` is the Linq iMessage line. Telnyx caller ID is `KickoffParsed.from_did` / `run_call(from_did=...)`.
 - Mid-call iMessage is not shipped. Do not treat a missing pause/resume as a failed L1 kickoff.
 - Pending collect and confirm live at `linq/pending/<chat_id>.json` under artifacts. It is not the live-call pause/resume seam.
-- Do not collect a name in iMessage. Do not set `LINQ_KICKOFF_CALLER` or `LINQ_KICKOFF_USER_ID`.
+- Do not collect a name in iMessage. Name is collected on website `/start` and is in settings after signup. Do not set `LINQ_KICKOFF_CALLER` or `LINQ_KICKOFF_USER_ID`.
