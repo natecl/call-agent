@@ -47,7 +47,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path at `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook`, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
 - [Linq inbound (closed alpha)](./linq-inbound.md) covers the iMessage L1 ingress hook. SMS stays off.
 - [Linq to call (closed alpha)](./linq-to-call.md) covers iMessage natural collect + confirm-before-dial → Fly `run_call` → result on the same chat.
-- [Verify linq-to-call](./verify-linq-call.md) covers the thirteen-check stub lever for that path.
+- [Verify linq-to-call](./verify-linq-call.md) covers the fourteen-check stub lever for that path.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.
 - [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, and the misconfig exit.
 - [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. The privacy page stays not shipped.

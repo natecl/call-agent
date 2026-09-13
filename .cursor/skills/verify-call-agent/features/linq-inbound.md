@@ -29,7 +29,7 @@ Preconditions:
 
 - **Stub hook.** Run `.venv/bin/call-agent verify-webhooks`. Exit code `0`. The `linq_hook` line is `[PASS]`. Stub POST is 501 `missing_app_base_url`. Stub GET ping is 200 `provider:linq`.
 - **Stub reply.** Run `.venv/bin/call-agent verify-message`. Exit code `0`. The `inbound_reply` line is `[PASS]` and names the inbound text.
-- **Stub kickoff.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Thirteen `[PASS]` lines and `13/13 passed`.
+- **Stub kickoff.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Fourteen `[PASS]` lines and `14/14 passed`.
 - **Live register URL.** The string `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook` is in `README.md`, `workers/webhooks/README.md`, and `docs/FEATURE_MAP.md`.
 - **Proof.** Save `verify-webhooks` stdout as `verify-webhooks.txt`, `verify-message` stdout as `verify-message.txt`, and `verify-linq-call` stdout as `verify-linq-call.txt`.
 

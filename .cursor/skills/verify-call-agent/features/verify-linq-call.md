@@ -1,12 +1,13 @@
 # Verify linq-to-call
 
-`verify-linq-call` is the stub lever for iMessage natural book → collect phone → confirm/approve → `run_call` → Linq result reply with artifact cross-links. It seeds a `users` row for the inbound fixture phone, including `from_did=+15555550177`. It needs no Telnyx, OpenAI, or Linq keys and opens no sockets. It exits `0` only when all thirteen checks pass. It fails if dial happens before confirm.
+`verify-linq-call` is the stub lever for iMessage natural book → collect time when missing → collect phone → confirm/approve → `run_call` → Linq result reply with artifact cross-links. It seeds a `users` row for the inbound fixture phone, including `from_did=+15555550177`. It needs no Telnyx, OpenAI, or Linq keys and opens no sockets. It exits `0` only when all fourteen checks pass. It fails if dial happens before confirm.
 
 ## Sub-features
 
-- `verify-pass` prints thirteen `[PASS]` lines and `13/13 passed` in stub mode.
+- `verify-pass` prints fourteen `[PASS]` lines and `14/14 passed` in stub mode.
 - `verify-exit` exits `0` on pass and `1` on any failure.
 - `parse-book` the natural reservation fixture collects party and time and asks for the restaurant phone number. No dial.
+- `collect-time` `can you make a reservation at poke palace for me?` asks for party and time. `2 people` asks for time, not the restaurant number. `7:30` then asks for the number. No dial.
 - `collect-phone` the +E164 follow-up asks to confirm and does not become a `BookRequest`. No dial.
 - `confirm-before-dial` `approve` / `yes` / `I confirm` become a `BookRequest`. A complete first-message one-shot never dials. A non-affirmative while waiting for confirm texts `Call failed:`.
 - `parse-ask` `ask +14155552671 hours name Nathan` asks to confirm, then `approve` becomes a hours `QuickAskRequest`. The `name` token is ignored; caller comes from the `users` row.
@@ -32,8 +33,8 @@ Preconditions:
 
 - Baseline env from `README.md`. This verb opens no sockets. It writes under a temp artifacts dir, not the process `CALL_AGENT_ARTIFACTS_DIR`, unless you pass a workspace through pytest.
 
-- **CI command.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Stdout has exactly thirteen lines that start with `[PASS]`, in this order: `parse_book`, `collect_phone`, `confirm_before_dial`, `parse_quick_ask`, `parse_fail_loud`, `account_lookup`, `account_gate`, `kickoff_reply`, `call_ran`, `cross_link`, `same_host_dial`, `from_did_users_row`, `no_number_order`. The last line is `13/13 passed`.
-- **Defaults.** Run `.venv/bin/call-agent verify-linq-call`. Same thirteen lines, exit code `0`.
+- **CI command.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Stdout has exactly fourteen lines that start with `[PASS]`, in this order: `parse_book`, `collect_time`, `collect_phone`, `confirm_before_dial`, `parse_quick_ask`, `parse_fail_loud`, `account_lookup`, `account_gate`, `kickoff_reply`, `call_ran`, `cross_link`, `same_host_dial`, `from_did_users_row`, `no_number_order`. The last line is `14/14 passed`.
+- **Defaults.** Run `.venv/bin/call-agent verify-linq-call`. Same fourteen lines, exit code `0`.
 - **Proof.** Save stdout as `verify-linq-call.txt` in the evidence directory.
 
 ## Gotchas

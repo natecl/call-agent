@@ -75,7 +75,7 @@ call-agent verify-message
 
 You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send shape, inbound `message.received` mapping, inbound reply + artifact text, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
 
-`call-agent verify-linq-call` proves iMessage natural collect + confirm-before-dial → stub `run_call` → result reply on the same chat, plus artifact cross-links. Thirteen `[PASS]` lines and `13/13 passed`, including `from_did_users_row` and `no_number_order`. It fails if dial happens before confirm. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
+`call-agent verify-linq-call` proves iMessage natural collect + confirm-before-dial → stub `run_call` → result reply on the same chat, plus artifact cross-links. Fourteen `[PASS]` lines and `14/14 passed`, including `collect_time`, `from_did_users_row` and `no_number_order`. It fails if dial happens before confirm. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
 
 `call-agent verify-persistence` checks the Neon and R2 ports. With those vars unset it uses SQLite and a local directory, prints three `[PASS]` lines, and exits 0. If some `R2_*` vars are set and others are not, or if `NEON_DATABASE_URL` is not a `postgresql://` URL, it exits 2 and names the problem. CI runs it with the vars unset. It never opens Neon or R2.
 
