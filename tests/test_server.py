@@ -365,6 +365,7 @@ def live_settings(
         "telnyx_api_key": "test-key",
         "telnyx_connection_id": "connection-1",
         "openai_api_key": "test-openai",
+        "openai_responses_model": "gpt-5.6-terra",
         "public_base_url": public_base,
         "public_webhook_url": public_base,
         "live_ingress_timeout_s": 0.4,

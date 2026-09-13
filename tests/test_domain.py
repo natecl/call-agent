@@ -13,6 +13,7 @@ from call_agent.domain import (
     Call,
     CloseLiveEffect,
     Codec,
+    ContinueResponseEffect,
     ConversationOpen,
     ConversationTerminal,
     Declined,
@@ -20,11 +21,13 @@ from call_agent.domain import (
     DialPlacedEvent,
     E164,
     Failed,
+    FarewellIdleCheckEvent,
     FinishEffect,
     FirstName,
     HangupConfirmTimeoutEvent,
     HangupDraining,
     HangupEffect,
+    HangupFarewell,
     HangupMarked,
     HangupRequested,
     HangupUnconfirmed,
@@ -42,13 +45,13 @@ from call_agent.domain import (
     LiveStallCheckEvent,
     LiveStallGiveUpEvent,
     LiveStarting,
+    LiveToolCallEvent,
     MarkEffect,
     MediaPlayFailedEvent,
     MediaStartEvent,
     MediaStopped,
     MediaStreaming,
     Mode,
-    NudgeLiveEffect,
     OpenLiveEffect,
     PlayAudioEffect,
     Question,
@@ -60,6 +63,7 @@ from call_agent.domain import (
     RunId,
     ScheduleEffect,
     Speaker,
+    SteerLiveEffect,
     StreamId,
     TelnyxAnswered,
     TelnyxRinging,
@@ -68,8 +72,10 @@ from call_agent.domain import (
     Turn,
     UserId,
     WebhookEvent,
+    WriteTaskEffect,
     assess_book,
     assess_transcript,
+    build_backend_instructions,
     build_book_instructions,
     build_instructions,
     exception_reason,
@@ -212,8 +218,7 @@ def test_verdict_closes_live_and_drains_without_a_mark_per_chunk(
     )
 
     assert audio_effects == (PlayAudioEffect(delta_b64=AUDIO),)
-    assert isinstance(call.conversation, ConversationTerminal)
-    assert call.conversation.verdict == Answered(answer_text="We're open 9 to 5.")
+    assert isinstance(call.conversation, ConversationOpen)
     assert [effect.model_dump(mode="json") for effect in verdict_effects] == [
         {
             "kind": "schedule",
@@ -399,6 +404,11 @@ def test_media_start_before_answer_opens_live_once_and_dedupes_webhook(
         "type": "audio/pcm",
         "rate": 16000,
     }
+    assert [tool.name for tool in second_effects[0].spec.tools] == [
+        "record_task_result",
+        "end_call",
+    ]
+    assert second_effects[0].spec.responses_model == "gpt-5.6-terra"
     assert not isinstance(call.live, LiveDormant)
     assert duplicate_call == call
     assert duplicate_effects == ()
@@ -492,10 +502,7 @@ def test_split_closing_turns_still_verdict_and_enter_hangup_drain(
 
     assert verdict == Answered(answer_text="We're open 9 to 5.")
     assert before_close == ()
-    assert isinstance(call.conversation, ConversationTerminal)
-    assert call.conversation.verdict == Answered(
-        answer_text="We're open 9 to 5."
-    )
+    assert isinstance(call.conversation, ConversationOpen)
     assert call.hangup == HangupDraining()
     assert call.live == LiveClosing()
     assert [effect.model_dump(mode="json") for effect in effects] == [
@@ -580,10 +587,7 @@ def test_book_booked_verdict_still_enters_hangup_drain(
         reduce_settings,
     )
 
-    assert isinstance(call.conversation, ConversationTerminal)
-    assert call.conversation.verdict == Booked(
-        confirmation_text="You're booked. We'll see you Friday."
-    )
+    assert isinstance(call.conversation, ConversationOpen)
     assert call.hangup == HangupDraining()
     assert call.live == LiveClosing()
     assert [effect.kind for effect in effects] == ["schedule", "close_live"]
@@ -630,20 +634,18 @@ def test_build_instructions_puts_disclosure_before_ask() -> None:
         "are frustrated acknowledge it briefly then take the next helpful step.\n"
         "Hi, I'm calling on behalf of Nathan. I have one quick question.\n"
         "Do you carry whole milk?\n"
-        "When you have the answer, or if they clearly cannot help, "
-        "say exactly: Thanks, that's all I needed. Goodbye.\n"
+        "When the task is done, say a short goodbye.\n"
         "Never book, reserve, or hold anything. "
         "Keep every turn under two sentences.\n"
         "If the other party pauses, keep listening briefly, then continue: "
         "confirm what you have or ask your next question.\n"
         "Delegation policy:\n"
         "Backend tools:\n"
-        "- None. This session has no tool-calling backend.\n"
+        "- record_task_result, end_call.\n"
         "Delegate to the backend when:\n"
-        "- Never. There is no backend to hand work to.\n"
+        "- the other party has given a final yes, no, time, or answer; "
+        "you must decide whether to accept what they offered; the call should end.\n"
         "Do not delegate to the backend when:\n"
-        "- Always. There is no backend; never pause or go quiet waiting for one. "
-        "Continue speaking with the other party yourself.\n"
         "- The other party greets you, repeats a result, or needs a brief clarification.\n"
         "- You can continue from these instructions and what they have already said.\n"
         "Do not guess or promise a result the other party has not said."
@@ -756,20 +758,17 @@ def test_build_book_instructions_puts_disclosure_before_facts() -> None:
         "Do not read a fixed list of questions.\n"
         "Never join a hold queue or waitlist. "
         "If they cannot seat this party at this time, accept the decline.\n"
-        "When the table is booked, or they clearly cannot take "
-        "the reservation, "
-        "say exactly: Thanks, that's all I needed. Goodbye.\n"
+        "When the task is done, say a short goodbye.\n"
         "Keep every turn under two sentences.\n"
         "If the other party pauses, keep listening briefly, then continue: "
         "confirm what you have or ask your next question.\n"
         "Delegation policy:\n"
         "Backend tools:\n"
-        "- None. This session has no tool-calling backend.\n"
+        "- record_task_result, end_call.\n"
         "Delegate to the backend when:\n"
-        "- Never. There is no backend to hand work to.\n"
+        "- the other party has given a final yes, no, time, or answer; "
+        "you must decide whether to accept what they offered; the call should end.\n"
         "Do not delegate to the backend when:\n"
-        "- Always. There is no backend; never pause or go quiet waiting for one. "
-        "Continue speaking with the other party yourself.\n"
         "- The other party greets you, repeats a result, or needs a brief clarification.\n"
         "- You can continue from these instructions and what they have already said.\n"
         "Do not guess or promise a result the other party has not said."
@@ -883,8 +882,7 @@ def test_live_delegation_replies_with_next_step(
     assert effects[0] == ReplyDelegationEffect(
         delegation_id="item_abc",
         thinking=(
-            "There is no backend. You are the whole agent. Continue the "
-            "conversation yourself from what they have said. "
+            "Continue from the conversation. "
             "Task: party 2 at Friday 7:30pm for Nathan; constraints none."
         ),
         commentary=(
@@ -912,38 +910,34 @@ def test_stall_check_rearms_when_activity_advanced(
 
     assert effects == (
         ScheduleEffect(
-            delay_s=6.0,
+            delay_s=20.0,
             event=LiveStallCheckEvent(activity_seq=2),
         ),
     )
-    assert call.live.nudges == 0
+    assert call.live.stall_check_pending is True
 
 
-def test_two_stall_nudges_then_give_up_hangs_up_via_stall(
+def test_silence_failsafe_steers_then_give_up_hangs_up_via_stall(
     reduce_settings: ReduceSettings,
 ) -> None:
     settings = reduce_settings.model_copy(
-        update={"live_stall_s": 0.0, "live_stall_max_nudges": 2}
+        update={"live_silence_failsafe_s": 0.0}
     )
     call = speaking_book_call()
     call, first = reduce(
         call, LiveStallCheckEvent(activity_seq=1), settings
     )
-    call, second = reduce(
-        call, LiveStallCheckEvent(activity_seq=1), settings
-    )
-    call, third = reduce(
-        call, LiveStallCheckEvent(activity_seq=1), settings
-    )
     call, give_up = reduce(call, LiveStallGiveUpEvent(), settings)
 
-    assert first[0].escalate is False
-    assert second[0].escalate is False
-    assert third[0].escalate is True
-    assert third[0].commentary == CLOSING_LINE
+    assert first[0] == SteerLiveEffect(
+        instructions=(
+            "The line has been quiet. Wrap up politely and say goodbye."
+        ),
+        event_id="silence-failsafe",
+    )
+    assert call.hangup == HangupRequested(via="stall")
     assert give_up[-1].result.status == "failed"
     assert "agent stalled" in give_up[-1].result.reason
-    assert call.hangup == HangupRequested(via="stall")
     assert call.finished is True
 
 
@@ -974,11 +968,11 @@ def test_stall_watchdog_idle_during_drain_and_while_input_flows(
     assert drain_stall == ()
     assert input_stall == (
         ScheduleEffect(
-            delay_s=6.0,
+            delay_s=20.0,
             event=LiveStallCheckEvent(activity_seq=2),
         ),
     )
-    assert listening.live.nudges == 0
+    assert listening.live.stall_check_pending is True
 
 
 def test_hangup_confirm_timeout_finishes_with_verdict(
@@ -1012,12 +1006,9 @@ def test_goodbye_needle_with_booked_verdict_enters_hangup_drain(
         reduce_settings,
     )
 
-    assert isinstance(call.conversation, ConversationTerminal)
-    assert call.conversation.verdict == Booked(
-        confirmation_text="You're booked. We'll see you Friday."
-    )
-    assert call.hangup == HangupDraining()
-    assert [effect.kind for effect in effects] == ["schedule", "close_live"]
+    assert isinstance(call.conversation, ConversationOpen)
+    assert call.hangup.kind == "hangup_idle"
+    assert all(effect.kind != "close_live" for effect in effects)
 
 
 def test_goodbye_needle_without_verdict_does_not_enter_hangup_drain(
@@ -1078,4 +1069,154 @@ def test_exception_reason_uses_type_name_when_str_is_empty() -> None:
 
     assert exception_reason(EmptyDisconnect()) == "EmptyDisconnect"
     assert exception_reason(ValueError("no tables")) == "ValueError: no tables"
+
+
+def _tool_call(name: str, arguments: dict, call_id: str = "call_1") -> LiveToolCallEvent:
+    return LiveToolCallEvent(
+        delegation_id="item_resp",
+        response_id="resp_1",
+        call_id=call_id,
+        name=name,
+        arguments_json=json.dumps(arguments),
+    )
+
+
+def test_responses_delegation_does_not_reply(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_book_call("Friday 7:30pm works for us."),
+        LiveDelegationEvent(
+            delegation_id="item_resp",
+            target="responses",
+            response_id="resp_1",
+        ),
+        reduce_settings,
+    )
+
+    assert all(effect.kind != "reply_delegation" for effect in effects)
+    assert call.live.response_id == "resp_1"
+
+
+def test_record_task_result_then_end_call_owns_hangup(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, record_effects = reduce(
+        speaking_book_call("You're booked. We'll see you Friday."),
+        _tool_call(
+            "record_task_result",
+            {
+                "outcome": "confirmed",
+                "summary": "You're booked Friday.",
+                "confirmed_fields": {
+                    "party_size": 2,
+                    "time_text": "Friday 7:30pm",
+                    "name_on_record": "Nathan",
+                    "answer_text": None,
+                },
+            },
+        ),
+        reduce_settings,
+    )
+    call, end_effects = reduce(
+        call,
+        _tool_call("end_call", {"reason": "task_done"}, call_id="call_end"),
+        reduce_settings,
+    )
+
+    assert isinstance(call.conversation, ConversationTerminal)
+    assert call.conversation.verdict == Booked(
+        confirmation_text="You're booked Friday."
+    )
+    assert call.task is not None
+    assert call.task.outcome == "confirmed"
+    assert [effect.kind for effect in record_effects[:3]] == [
+        "tool_result",
+        "continue_response",
+        "write_task",
+    ]
+    assert isinstance(record_effects[2], WriteTaskEffect)
+    assert call.hangup == HangupFarewell(via="tool")
+    assert end_effects[0].kind == "tool_result"
+    assert json.loads(end_effects[0].output)["ok"] is True
+    assert isinstance(end_effects[1], ContinueResponseEffect)
+    idle = next(
+        effect
+        for effect in end_effects
+        if isinstance(effect, ScheduleEffect)
+        and isinstance(effect.event, FarewellIdleCheckEvent)
+    )
+    call, drain_effects = reduce(call, idle.event, reduce_settings)
+    assert call.hangup == HangupDraining(via="tool")
+    assert CloseLiveEffect() in drain_effects
+
+
+def test_invalid_record_task_result_returns_error_and_stays_open(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_book_call(),
+        _tool_call(
+            "record_task_result",
+            {
+                "outcome": "answered",
+                "summary": "hours",
+                "confirmed_fields": {
+                    "party_size": None,
+                    "time_text": None,
+                    "name_on_record": None,
+                    "answer_text": "Open 9 to 5.",
+                },
+            },
+        ),
+        reduce_settings,
+    )
+
+    assert call.task is None
+    assert isinstance(call.conversation, ConversationOpen)
+    assert call.hangup.kind == "hangup_idle"
+    assert json.loads(effects[0].output)["ok"] is False
+    assert effects[1].kind == "continue_response"
+
+
+def test_end_call_task_done_without_record_does_not_hang_up(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_call(),
+        _tool_call("end_call", {"reason": "task_done"}),
+        reduce_settings,
+    )
+
+    assert call.hangup.kind == "hangup_idle"
+    assert json.loads(effects[0].output) == {
+        "error": "record_task_result first",
+        "ok": False,
+    }
+
+
+def test_build_backend_instructions_lists_legal_outcomes() -> None:
+    ask = QuickAskRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        question=Question.from_cli(QuestionType.HOURS, None),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+    )
+    book = BookRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="Friday 7pm",
+    )
+
+    ask_text = build_backend_instructions(ask)
+    book_text = build_backend_instructions(book)
+
+    assert "answered, declined, or no_result" in ask_text
+    assert "confirmed, declined, or no_result" in book_text
+    assert "record_task_result" in ask_text
+    assert "Never invent a successful action" in book_text
 

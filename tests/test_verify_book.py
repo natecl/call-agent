@@ -25,6 +25,9 @@ def test_verify_book_proves_stub_booking_from_artifacts() -> None:
         "result_artifact",
         "multi_turn_booking",
         "keeps_talking",
+        "session_delegation",
+        "tool_loop",
+        "app_owned_hangup",
     ]
     assert report.passed is True
     assert report.call_control_id == "stub-call-0001"

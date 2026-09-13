@@ -501,7 +501,7 @@ def verify_linq_call(
         call_ok = (
             result_artifact.get("status") == "booked"
             and hangup.is_file()
-            and report.get("hangup", {}).get("path") == "trail"
+            and report.get("hangup", {}).get("path") == "tool"
             and receipt.call_control_id == "stub-call-0001"
         )
         call_detail = (

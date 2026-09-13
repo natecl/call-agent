@@ -32,6 +32,7 @@ class TimingMs(FrozenModel):
     live_active: int | None = None
     verdict: int | None = None
     live_closed: int | None = None
+    farewell_started: int | None = None
     final_mark_sent: int | None = None
     final_mark_echoed: int | None = None
     hangup_sent: int | None = None
@@ -58,6 +59,19 @@ class Counts(FrozenModel):
     output_audio_chunks_after_verdict: int
     inbound_media_chunks: int
     transcript_turns: int
+    tool_calls: int = 0
+    tool_results: int = 0
+    responses_continued: int = 0
+
+
+class AudioSummary(FrozenModel):
+    resampled: bool = False
+
+
+class TaskSummary(FrozenModel):
+    outcome: str | None = None
+    call_id: str | None = None
+    seq: int | None = None
 
 
 class Refs(FrozenModel):
@@ -83,6 +97,8 @@ class CallReport(FrozenModel):
     timing_ms: TimingMs
     hangup: HangupSummary
     counts: Counts
+    audio: AudioSummary = AudioSummary()
+    task: TaskSummary | None = None
     refs: Refs
 
 
@@ -108,6 +124,7 @@ class RedactedCallReport(FrozenModel):
     timing_ms: TimingMs
     hangup: RedactedHangupSummary
     counts: Counts
+    audio: AudioSummary = AudioSummary()
 
 
 def mask_e164(value: E164) -> MaskedE164:
@@ -139,6 +156,7 @@ def redact_call_report(
             drain_timeout_s=report.hangup.drain_timeout_s,
         ),
         counts=report.counts,
+        audio=report.audio,
     )
 
 
@@ -151,6 +169,7 @@ _TIMING_TRANSITIONS: dict[str, tuple[str, str]] = {
     "verdict": ("conversation", "conversation_terminal"),
     "live_closed": ("live", "live_closed"),
     "final_mark_sent": ("hangup", "hangup_marked"),
+    "farewell_started": ("hangup", "hangup_farewell"),
     "hangup_sent": ("hangup", "hangup_requested"),
     "call_ended": ("telnyx", "telnyx_ended"),
 }
@@ -251,6 +270,35 @@ def build_call_report(
                 1 for row in events if row["kind"] == "media_chunk"
             ),
             transcript_turns=len(call.conversation.transcript.turns),
+            tool_calls=sum(
+                1 for row in events if row.get("kind") == "live_tool_call"
+            ),
+            tool_results=sum(
+                1 for row in effects if row.get("effect") == "tool_result"
+            ),
+            responses_continued=sum(
+                1
+                for row in effects
+                if row.get("effect") == "continue_response"
+            ),
+        ),
+        audio=AudioSummary(resampled=call.resampled),
+        task=(
+            TaskSummary(
+                outcome=call.task.outcome,
+                call_id=call.task.call_id,
+                seq=next(
+                    (
+                        row["seq"]
+                        for row in reversed(events)
+                        if row.get("kind") == "live_tool_call"
+                        and row.get("call_id") == call.task.call_id
+                    ),
+                    None,
+                ),
+            )
+            if call.task is not None
+            else None
         ),
         refs=refs,
     )

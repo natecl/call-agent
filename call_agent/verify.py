@@ -60,6 +60,9 @@ CheckName = Literal[
     "disclosure_first",
     "clean_hangup",
     "result_artifact",
+    "session_delegation",
+    "tool_loop",
+    "app_owned_hangup",
     "multi_turn_booking",
     "keeps_talking",
 ]
@@ -272,7 +275,7 @@ def verify_quick_ask(
         and terminal_before_hangup
         and drained_before_hangup
         and marks_sent == 1
-        and hangup_path == "trail"
+        and hangup_path == "tool"
         and artifact_result.get("status") in {"answered", "declined"}
     )
     clean_hangup_check = VerifyCheck(
@@ -291,8 +294,8 @@ def verify_quick_ask(
             f"hangup_seq="
             f"{hangup_sequences[-1] if hangup_sequences else None}, "
             "expected status answered|declined, verdict before call.hangup, "
-            "one final mark, and the trailing silence after the last audio "
-            "and before call.hangup"
+            "one final mark, hangup path tool, and the trailing silence after "
+            "the last audio and before call.hangup"
             + (
                 f" (reason: {artifact_result.get('reason')})"
                 if artifact_result.get("reason")
@@ -336,12 +339,23 @@ def verify_quick_ask(
         ),
     )
 
+    session_check = _session_delegation_check(run_dir, call_report)
+    tool_loop_check = _tool_loop_check(
+        run_dir, rows, events, artifact_result
+    )
+    app_hangup_check = _app_owned_hangup_check(
+        rows, call_report, trail_sequences, hangup_sequences
+    )
+
     checks = (
         did_check,
         dial_check,
         disclosure_check,
         clean_hangup_check,
         result_check,
+        session_check,
+        tool_loop_check,
+        app_hangup_check,
     )
     return VerifyReport(
         passed=all(check.passed for check in checks),
@@ -371,17 +385,19 @@ def verify_book(
 ) -> VerifyReport:
     verify_input = inp or BookVerifyInput()
     active_workspace = workspace or _temporary_workspace("verify-book-")
-    stall_s = 6.0
-    if scenario is not None and (
-        scenario.never_resumes or scenario.stall_after_time_turn
-    ):
+    stall_s = 20.0
+    farewell_idle = 0.8
+    if scenario is not None and scenario.never_resumes:
         stall_s = 0.2
+        farewell_idle = 0.05
     settings = Settings(
         _env_file=None,
         call_agent_db_path=active_workspace.db_path,
         call_agent_artifacts_dir=active_workspace.artifacts_dir,
         retain_call_artifacts=True,
-        live_stall_s=stall_s,
+        live_silence_failsafe_s=stall_s,
+        farewell_idle_s=farewell_idle,
+        farewell_max_s=0.2 if scenario is not None and scenario.never_resumes else 4.0,
     )
     ledger = Ledger(active_workspace.db_path)
     telnyx = StubTelnyxHttp()
@@ -545,7 +561,7 @@ def verify_book(
         and terminal_before_hangup
         and drained_before_hangup
         and marks_sent == 1
-        and hangup_path == "trail"
+        and hangup_path == "tool"
         and artifact_result.get("status") in {"booked", "declined"}
     )
     clean_hangup_check = VerifyCheck(
@@ -564,8 +580,8 @@ def verify_book(
             f"hangup_seq="
             f"{hangup_sequences[-1] if hangup_sequences else None}, "
             "expected status booked|declined, verdict before call.hangup, "
-            "one final mark, and the trailing silence after the last audio "
-            "and before call.hangup"
+            "one final mark, hangup path tool, and the trailing silence after "
+            "the last audio and before call.hangup"
             + (
                 f" (reason: {artifact_result.get('reason')})"
                 if artifact_result.get("reason")
@@ -641,31 +657,38 @@ def verify_book(
         int(event["seq"])
         for event in events
         if event.get("kind") == "live_delegation"
+        and event.get("target") == "responses"
     ]
-    reply_sequences = [
+    tool_result_sequences = [
         int(row["seq"])
         for row in event_rows
-        if row.get("effect") == "reply_delegation"
+        if row.get("effect") == "tool_result"
     ]
-    output_after_reply = bool(
-        reply_sequences
+    continue_sequences = [
+        int(row["seq"])
+        for row in event_rows
+        if row.get("effect") == "continue_response"
+    ]
+    output_after_continue = bool(
+        continue_sequences
         and any(
             event.get("kind") == "live_output_transcript"
-            and int(event["seq"]) > reply_sequences[0]
+            and int(event["seq"]) > continue_sequences[0]
             for event in events
         )
     )
-    escalate_nudges = any(
-        row.get("effect") == "nudge_live" and row.get("escalate") is True
-        for row in event_rows
+    steer_effects = any(
+        row.get("effect") == "steer_live" for row in event_rows
     )
     keeps_passed = (
         bool(delegation_sequences)
-        and bool(reply_sequences)
-        and delegation_sequences[0] < reply_sequences[0]
-        and output_after_reply
-        and not escalate_nudges
-        and hangup_path == "trail"
+        and bool(tool_result_sequences)
+        and bool(continue_sequences)
+        and delegation_sequences[0] < tool_result_sequences[0]
+        < continue_sequences[0]
+        and output_after_continue
+        and not steer_effects
+        and hangup_path == "tool"
         and artifact_result.get("status") in {"booked", "declined"}
     )
     keeps_check = VerifyCheck(
@@ -674,15 +697,26 @@ def verify_book(
         detail=(
             f"delegation_seq="
             f"{delegation_sequences[0] if delegation_sequences else None} "
-            f"reply_seq="
-            f"{reply_sequences[0] if reply_sequences else None} "
-            f"output_after_reply={output_after_reply} "
-            f"escalate_nudges={escalate_nudges} "
+            f"tool_result_seq="
+            f"{tool_result_sequences[0] if tool_result_sequences else None} "
+            f"continue_seq="
+            f"{continue_sequences[0] if continue_sequences else None} "
+            f"output_after_continue={output_after_continue} "
+            f"steer_live={steer_effects} "
             f"hangup_path={hangup_path} "
             f"status={artifact_result.get('status')}, "
-            "expected live_delegation then reply_delegation then more "
-            "agent speech, hangup trail, status booked|declined"
+            "expected live_delegation then tool_result then "
+            "continue_response then more agent speech, hangup tool, "
+            "status booked|declined"
         ),
+    )
+
+    session_check = _session_delegation_check(run_dir, call_report)
+    tool_loop_check = _tool_loop_check(
+        run_dir, event_rows, events, artifact_result
+    )
+    app_hangup_check = _app_owned_hangup_check(
+        event_rows, call_report, trail_sequences, hangup_sequences
     )
 
     checks = (
@@ -693,11 +727,147 @@ def verify_book(
         result_check,
         multi_check,
         keeps_check,
+        session_check,
+        tool_loop_check,
+        app_hangup_check,
     )
     return VerifyReport(
         passed=all(check.passed for check in checks),
         checks=checks,
         call_control_id=result.call_control_id,
+    )
+
+
+def _session_delegation_check(
+    run_dir: Path, call_report: dict
+) -> VerifyCheck:
+    session_start = _read_json(run_dir / "session_start.json")
+    session = session_start.get("session") or {}
+    delegation = session.get("delegation") or {}
+    responses = delegation.get("responses") or {}
+    tools = responses.get("tools") or []
+    names = {
+        tool.get("name") for tool in tools if isinstance(tool, dict)
+    }
+    forbidden = {"turn_detection", "modalities", "input_audio_format"}
+    has_session_tools = "tools" in session or "tool_choice" in session
+    audio_rate = (
+        session.get("audio", {}).get("format", {}).get("rate")
+        if isinstance(session.get("audio"), dict)
+        else None
+    )
+    resampled = (call_report.get("audio") or {}).get("resampled")
+    media_start = next(
+        (
+            row
+            for row in _read_json_lines(run_dir / "events.jsonl")
+            if row.get("kind") == "media_start"
+        ),
+        {},
+    )
+    passed = (
+        delegation.get("type") == "responses"
+        and bool(responses.get("model"))
+        and names == {"record_task_result", "end_call"}
+        and responses.get("parallel_tool_calls") is False
+        and not (set(session) & forbidden)
+        and not has_session_tools
+        and audio_rate == 16000
+        and resampled is False
+        and media_start.get("sample_rate") == 16000
+    )
+    return VerifyCheck(
+        name="session_delegation",
+        passed=passed,
+        detail=(
+            f"type={delegation.get('type')} model={responses.get('model')} "
+            f"tools={sorted(names)} parallel={responses.get('parallel_tool_calls')} "
+            f"audio_rate={audio_rate} media_rate={media_start.get('sample_rate')} "
+            f"resampled={resampled} session_tools={has_session_tools}"
+        ),
+    )
+
+
+def _tool_loop_check(
+    run_dir: Path,
+    event_rows: list[dict],
+    events: list[dict],
+    artifact_result: dict,
+) -> VerifyCheck:
+    delegations = [
+        event
+        for event in events
+        if event.get("kind") == "live_delegation"
+        and event.get("target") == "responses"
+    ]
+    tool_calls = [
+        event for event in events if event.get("kind") == "live_tool_call"
+    ]
+    tool_results = [
+        row for row in event_rows if row.get("effect") == "tool_result"
+    ]
+    continues = [
+        row for row in event_rows if row.get("effect") == "continue_response"
+    ]
+    call_ids = [event.get("call_id") for event in tool_calls]
+    result_ids = [row.get("call_id") for row in tool_results]
+    unique_once = call_ids == result_ids and len(call_ids) == len(set(call_ids))
+    task_path = run_dir / "task.json"
+    task = _read_json(task_path) if task_path.is_file() else {}
+    status_map = {
+        "confirmed": "booked",
+        "answered": "answered",
+        "declined": "declined",
+    }
+    mapped = status_map.get(str(task.get("outcome")))
+    passed = (
+        bool(delegations)
+        and bool(tool_calls)
+        and bool(tool_results)
+        and bool(continues)
+        and unique_once
+        and task_path.is_file()
+        and mapped == artifact_result.get("status")
+    )
+    return VerifyCheck(
+        name="tool_loop",
+        passed=passed,
+        detail=(
+            f"delegations={len(delegations)} tool_calls={len(tool_calls)} "
+            f"tool_results={len(tool_results)} continues={len(continues)} "
+            f"unique_once={unique_once} task_outcome={task.get('outcome')} "
+            f"status={artifact_result.get('status')}"
+        ),
+    )
+
+
+def _app_owned_hangup_check(
+    event_rows: list[dict],
+    call_report: dict,
+    trail_sequences: list[int],
+    hangup_sequences: list[int],
+) -> VerifyCheck:
+    steer = any(row.get("effect") == "steer_live" for row in event_rows)
+    marks_sent = sum(1 for row in event_rows if row.get("effect") == "mark")
+    hangup_path = call_report.get("hangup", {}).get("path")
+    trail_before_hangup = bool(
+        trail_sequences
+        and hangup_sequences
+        and trail_sequences[-1] < hangup_sequences[-1]
+    )
+    passed = (
+        hangup_path == "tool"
+        and not steer
+        and marks_sent == 1
+        and trail_before_hangup
+    )
+    return VerifyCheck(
+        name="app_owned_hangup",
+        passed=passed,
+        detail=(
+            f"hangup_path={hangup_path} steer_live={steer} "
+            f"marks_sent={marks_sent} trail_before_hangup={trail_before_hangup}"
+        ),
     )
 
 

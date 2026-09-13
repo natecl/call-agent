@@ -24,6 +24,7 @@ from .domain import (
     ClientState,
     CloseLiveEffect,
     Codec,
+    ContinueResponseEffect,
     DialEffect,
     DialPlacedEvent,
     DialSpec,
@@ -40,7 +41,6 @@ from .domain import (
     MediaStreaming,
     MediaStopEvent,
     Mode,
-    NudgeLiveEffect,
     OpenLiveEffect,
     PlayAudioEffect,
     BookRequest,
@@ -53,9 +53,12 @@ from .domain import (
     SampleRate,
     ScheduleEffect,
     SpeakFirstEffect,
+    SteerLiveEffect,
     StreamId,
     TimeoutEvent,
+    ToolResultEffect,
     Transcript,
+    WriteTaskEffect,
     exception_reason,
     reduce,
 )
@@ -351,10 +354,12 @@ class CallHandle:
         self._reduce_settings = ReduceSettings(
             live_model=settings.openai_live_model,
             voice=settings.openai_live_voice,
+            responses_model=settings.openai_responses_model or "gpt-5.6-terra",
             hangup_trailing_silence_s=settings.hangup_trailing_silence_s,
             hangup_drain_timeout_s=settings.hangup_drain_timeout_s,
-            live_stall_s=settings.live_stall_s,
-            live_stall_max_nudges=settings.live_stall_max_nudges,
+            live_silence_failsafe_s=settings.live_silence_failsafe_s,
+            farewell_idle_s=settings.farewell_idle_s,
+            farewell_max_s=settings.farewell_max_s,
             hangup_confirm_timeout_s=settings.hangup_confirm_timeout_s,
         )
 
@@ -440,10 +445,21 @@ class CallHandle:
                 effect.delegation_id, effect.thinking, effect.commentary
             )
             return
-        if isinstance(effect, NudgeLiveEffect):
-            await self.ports.gpt_live.nudge(
-                effect.instructions, effect.commentary, effect.event_id
+        if isinstance(effect, SteerLiveEffect):
+            await self.ports.gpt_live.steer(
+                effect.instructions, effect.event_id
             )
+            return
+        if isinstance(effect, ToolResultEffect):
+            await self.ports.gpt_live.send_tool_result(
+                effect.call_id, effect.output, effect.event_id
+            )
+            return
+        if isinstance(effect, ContinueResponseEffect):
+            await self.ports.gpt_live.continue_response(effect.event_id)
+            return
+        if isinstance(effect, WriteTaskEffect):
+            self.run_dir.write_json("task.json", effect.payload)
             return
         if isinstance(effect, ForwardAudioEffect):
             await self.ports.gpt_live.append_audio(effect.payload_b64)
@@ -594,6 +610,8 @@ def validate_live(settings: Settings) -> None:
         missing.append("TELNYX_CONNECTION_ID")
     if not settings.openai_api_key:
         missing.append("OPENAI_API_KEY")
+    if not settings.openai_responses_model:
+        missing.append("OPENAI_RESPONSES_MODEL")
     if (
         not settings.public_base_url
         or settings.public_base_url == "https://stub.invalid"

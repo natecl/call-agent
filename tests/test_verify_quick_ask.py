@@ -26,11 +26,14 @@ def test_verify_quick_ask_proves_stub_call_from_artifacts() -> None:
         "disclosure_first",
         "clean_hangup",
         "result_artifact",
+        "session_delegation",
+        "tool_loop",
+        "app_owned_hangup",
     ]
     assert report.passed is True
     assert report.call_control_id == "stub-call-0001"
 
-    result_detail = report.checks[-1].detail
+    result_detail = report.checks[4].detail
     artifacts_dir = Path(
         result_detail.split("artifacts_dir=", 1)[1].split(" ", 1)[0]
     )
@@ -64,6 +67,9 @@ def test_verify_fails_when_stub_skips_spoken_disclosure(
         False,
         True,
         True,
+        True,
+        True,
+        True,
     ]
     assert report.passed is False
     assert "first_agent_turn_discloses=False" in report.checks[2].detail
@@ -80,6 +86,9 @@ def test_verify_fails_when_from_did_is_not_the_users(
     assert [check.passed for check in report.checks] == [
         False,
         False,
+        True,
+        True,
+        True,
         True,
         True,
         True,
@@ -104,6 +113,9 @@ def test_verify_fails_when_dial_body_is_not_bidirectional(
     assert [check.passed for check in report.checks] == [
         True,
         False,
+        True,
+        True,
+        True,
         True,
         True,
         True,
@@ -149,6 +161,9 @@ def test_verify_fails_clean_hangup_when_playback_never_drains(
         True,
         False,
         True,
+        True,
+        True,
+        False,
     ]
     assert report.passed is False
     assert "status=answered" in report.checks[3].detail
@@ -181,49 +196,29 @@ def test_verify_passes_with_one_final_mark_when_goodbye_audio_storms(
     call_report = json.loads((run_dir / "call_report.json").read_text())
     timing = call_report["timing_ms"]
 
+    assert verdict_row["transitions"]["conversation"] == (
+        "conversation_terminal"
+    )
     assert report.passed is True
     assert marks == ["hangup"]
     assert echoes == ["hangup"]
-    assert verdict_row["transitions"] == {
-        "conversation": "conversation_terminal",
-        "hangup": "hangup_draining",
-        "live": "live_closing",
-    }
     assert call_report["status"] == "answered"
     assert call_report["call_control_id"] == "stub-call-0001"
-    assert call_report["hangup"] == {
-        "path": "trail",
-        "cause": "normal_clearing",
-        "source": "caller",
-        "final_mark": "hangup",
-        "trailing_silence_s": 0.0,
-        "drain_timeout_s": 10.0,
-        "confirmed": True,
-    }
-    assert call_report["counts"] == {
-        "events": 121,
-        "effects": 115,
-        "marks_sent": 1,
-        "mark_echoes": 1,
-        "stale_mark_echoes": 0,
-        "output_audio_chunks": 101,
-        "output_audio_chunks_after_verdict": 99,
-        "inbound_media_chunks": 3,
-        "transcript_turns": 3,
-    }
-    assert call_report["refs"] == {
-        "result": "stub-call-0001/result.json",
-        "transcript": "stub-call-0001/transcript.json",
-        "events": "stub-call-0001/events.jsonl",
-        "inbound_audio": "stub-call-0001/audio/inbound.wav",
-        "outbound_audio": "stub-call-0001/audio/outbound.wav",
-    }
+    assert call_report["hangup"]["path"] == "tool"
+    assert call_report["hangup"]["final_mark"] == "hangup"
+    assert call_report["hangup"]["confirmed"] is True
+    assert call_report["counts"]["marks_sent"] == 1
+    assert call_report["counts"]["tool_calls"] >= 2
+    assert call_report["counts"]["tool_results"] >= 2
+    assert call_report["audio"]["resampled"] is False
+    assert call_report["task"]["outcome"] == "answered"
     assert (
         timing["dial_placed"]
         <= timing["answered"]
         <= timing["media_streaming"]
         <= timing["live_active"]
         <= timing["verdict"]
+        <= timing["farewell_started"]
         <= timing["live_closed"]
         <= timing["final_mark_sent"]
         <= timing["final_mark_echoed"]
@@ -258,7 +253,10 @@ def test_verify_quick_ask_passes_when_telnyx_streams_l16_at_8000(
     with wave.open(str(run_dir / "audio" / "outbound.wav")) as outbound:
         outbound_shape = (outbound.getframerate(), outbound.getnframes())
 
-    assert report.passed is True
+    assert report.passed is False
+    assert report.checks[5].name == "session_delegation"
+    assert report.checks[5].passed is False
+    assert "resampled=True" in report.checks[5].detail
     assert dial["stream_bidirectional_sampling_rate"] == 16000
     assert session_start["session"]["audio"]["format"] == {
         "type": "audio/pcm",

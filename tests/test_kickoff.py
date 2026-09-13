@@ -601,6 +601,7 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
         telnyx_api_key="k",
         telnyx_connection_id="c",
         openai_api_key="o",
+        openai_responses_model="gpt-5.6-terra",
         public_base_url="https://hidden-beacon-080.fly.dev",
         public_webhook_url=None,
     )

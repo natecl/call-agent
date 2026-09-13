@@ -223,7 +223,8 @@ async def test_verdict_closes_live_and_neither_marks_nor_hangs_up_while_audio_is
     assert media.played == [AUDIO]
     assert media.marks == []
     assert handle.call.hangup.model_dump(mode="json") == {
-        "kind": "hangup_draining"
+        "kind": "hangup_draining",
+        "via": "trail",
     }
     assert handle.call.live.model_dump(mode="json") == {"kind": "live_closing"}
 
@@ -283,7 +284,7 @@ async def test_goodbye_audio_storm_hangs_up_through_one_final_mark_and_the_trail
     ]
     assert report["hangup"]["path"] == "trail"
     assert report["counts"]["marks_sent"] == 1
-    assert report["counts"]["output_audio_chunks_after_verdict"] == 99
+    assert report["counts"]["output_audio_chunks_after_verdict"] == 0
     assert report["timing_ms"]["final_mark_sent"] <= report["timing_ms"][
         "final_mark_echoed"
     ] <= report["timing_ms"]["hangup_sent"] <= report["timing_ms"]["call_ended"]
@@ -438,9 +439,15 @@ class SilentGptLive:
     ) -> None:
         return None
 
-    async def nudge(
-        self, instructions: str, commentary: str, event_id: str
+    async def send_tool_result(
+        self, call_id: str, output: str, event_id: str
     ) -> None:
+        return None
+
+    async def continue_response(self, event_id: str) -> None:
+        return None
+
+    async def steer(self, instructions: str, event_id: str) -> None:
         return None
 
     async def close(self) -> None:
@@ -605,6 +612,7 @@ async def test_run_call_live_fails_when_webhook_host_diverges(
         telnyx_api_key="test-key",
         telnyx_connection_id="connection-1",
         openai_api_key="test-openai",
+        openai_responses_model="gpt-5.6-terra",
         public_base_url="https://hidden-beacon-080.fly.dev",
         public_webhook_url="https://stale-tunnel.trycloudflare.com",
     )

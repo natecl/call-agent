@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     openai_live_model: str = "gpt-live-1"
     openai_live_voice: str = "marin"
     openai_live_extra_headers: str | None = None
+    openai_responses_model: str | None = None
     public_base_url: str = "https://stub.invalid"
     public_webhook_url: str | None = None
     port: int = Field(default=8000, validation_alias="CALL_AGENT_PORT")
@@ -45,8 +46,9 @@ class Settings(BaseSettings):
     live_ingress_timeout_s: float = 15.0
     hangup_trailing_silence_s: float = 0.4
     hangup_drain_timeout_s: float = 10.0
-    live_stall_s: float = 6.0
-    live_stall_max_nudges: int = 2
+    live_silence_failsafe_s: float = 20.0
+    farewell_idle_s: float = 0.8
+    farewell_max_s: float = 4.0
     hangup_confirm_timeout_s: float = 5.0
     retain_call_artifacts: bool = False
 

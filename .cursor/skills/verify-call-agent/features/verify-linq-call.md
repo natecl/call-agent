@@ -14,7 +14,7 @@
 - `account-lookup` approve builds `BookRequest.caller` and `user_id` from the seeded `users` row. `kickoff.json` records `account.user_id` and `from_did`.
 - `account-gate` no row, a row with no first name, and a row with no `from_did` reply plain lines. Never `Call failed: missing caller name`. No dial.
 - `kickoff-reply` two `POST /chats/{chat_id}/messages` sends: `Okay, I'm going to call them now.` then `Booked:`.
-- `call-ran` stub call is `booked`, hangup path trail, `hangup.json` present. This lever retains artifacts so it can read them.
+- `call-ran` stub call is `booked`, hangup path tool, `hangup.json` present. This lever retains artifacts so it can read them.
 - `cross-link` `linq/<event_id>/call.json` and `<ccid>/linq.json` point at each other.
 - `same-host` `dial.json` webhook host equals stream host (`stub.invalid`).
 - `from-did-users-row` `dial.json` `from` is the seeded `users.from_did` (`+15555550177`), not the inbound personal phone and not the Linq line.

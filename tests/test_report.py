@@ -114,6 +114,7 @@ def test_redact_call_report_keeps_allowlist_and_drops_identity() -> None:
         "timing_ms",
         "hangup",
         "counts",
+        "audio",
     }
     assert set(dump["hangup"]) == {
         "path",

@@ -39,10 +39,10 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
 - [Accounts](./accounts.md) covers `users` row seed (`account upsert --from-did` / `get` / `list`) and the signed Fly sync contract.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
-- [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, `speak_first` append frames, Realtime reject, and no tool-delegation.
-- [Verify quick-ask](./verify-quick-ask.md) covers the five-check lever in stub mode and its exit codes.
+- [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, Responses delegation, `speak_first` append frames, and Realtime reject.
+- [Verify quick-ask](./verify-quick-ask.md) covers the eight-check lever in stub mode and its exit codes.
 - [Book a table](./book.md) covers a stub booking call, the result JSON, the artifacts, and the live gate.
-- [Verify book](./verify-book.md) covers the seven-check lever in stub mode and its exit codes.
+- [Verify book](./verify-book.md) covers the ten-check lever in stub mode and its exit codes.
 - [Verify message](./verify-message.md) covers the MessagingPort + Linq V3 stub lever, inbound reply artifacts, and the register-webhook gate.
 - [Always-on webhooks versus local tunnel](./webhooks.md) covers the Worker prod path at `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook`, the laptop tunnel, `PUBLIC_WEBHOOK_URL`, and the Linq hook.
 - [Linq inbound (closed alpha)](./linq-inbound.md) covers the iMessage L1 ingress hook. SMS stays off.

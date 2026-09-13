@@ -51,15 +51,18 @@ call-agent verify-quick-ask --to +15555550123 --ask hours --name Nathan --mode s
 call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub
 ```
 
-`verify-quick-ask` should print five `[PASS]` lines and `5/5 passed`, and exit 0. The five checks are:
+`verify-quick-ask` should print eight `[PASS]` lines and `8/8 passed`, and exit 0. The eight checks are:
 
 1. `did_in_ledger`. The user has exactly one number in the ledger, and provisioning twice returns the same number.
 2. `dial_payload`. The Call Control body has `from` set to that number, `to` set to the destination, a `wss://` `stream_url`, `stream_bidirectional_mode: rtp`, and `stream_bidirectional_target_legs: self`.
 3. `disclosure_first`. The GPT-Live `session.start` instructions name the caller ("on behalf of Nathan") before the question, and the agent's first transcript turn does too.
-4. `clean_hangup`. The verdict comes from the transcript, the agent closes GPT-Live and plays out what it still sends, sends exactly one Telnyx mark named `hangup` once GPT-Live confirms the close, Telnyx echoes it, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s), or a call that sends more than one mark, fails this check.
+4. `clean_hangup`. The verdict comes from `record_task_result`, the agent calls `end_call`, this process farewells then drains, sends exactly one Telnyx mark named `hangup` once GPT-Live confirms the close, Telnyx echoes it, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. `hangup.path` is `tool`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s), or a call that sends more than one mark, fails this check.
 5. `result_artifact`. `result.json` is a valid `QuickAskResult`, its `transcript_ref` and `audio_ref` point at files that exist, and `call_report.json` is a valid `CallReport` whose refs exist.
+6. `session_delegation`. `session.start` has `delegation.type=responses`, tools `record_task_result` and `end_call`, audio 16 kHz, and no resample.
+7. `tool_loop`. A Responses delegation, tool calls, `tool_result` then `continue_response`, and `task.json` whose outcome maps to the result status.
+8. `app_owned_hangup`. Hangup path `tool`, one mark, trail before `call.hangup`, no silence-failsafe steer.
 
-`verify-book` should print seven `[PASS]` lines and `7/7 passed`. The first five checks match `verify-quick-ask`, except `clean_hangup` expects `booked` or `declined`. The sixth check is `multi_turn_booking`. The transcript must have at least three agent turns and two business turns, and it must mention party, time, and constraints. A one-shot stub that skips that conversation fails this check and exits 1. The seventh check is `keeps_talking`: the stub emits a client delegation after the time turn, this process replies, and the agent speaks again before hanging up on the trail.
+`verify-book` should print ten `[PASS]` lines and `10/10 passed`. The first five checks match `verify-quick-ask`, except `clean_hangup` expects `booked` or `declined`. The sixth check is `multi_turn_booking`. The transcript must have at least three agent turns and two business turns, and it must mention party, time, and constraints. A one-shot stub that skips that conversation fails this check and exits 1. The seventh check is `keeps_talking`: the stub emits Responses tools after the time turn, this process returns the tool result and continues, and the agent speaks again before hanging up `via=tool`. Checks 8–10 are the same `session_delegation`, `tool_loop`, and `app_owned_hangup` rows.
 
 To run the test suite:
 
@@ -112,7 +115,7 @@ Live mode places a real call. It is gated so that no test or CI run can reach th
 4. Assign the outbound caller ID. Live CLI takes `--from-did` or reads `users.from_did` for `--user`. Seed with `call-agent account upsert --phone +1... --name Nathan --from-did +1...`. Confirm/dial never calls `ledger.provision` and never `POST /v2/number_orders`. `did provision --live` is an ops verb that can order a number into the `dids` table; it is not a live-call prerequisite.
 5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live --from-did +1...`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends. `call-agent book --to +1... --name Nathan --party 2 --time "Friday 7pm" --live --from-did +1...` is the same path with a `BookRequest`. The later live target for book is `+17272701288`. Do not dial it until `{PUBLIC_BASE_URL}/health` returns HTTP 200 with this process's `serve_token`. Cap GO on this fail-loud climb. HOLD REDIAL for the live book. This tree does not place that call.
 
-`call-agent verify-quick-ask --mode live` runs the same five checks against a real call. `call-agent verify-book --mode live` is gated the same way and still runs the stub adapters unless you change the code. Only call numbers you control until you have reviewed consent, calling-hour, and AI-disclosure rules for your destination.
+`call-agent verify-quick-ask --mode live` runs the same eight checks against a real call. `call-agent verify-book --mode live` is gated the same way and still runs the stub adapters unless you change the code. Only call numbers you control until you have reviewed consent, calling-hour, and AI-disclosure rules for your destination.
 
 Prove the Worker inbox without deploying:
 

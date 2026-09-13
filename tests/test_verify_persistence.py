@@ -110,6 +110,9 @@ def test_verify_quick_ask_stays_green_on_sqlite_local(
         "disclosure_first",
         "clean_hangup",
         "result_artifact",
+        "session_delegation",
+        "tool_loop",
+        "app_owned_hangup",
     ]
 
 
