@@ -163,6 +163,8 @@ def test_verify_quick_ask_writes_redacted_sibling(
     assert report.passed is True
     assert full.to == "+14155552671"
     assert full.from_did == "+15555550100"
+    assert full.hangup.confirmed is True
+    assert "confirmed" not in sibling.hangup.model_dump()
     assert (run_dir / "call_report.redacted.json").is_file()
     assert "Nathan" in transcript
     assert (

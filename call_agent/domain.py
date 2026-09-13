@@ -175,6 +175,11 @@ class Question(FrozenModel):
 DISCLOSURE_PHRASE = "on behalf of "
 CLOSING_LINE = "Thanks, that's all I needed. Goodbye."
 
+SILENCE_CONTINUE_LINE = (
+    "If the other party pauses, keep listening briefly, then continue: "
+    "confirm what you have or ask your next question."
+)
+
 DELEGATION_POLICY_LINES = (
     "Delegation policy:",
     "Backend tools:",
@@ -182,10 +187,14 @@ DELEGATION_POLICY_LINES = (
     "Delegate to the backend when:",
     "- Never. There is no backend to hand work to.",
     "Do not delegate to the backend when:",
+    "- Always. There is no backend; never pause or go quiet waiting for one. "
+    "Continue speaking with the other party yourself.",
     "- The other party greets you, repeats a result, or needs a brief clarification.",
     "- You can continue from these instructions and what they have already said.",
     "Do not guess or promise a result the other party has not said.",
 )
+
+GOODBYE_NEEDLES = ("goodbye", "bye for now", "have a good")
 
 
 def first_spoken_line(caller: FirstName) -> str:
@@ -219,6 +228,7 @@ def build_instructions(caller: FirstName, question: Question) -> str:
                 "Never book, reserve, or hold anything. "
                 "Keep every turn under two sentences."
             ),
+            SILENCE_CONTINUE_LINE,
             *DELEGATION_POLICY_LINES,
         )
     )
@@ -279,6 +289,7 @@ def build_book_instructions(
                 f"say exactly: {CLOSING_LINE}"
             ),
             "Keep every turn under two sentences.",
+            SILENCE_CONTINUE_LINE,
             *DELEGATION_POLICY_LINES,
         )
     )
@@ -539,6 +550,9 @@ class LiveStarting(FrozenModel):
 class LiveActive(FrozenModel):
     kind: Literal["live_active"] = "live_active"
     session_id: LiveSessionId
+    activity_seq: int = 0
+    stall_check_pending: bool = False
+    nudges: int = 0
 
 
 class LiveClosing(FrozenModel):
@@ -574,7 +588,7 @@ ConversationTrack: TypeAlias = Annotated[
 
 HANGUP_MARK = "hangup"
 
-HangupVia: TypeAlias = Literal["trail", "drain_timeout", "failure"]
+HangupVia: TypeAlias = Literal["trail", "drain_timeout", "failure", "stall"]
 
 
 class HangupIdle(FrozenModel):
@@ -599,12 +613,18 @@ class HangupConfirmed(FrozenModel):
     via: HangupVia
 
 
+class HangupUnconfirmed(FrozenModel):
+    kind: Literal["hangup_unconfirmed"] = "hangup_unconfirmed"
+    via: HangupVia
+
+
 HangupTrack: TypeAlias = Annotated[
     HangupIdle
     | HangupDraining
     | HangupMarked
     | HangupRequested
-    | HangupConfirmed,
+    | HangupConfirmed
+    | HangupUnconfirmed,
     Field(discriminator="kind"),
 ]
 
@@ -704,6 +724,18 @@ class LiveErrorEvent(FrozenModel):
     message: str
 
 
+class LiveNoteEvent(FrozenModel):
+    kind: Literal["live_note"] = "live_note"
+    event_type: str
+    client_event_id: str | None = None
+    usage_seconds: float | None = None
+
+
+class LiveDelegationEvent(FrozenModel):
+    kind: Literal["live_delegation"] = "live_delegation"
+    delegation_id: str
+
+
 class TimeoutEvent(FrozenModel):
     kind: Literal["timeout"] = "timeout"
     webhook_host: str | None = None
@@ -716,6 +748,30 @@ class HangupTrailElapsedEvent(FrozenModel):
 
 class HangupDrainTimeoutEvent(FrozenModel):
     kind: Literal["hangup_drain_timeout"] = "hangup_drain_timeout"
+
+
+class HangupConfirmTimeoutEvent(FrozenModel):
+    kind: Literal["hangup_confirm_timeout"] = "hangup_confirm_timeout"
+
+
+class LiveStallCheckEvent(FrozenModel):
+    kind: Literal["live_stall_check"] = "live_stall_check"
+    activity_seq: int
+
+
+class LiveStallGiveUpEvent(FrozenModel):
+    kind: Literal["live_stall_give_up"] = "live_stall_give_up"
+
+
+class MediaPlayFailedEvent(FrozenModel):
+    kind: Literal["media_play_failed"] = "media_play_failed"
+    stream_id: StreamId
+    error_type: str
+
+
+class RuntimeFailureEvent(FrozenModel):
+    kind: Literal["runtime_failure"] = "runtime_failure"
+    reason: str
 
 
 CallEvent: TypeAlias = Annotated[
@@ -731,9 +787,16 @@ CallEvent: TypeAlias = Annotated[
     | LiveOutputAudioEvent
     | LiveClosedEvent
     | LiveErrorEvent
+    | LiveNoteEvent
+    | LiveDelegationEvent
     | TimeoutEvent
     | HangupTrailElapsedEvent
-    | HangupDrainTimeoutEvent,
+    | HangupDrainTimeoutEvent
+    | HangupConfirmTimeoutEvent
+    | LiveStallCheckEvent
+    | LiveStallGiveUpEvent
+    | MediaPlayFailedEvent
+    | RuntimeFailureEvent,
     Field(discriminator="kind"),
 ]
 
@@ -751,6 +814,21 @@ class OpenLiveEffect(FrozenModel):
 class SpeakFirstEffect(FrozenModel):
     kind: Literal["speak_first"] = "speak_first"
     line: str
+
+
+class ReplyDelegationEffect(FrozenModel):
+    kind: Literal["reply_delegation"] = "reply_delegation"
+    delegation_id: str
+    thinking: str
+    commentary: str
+
+
+class NudgeLiveEffect(FrozenModel):
+    kind: Literal["nudge_live"] = "nudge_live"
+    instructions: str
+    commentary: str
+    event_id: str
+    escalate: bool = False
 
 
 class ForwardAudioEffect(FrozenModel):
@@ -792,6 +870,8 @@ Effect: TypeAlias = Annotated[
     DialEffect
     | OpenLiveEffect
     | SpeakFirstEffect
+    | ReplyDelegationEffect
+    | NudgeLiveEffect
     | ForwardAudioEffect
     | PlayAudioEffect
     | MarkEffect
@@ -808,6 +888,9 @@ class ReduceSettings(FrozenModel):
     voice: str
     hangup_trailing_silence_s: float = Field(ge=0)
     hangup_drain_timeout_s: float = Field(ge=0)
+    live_stall_s: float = Field(default=6.0, ge=0)
+    live_stall_max_nudges: int = Field(default=2, ge=0)
+    hangup_confirm_timeout_s: float = Field(default=5.0, ge=0)
 
 
 def _collapsed_agent_text(transcript: Transcript) -> str:
@@ -821,10 +904,74 @@ def _agent_said_closing(transcript: Transcript) -> bool:
     return CLOSING_LINE.casefold() in _collapsed_agent_text(transcript).casefold()
 
 
+def _last_agent_has_goodbye(transcript: Transcript) -> bool:
+    last_agent = next(
+        (
+            turn.text
+            for turn in reversed(transcript.turns)
+            if turn.speaker is Speaker.AGENT
+        ),
+        "",
+    )
+    lowered = last_agent.casefold()
+    return any(needle in lowered for needle in GOODBYE_NEEDLES)
+
+
+def _ready_to_assess(transcript: Transcript) -> bool:
+    return _agent_said_closing(transcript) or _last_agent_has_goodbye(
+        transcript
+    )
+
+
+def exception_reason(error: BaseException) -> str:
+    message = str(error).strip()
+    name = type(error).__name__
+    if not message:
+        return name
+    return f"{name}: {message}"
+
+
+def next_step_line(
+    request: QuickAskRequest | BookRequest, transcript: Transcript
+) -> str:
+    lowered = transcript.business_text().casefold()
+    if isinstance(request, BookRequest):
+        has_book = any(needle in lowered for needle in BOOK_NEEDLES)
+        has_decline = any(needle in lowered for needle in DECLINE_BOOK_NEEDLES)
+        if has_book or has_decline:
+            return CLOSING_LINE
+        return (
+            f"Can you confirm the reservation for {request.party_size} at "
+            f"{request.time_text} under {request.caller}?"
+        )
+    spec = QUESTION_TABLE[request.question.kind]
+    has_answer = any(needle in lowered for needle in spec.answer_needles)
+    has_decline = any(needle in lowered for needle in spec.decline_needles)
+    if has_answer or has_decline:
+        return CLOSING_LINE
+    return request.question.text
+
+
+def _delegation_thinking(request: QuickAskRequest | BookRequest) -> str:
+    if isinstance(request, BookRequest):
+        notes = request.constraints or "none"
+        return (
+            "There is no backend. You are the whole agent. Continue the "
+            "conversation yourself from what they have said. "
+            f"Task: party {request.party_size} at {request.time_text} for "
+            f"{request.caller}; constraints {notes}."
+        )
+    return (
+        "There is no backend. You are the whole agent. Continue the "
+        "conversation yourself from what they have said. "
+        f"Task: {request.question.text}."
+    )
+
+
 def assess_transcript(
     transcript: Transcript, question: Question
 ) -> Answered | Declined | None:
-    if not _agent_said_closing(transcript):
+    if not _ready_to_assess(transcript):
         return None
     business_text = transcript.business_text()
     if not business_text.strip():
@@ -844,7 +991,7 @@ def assess_transcript(
 
 
 def assess_book(transcript: Transcript) -> Booked | Declined | None:
-    if not _agent_said_closing(transcript):
+    if not _ready_to_assess(transcript):
         return None
     business_text = transcript.business_text()
     if not business_text.strip():
@@ -1011,14 +1158,25 @@ def _end_for_webhook(
     )
 
 
-def _hang_up(call: Call, via: HangupVia) -> tuple[Call, tuple[Effect, ...]]:
+def _hangup_confirm_schedule(settings: ReduceSettings) -> ScheduleEffect:
+    return ScheduleEffect(
+        delay_s=settings.hangup_confirm_timeout_s,
+        event=HangupConfirmTimeoutEvent(),
+    )
+
+
+def _hang_up(
+    call: Call, via: HangupVia, settings: ReduceSettings
+) -> tuple[Call, tuple[Effect, ...]]:
     if not isinstance(call.dial, DialPlaced):
         raise ValueError("placed dial required")
     updates, effects = _close_live(call)
     updates["hangup"] = HangupRequested(via=via)
     return (
         call.model_copy(update=updates),
-        (HangupEffect(call_control_id=call.dial.call_control_id),) + effects,
+        (HangupEffect(call_control_id=call.dial.call_control_id),)
+        + effects
+        + (_hangup_confirm_schedule(settings),),
     )
 
 
@@ -1055,25 +1213,96 @@ def timeout_failure_reason(call: Call, event: TimeoutEvent) -> str:
 
 
 def _fail(
-    call: Call, reason: str
+    call: Call,
+    reason: str,
+    settings: ReduceSettings,
+    via: HangupVia = "failure",
 ) -> tuple[Call, tuple[Effect, ...]]:
-    effects: tuple[Effect, ...] = ()
-    updates: dict[str, Any] = {}
+    extra: tuple[Effect, ...] = ()
     if (
         isinstance(call.dial, DialPlaced)
         and not isinstance(call.telnyx, TelnyxEnded)
         and isinstance(call.hangup, (HangupIdle, HangupDraining, HangupMarked))
     ):
-        updates["hangup"] = HangupRequested(via="failure")
-        effects += (HangupEffect(call_control_id=call.dial.call_control_id),)
-    close_updates, close_effects = _close_live(call)
-    updates |= close_updates
-    effects += close_effects
-    call = call.model_copy(update=updates)
+        call, extra = _hang_up(call, via, settings)
+    else:
+        close_updates, close_effects = _close_live(call)
+        call = call.model_copy(update=close_updates)
+        extra = close_effects
     return _finish(
         call,
         Failed(call_control_id=_call_control_id(call), reason=reason),
-        effects,
+        extra,
+    )
+
+
+def _bump_stall(
+    call: Call, settings: ReduceSettings, updates: dict[str, Any]
+) -> tuple[dict[str, Any], tuple[Effect, ...]]:
+    hangup = updates.get("hangup", call.hangup)
+    live = updates.get("live", call.live)
+    if not isinstance(hangup, HangupIdle) or not isinstance(live, LiveActive):
+        return updates, ()
+    next_seq = live.activity_seq + 1
+    extra: tuple[Effect, ...] = ()
+    pending = live.stall_check_pending
+    if not pending:
+        extra = (
+            ScheduleEffect(
+                delay_s=settings.live_stall_s,
+                event=LiveStallCheckEvent(activity_seq=next_seq),
+            ),
+        )
+        pending = True
+    updates["live"] = live.model_copy(
+        update={"activity_seq": next_seq, "stall_check_pending": pending}
+    )
+    return updates, extra
+
+
+def _nudge_live(
+    call: Call, settings: ReduceSettings, escalate: bool
+) -> tuple[Call, tuple[Effect, ...]]:
+    if not isinstance(call.live, LiveActive):
+        return call, ()
+    if escalate:
+        live = call.live.model_copy(
+            update={
+                "nudges": call.live.nudges + 1,
+                "stall_check_pending": True,
+            }
+        )
+        return call.model_copy(update={"live": live}), (
+            NudgeLiveEffect(
+                instructions=f"Say exactly: {CLOSING_LINE}",
+                commentary=CLOSING_LINE,
+                event_id=f"nudge-{live.nudges}",
+                escalate=True,
+            ),
+            ScheduleEffect(
+                delay_s=settings.live_stall_s,
+                event=LiveStallGiveUpEvent(),
+            ),
+        )
+    commentary = next_step_line(call.request, call.conversation.transcript)
+    next_nudges = call.live.nudges + 1
+    live = call.live.model_copy(
+        update={"nudges": next_nudges, "stall_check_pending": True}
+    )
+    return call.model_copy(update={"live": live}), (
+        NudgeLiveEffect(
+            instructions=(
+                "The other party has gone quiet. Do not wait for a backend. "
+                f"Continue now: {commentary}. Keep it under two sentences."
+            ),
+            commentary=commentary,
+            event_id=f"nudge-{next_nudges}",
+            escalate=False,
+        ),
+        ScheduleEffect(
+            delay_s=settings.live_stall_s,
+            event=LiveStallCheckEvent(activity_seq=call.live.activity_seq),
+        ),
     )
 
 
@@ -1122,7 +1351,9 @@ def reduce(
             return _end_for_webhook(call, previous_telnyx, ())
         if event.event_type == "streaming.failed":
             reason = event.failure_reason or "unknown"
-            return _fail(call, f"Telnyx media streaming failed: {reason}")
+            return _fail(
+                call, f"Telnyx media streaming failed: {reason}", settings
+            )
         return _maybe_open_live(call, settings)
 
     if isinstance(event, MediaStartEvent):
@@ -1153,7 +1384,7 @@ def reduce(
             (),
         )
 
-    if isinstance(event, MediaStopEvent):
+    if isinstance(event, (MediaStopEvent, MediaPlayFailedEvent)):
         return call.model_copy(update={"media": MediaStopped()}), ()
 
     if isinstance(event, LiveStartedEvent):
@@ -1165,9 +1396,20 @@ def reduce(
             ForwardAudioEffect(payload_b64=payload)
             for payload in call.live.buffered_audio
         )
+        effects += (
+            ScheduleEffect(
+                delay_s=settings.live_stall_s,
+                event=LiveStallCheckEvent(activity_seq=0),
+            ),
+        )
         return (
             call.model_copy(
-                update={"live": LiveActive(session_id=event.session_id)}
+                update={
+                    "live": LiveActive(
+                        session_id=event.session_id,
+                        stall_check_pending=True,
+                    )
+                }
             ),
             effects,
         )
@@ -1175,11 +1417,14 @@ def reduce(
     if isinstance(event, LiveOutputAudioEvent):
         if not isinstance(call.media, MediaStreaming):
             return call, ()
+        updates: dict[str, Any] = {}
+        updates, stall_effects = _bump_stall(call, settings, updates)
+        call = call.model_copy(update=updates) if updates else call
         return call, (
             PlayAudioEffect(
                 delta_b64=_to_media_rate(call.media, event.delta_b64)
             ),
-        )
+        ) + stall_effects
 
     if isinstance(event, MediaMarkEvent):
         if not isinstance(call.hangup, HangupMarked) or (
@@ -1196,12 +1441,89 @@ def reduce(
     if isinstance(event, HangupTrailElapsedEvent):
         if not isinstance(call.hangup, HangupMarked):
             return call, ()
-        return _hang_up(call, via="trail")
+        return _hang_up(call, via="trail", settings=settings)
 
     if isinstance(event, HangupDrainTimeoutEvent):
         if not isinstance(call.hangup, (HangupDraining, HangupMarked)):
             return call, ()
-        return _hang_up(call, via="drain_timeout")
+        return _hang_up(call, via="drain_timeout", settings=settings)
+
+    if isinstance(event, HangupConfirmTimeoutEvent):
+        if not isinstance(call.hangup, HangupRequested):
+            return call, ()
+        call = call.model_copy(
+            update={"hangup": HangupUnconfirmed(via=call.hangup.via)}
+        )
+        if isinstance(call.conversation, ConversationTerminal):
+            return _finish(call, _result_from_verdict(call))
+        return _finish(
+            call,
+            Failed(
+                call_control_id=_call_control_id(call),
+                reason=(
+                    "hangup unconfirmed: Telnyx did not send call.hangup"
+                ),
+            ),
+        )
+
+    if isinstance(event, LiveStallCheckEvent):
+        if not isinstance(call.live, LiveActive) or not isinstance(
+            call.hangup, HangupIdle
+        ):
+            return call, ()
+        if event.activity_seq != call.live.activity_seq:
+            return call.model_copy(
+                update={
+                    "live": call.live.model_copy(
+                        update={"stall_check_pending": True}
+                    )
+                }
+            ), (
+                ScheduleEffect(
+                    delay_s=settings.live_stall_s,
+                    event=LiveStallCheckEvent(
+                        activity_seq=call.live.activity_seq
+                    ),
+                ),
+            )
+        if call.live.nudges < settings.live_stall_max_nudges:
+            return _nudge_live(call, settings, escalate=False)
+        return _nudge_live(call, settings, escalate=True)
+
+    if isinstance(event, LiveStallGiveUpEvent):
+        if not isinstance(call.hangup, HangupIdle):
+            return call, ()
+        nudges = call.live.nudges if isinstance(call.live, LiveActive) else 0
+        return _fail(
+            call,
+            (
+                "agent stalled: no live output for "
+                f"{settings.live_stall_s}s after {nudges} nudges"
+            ),
+            settings,
+            via="stall",
+        )
+
+    if isinstance(event, LiveDelegationEvent):
+        if not isinstance(call.live, LiveActive) or not isinstance(
+            call.conversation, ConversationOpen
+        ):
+            return call, ()
+        updates: dict[str, Any] = {}
+        updates, stall_effects = _bump_stall(call, settings, updates)
+        call = call.model_copy(update=updates) if updates else call
+        return call, (
+            ReplyDelegationEffect(
+                delegation_id=event.delegation_id,
+                thinking=_delegation_thinking(call.request),
+                commentary=next_step_line(
+                    call.request, call.conversation.transcript
+                ),
+            ),
+        ) + stall_effects
+
+    if isinstance(event, LiveNoteEvent):
+        return call, ()
 
     if isinstance(
         event, (LiveInputTranscriptEvent, LiveOutputTranscriptEvent)
@@ -1228,8 +1550,11 @@ def reduce(
             )
         if _should_enter_hangup_drain(call, transcript, verdict):
             updates, effects = _enter_hangup_drain(call, settings, updates)
+        else:
+            updates, stall_effects = _bump_stall(call, settings, updates)
+            effects += stall_effects
         if not updates:
-            return call, ()
+            return call, effects
         return call.model_copy(update=updates), effects
 
     if isinstance(event, LiveClosedEvent):
@@ -1240,9 +1565,12 @@ def reduce(
         return call.model_copy(update=updates), (MarkEffect(name=HANGUP_MARK),)
 
     if isinstance(event, LiveErrorEvent):
-        return _fail(call, event.message)
+        return _fail(call, event.message, settings)
 
     if isinstance(event, TimeoutEvent):
-        return _fail(call, timeout_failure_reason(call, event))
+        return _fail(call, timeout_failure_reason(call, event), settings)
+
+    if isinstance(event, RuntimeFailureEvent):
+        return _fail(call, event.reason, settings)
 
     return call, ()

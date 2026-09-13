@@ -19,6 +19,7 @@ from .domain import (
     QuestionType,
     QuickAskRequest,
     UserId,
+    exception_reason,
 )
 from .linq import (
     claim_path,
@@ -275,7 +276,8 @@ def collect_reply_text(waiting_for: WaitingFor) -> str:
 
 
 def failed_reply_text(reason: str) -> str:
-    return f"Call failed: {reason}"
+    text = reason.strip() or "unknown"
+    return f"Call failed: {text}"
 
 
 def parse_kickoff(
@@ -344,7 +346,8 @@ def result_reply_text(result: CallResult, to: E164) -> str:
         return "They declined."
     if result.status == "no_answer":
         return f"No answer at {to}."
-    return f"Call failed: {result.reason}"
+    reason = (result.reason or "").strip() or "unknown"
+    return f"Call failed: {reason}"
 
 
 def kickoff_host_mismatch(
@@ -573,7 +576,7 @@ async def run_kickoff(
             error=str(error),
         )
     except Exception as error:
-        text = f"Call failed: {error}"
+        text = f"Call failed: {exception_reason(error)}"
         result_receipt = session.text(text, kind="result")
         write_call_cross_links(
             session.settings,

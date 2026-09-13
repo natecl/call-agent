@@ -59,7 +59,7 @@ call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 
 4. `clean_hangup`. The verdict comes from the transcript, the agent closes GPT-Live and plays out what it still sends, sends exactly one Telnyx mark named `hangup` once GPT-Live confirms the close, Telnyx echoes it, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s), or a call that sends more than one mark, fails this check.
 5. `result_artifact`. `result.json` is a valid `QuickAskResult`, its `transcript_ref` and `audio_ref` point at files that exist, and `call_report.json` is a valid `CallReport` whose refs exist.
 
-`verify-book` should print six `[PASS]` lines and `6/6 passed`. The first five checks match `verify-quick-ask`, except `clean_hangup` expects `booked` or `declined`. The sixth check is `multi_turn_booking`. The transcript must have at least three agent turns and two business turns, and it must mention party, time, and constraints. A one-shot stub that skips that conversation fails this check and exits 1.
+`verify-book` should print seven `[PASS]` lines and `7/7 passed`. The first five checks match `verify-quick-ask`, except `clean_hangup` expects `booked` or `declined`. The sixth check is `multi_turn_booking`. The transcript must have at least three agent turns and two business turns, and it must mention party, time, and constraints. A one-shot stub that skips that conversation fails this check and exits 1. The seventh check is `keeps_talking`: the stub emits a client delegation after the time turn, this process replies, and the agent speaks again before hanging up on the trail.
 
 To run the test suite:
 

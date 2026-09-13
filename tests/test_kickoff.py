@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 from call_agent.accounts import UserRecord
 from call_agent.config import Settings
@@ -628,6 +629,40 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
     result_text = port.sent[-1][1]["message"]["parts"][0]["value"]
     assert result_text.startswith("Call not placed:")
     assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+
+
+async def test_run_kickoff_empty_disconnect_reason_is_not_blank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def boom(*args: object, **kwargs: object) -> object:
+        raise WebSocketDisconnect(code=1006)
+
+    monkeypatch.setattr("call_agent.kickoff.run_call", boom)
+    settings = _settings(tmp_path)
+    inbound = parse_inbound(
+        kickoff_inbound_bytes(PHONE_FOLLOWUP_TEXT, "evt-empty-reason")
+    )
+    assert inbound is not None
+    request = BookRequest(
+        user_id=UserId("acctnathan"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="7:30",
+    )
+    port = StubLinq()
+    session = make_session(inbound, settings, port)
+
+    receipt = await run_kickoff(
+        session, request, from_did=E164("+15555550177")
+    )
+
+    assert receipt.result is None
+    result_text = port.sent[-1][1]["message"]["parts"][0]["value"]
+    assert result_text == "Call failed: WebSocketDisconnect"
+    assert not result_text.endswith("Call failed: ")
+    assert str(WebSocketDisconnect(code=1006)).strip() == ""
 
 
 async def test_kickoff_session_ask_is_reserved(tmp_path: Path) -> None:

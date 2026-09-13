@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
+from starlette.websockets import WebSocketDisconnect
 
 from .config import Settings
 from .domain import (
@@ -34,20 +35,28 @@ from .domain import (
     LiveAudioFormat,
     MarkEffect,
     MediaChunkEvent,
+    MediaPlayFailedEvent,
     MediaStartEvent,
+    MediaStreaming,
+    MediaStopEvent,
     Mode,
+    NudgeLiveEffect,
     OpenLiveEffect,
     PlayAudioEffect,
     BookRequest,
     CallResult,
     QuickAskRequest,
     ReduceSettings,
+    ReplyDelegationEffect,
     RunId,
+    RuntimeFailureEvent,
     SampleRate,
     ScheduleEffect,
     SpeakFirstEffect,
+    StreamId,
     TimeoutEvent,
     Transcript,
+    exception_reason,
     reduce,
 )
 from .gpt_live import (
@@ -104,8 +113,11 @@ class RunDir:
         self._inbound = bytearray()
         self._outbound = bytearray()
         self.path.mkdir(parents=True, exist_ok=True)
+        self._events = (self.path / "events.jsonl").open("a")
+        self._last_transcript: Transcript | None = None
 
     def bind(self, call_control_id: CallControlId) -> None:
+        self._close_events()
         target = self.root / str(call_control_id)
         if target != self.path:
             if target.exists():
@@ -113,6 +125,7 @@ class RunDir:
             self.path.rename(target)
             self.path = target
         self.call_control_id = str(call_control_id)
+        self._events = (self.path / "events.jsonl").open("a")
 
     def write_json(self, name: str, payload: dict[str, Any]) -> None:
         (self.path / name).write_text(
@@ -148,10 +161,19 @@ class RunDir:
             **payload,
         }
         self.rows.append(row)
-        with (self.path / "events.jsonl").open("a") as events:
-            events.write(json.dumps(row, sort_keys=True) + "\n")
+        self._events.write(json.dumps(row, sort_keys=True) + "\n")
+        self._events.flush()
+
+    def _close_events(self) -> None:
+        events = getattr(self, "_events", None)
+        if events is not None and not events.closed:
+            events.close()
+        self._events = None
 
     def write_transcript(self, transcript: Transcript) -> None:
+        if self._last_transcript == transcript:
+            return
+        self._last_transcript = transcript
         self.write_json(
             "transcript.json",
             {
@@ -164,11 +186,9 @@ class RunDir:
 
     def append_inbound(self, payload_b64: str) -> None:
         self._inbound.extend(base64.b64decode(payload_b64))
-        self._write_audio()
 
     def append_outbound(self, payload_b64: str) -> None:
         self._outbound.extend(base64.b64decode(payload_b64))
-        self._write_audio()
 
     def finish(
         self,
@@ -178,6 +198,7 @@ class RunDir:
     ) -> CallResult:
         self.write_transcript(call.conversation.transcript)
         self._write_audio()
+        self._close_events()
         refs = Refs(
             result=f"{self.call_control_id}/result.json",
             transcript=f"{self.call_control_id}/transcript.json",
@@ -275,6 +296,9 @@ def build_ports(
             submit=submit,
             sample_rate=faults.media_sample_rate,
             echo_marks=not faults.playback_never_drains,
+            drop_after_plays=(
+                1 if faults.media_drops_before_hangup else None
+            ),
         )
         return Ports(
             telnyx_http=StubTelnyxHttp(
@@ -329,6 +353,9 @@ class CallHandle:
             voice=settings.openai_live_voice,
             hangup_trailing_silence_s=settings.hangup_trailing_silence_s,
             hangup_drain_timeout_s=settings.hangup_drain_timeout_s,
+            live_stall_s=settings.live_stall_s,
+            live_stall_max_nudges=settings.live_stall_max_nudges,
+            hangup_confirm_timeout_s=settings.hangup_confirm_timeout_s,
         )
 
     def submit(self, event: CallEvent) -> None:
@@ -357,7 +384,14 @@ class CallHandle:
                     )
                 )
                 continue
-            await self._process_event(event)
+            try:
+                await self._process_event(event)
+            except Exception as error:
+                if isinstance(event, RuntimeFailureEvent):
+                    raise
+                await self._process_event(
+                    RuntimeFailureEvent(reason=exception_reason(error))
+                )
         return self._result
 
     async def _process_event(self, event: CallEvent) -> None:
@@ -401,15 +435,31 @@ class CallHandle:
         if isinstance(effect, SpeakFirstEffect):
             await self.ports.gpt_live.speak_first(effect.line)
             return
+        if isinstance(effect, ReplyDelegationEffect):
+            await self.ports.gpt_live.reply_delegation(
+                effect.delegation_id, effect.thinking, effect.commentary
+            )
+            return
+        if isinstance(effect, NudgeLiveEffect):
+            await self.ports.gpt_live.nudge(
+                effect.instructions, effect.commentary, effect.event_id
+            )
+            return
         if isinstance(effect, ForwardAudioEffect):
             await self.ports.gpt_live.append_audio(effect.payload_b64)
             return
         if isinstance(effect, PlayAudioEffect):
             self.run_dir.append_outbound(effect.delta_b64)
-            await self.ports.telnyx_media.play(effect.delta_b64)
+            try:
+                await self.ports.telnyx_media.play(effect.delta_b64)
+            except (WebSocketDisconnect, RuntimeError) as error:
+                await self._media_play_failed(error)
             return
         if isinstance(effect, MarkEffect):
-            await self.ports.telnyx_media.mark(effect.name)
+            try:
+                await self.ports.telnyx_media.mark(effect.name)
+            except (WebSocketDisconnect, RuntimeError) as error:
+                await self._media_play_failed(error)
             return
         if isinstance(effect, ScheduleEffect):
             asyncio.get_running_loop().call_later(
@@ -432,6 +482,19 @@ class CallHandle:
                 self.call,
                 self._reduce_settings,
             )
+
+    async def _media_play_failed(self, error: BaseException) -> None:
+        stream_id = (
+            self.call.media.stream_id
+            if isinstance(self.call.media, MediaStreaming)
+            else StreamId("unknown")
+        )
+        await self._process_event(
+            MediaPlayFailedEvent(
+                stream_id=stream_id,
+                error_type=type(error).__name__,
+            )
+        )
 
 
 class CallBook:

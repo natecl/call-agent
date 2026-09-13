@@ -13,7 +13,9 @@ from call_agent.domain import (
     E164,
     LiveAudioFormat,
     LiveClosedEvent,
+    LiveDelegationEvent,
     LiveInputTranscriptEvent,
+    LiveNoteEvent,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
     LiveSessionSpec,
@@ -465,7 +467,33 @@ def test_parse_gpt_live_rejects_realtime_and_ignores_usage() -> None:
     with pytest.raises(ValueError, match="Realtime event"):
         parse_event(json.dumps({"type": "input_audio_buffer.commit"}))
 
-    assert parse_event(json.dumps({"type": "session.usage.updated"})) is None
+    assert parse_event(json.dumps({"type": "session.usage.updated"})) == LiveNoteEvent(
+        event_type="session.usage.updated"
+    )
+    note = parse_event(
+        json.dumps(
+            {
+                "type": "session.instructions.appended",
+                "client_event_id": "speak-first-1",
+            }
+        )
+    )
+    assert note == LiveNoteEvent(
+        event_type="session.instructions.appended",
+        client_event_id="speak-first-1",
+    )
+    assert parse_event(
+        json.dumps(
+            {
+                "type": "session.delegation.created",
+                "delegation": {
+                    "id": "item_abc",
+                    "type": "delegation",
+                    "target": "client",
+                },
+            }
+        )
+    ) == LiveDelegationEvent(delegation_id="item_abc")
 
 
 def test_speak_first_frames_are_instructions_then_commentary() -> None:
@@ -476,6 +504,7 @@ def test_speak_first_frames_are_instructions_then_commentary() -> None:
     assert frames == (
         {
             "type": "session.instructions.append",
+            "event_id": "speak-first-1",
             "delegation_id": None,
             "content": (
                 "Speak first, then listen. Your first spoken line is: "
@@ -484,6 +513,7 @@ def test_speak_first_frames_are_instructions_then_commentary() -> None:
         },
         {
             "type": "session.commentary.append",
+            "event_id": "speak-first-2",
             "delegation_id": None,
             "content": (
                 "Hi, I'm calling on behalf of Nathan. I have one quick question."
@@ -535,6 +565,7 @@ async def test_live_gpt_live_speak_first_sends_append_frames(
         },
         {
             "type": "session.instructions.append",
+            "event_id": "speak-first-1",
             "delegation_id": None,
             "content": (
                 "Speak first, then listen. Your first spoken line is: "
@@ -543,9 +574,53 @@ async def test_live_gpt_live_speak_first_sends_append_frames(
         },
         {
             "type": "session.commentary.append",
+            "event_id": "speak-first-2",
             "delegation_id": None,
             "content": (
                 "Hi, I'm calling on behalf of Nathan. I have one quick question."
             ),
         },
     ]
+
+
+async def test_live_gpt_live_nudge_and_reply_delegation_send_append_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FlushingLiveSocket([])
+
+    async def fake_connect(endpoint: str, additional_headers: dict[str, str]):
+        return socket
+
+    monkeypatch.setattr("call_agent.gpt_live.connect", fake_connect)
+    live = LiveGptLive(
+        endpoint="wss://live.example.test/v1/live/sessions",
+        api_key="key",
+        extra_headers=None,
+        submit=lambda event: None,
+    )
+    await live.start(
+        LiveSessionSpec(
+            model="gpt-live-1",
+            instructions="Call on behalf of Nathan.",
+            audio=LiveAudioFormat(type="audio/pcm", rate=16000),
+            voice="marin",
+        )
+    )
+    await live.reply_delegation(
+        "item_abc", "thinking text", "Please confirm Friday."
+    )
+    await live.nudge("Continue now.", "Can you confirm?", "nudge-1")
+
+    types = [message["type"] for message in socket.sent]
+    assert types == [
+        "session.start",
+        "session.thinking.append",
+        "session.commentary.append",
+        "session.instructions.append",
+        "session.commentary.append",
+    ]
+    assert socket.sent[1]["event_id"] == "delegation-item_abc-thinking"
+    assert socket.sent[1]["delegation_id"] == "item_abc"
+    assert socket.sent[3]["event_id"] == "nudge-1-instructions"
+    assert socket.sent[3]["delegation_id"] is None
+

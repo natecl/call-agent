@@ -23,7 +23,10 @@ def test_feature_map_lists_shipped_book_rows() -> None:
         "| `assess_book` | shipped |",
         "| `hangup-on-goodbye` | shipped |",
         "| `multi_turn_booking` | shipped |",
+        "| `keeps_talking` | shipped |",
         "| `build_book_instructions` | shipped |",
+        "| goodbye needles | shipped |",
+        "| hangup confirm timeout | shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]
@@ -37,6 +40,12 @@ def test_feature_map_lists_live_prompt_rows() -> None:
         "| speak_first | shipped |",
         "| Realtime reject | shipped |",
         "| no tool-delegation | shipped |",
+        "| live event journal | shipped |",
+        "| live delegation reply | shipped |",
+        "| live stall watchdog | shipped |",
+        "| media disconnect → MediaStop | shipped |",
+        "| play into closed media is non-fatal | shipped |",
+        "| runtime crash → failed result | shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]

@@ -11,6 +11,7 @@ from .domain import (
     FrozenModel,
     HangupConfirmed,
     HangupRequested,
+    HangupUnconfirmed,
     HangupVia,
     Mode,
     CallResult,
@@ -44,6 +45,7 @@ class HangupSummary(FrozenModel):
     final_mark: str
     trailing_silence_s: float
     drain_timeout_s: float
+    confirmed: bool = False
 
 
 class Counts(FrozenModel):
@@ -168,7 +170,9 @@ def _first_transition(
 
 
 def _hangup_path(call: Call) -> HangupPath | None:
-    if isinstance(call.hangup, (HangupRequested, HangupConfirmed)):
+    if isinstance(
+        call.hangup, (HangupRequested, HangupConfirmed, HangupUnconfirmed)
+    ):
         return call.hangup.via
     if isinstance(call.telnyx, TelnyxEnded):
         return "far_party"
@@ -227,6 +231,7 @@ def build_call_report(
             final_mark=HANGUP_MARK,
             trailing_silence_s=settings.hangup_trailing_silence_s,
             drain_timeout_s=settings.hangup_drain_timeout_s,
+            confirmed=isinstance(call.hangup, HangupConfirmed),
         ),
         counts=Counts(
             events=len(events),

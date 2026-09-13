@@ -22,24 +22,33 @@ from call_agent.domain import (
     Failed,
     FinishEffect,
     FirstName,
+    HangupConfirmTimeoutEvent,
     HangupDraining,
     HangupEffect,
     HangupMarked,
     HangupRequested,
+    HangupUnconfirmed,
     LiveActive,
     LiveClosed,
     LiveClosedEvent,
     LiveClosing,
+    LiveDelegationEvent,
     LiveDormant,
     LiveInputTranscriptEvent,
+    LiveNoteEvent,
     LiveOutputAudioEvent,
     LiveOutputTranscriptEvent,
     LiveSessionId,
+    LiveStallCheckEvent,
+    LiveStallGiveUpEvent,
     LiveStarting,
     MarkEffect,
+    MediaPlayFailedEvent,
     MediaStartEvent,
+    MediaStopped,
     MediaStreaming,
     Mode,
+    NudgeLiveEffect,
     OpenLiveEffect,
     PlayAudioEffect,
     Question,
@@ -47,7 +56,9 @@ from call_agent.domain import (
     QuickAskRequest,
     QUICK_ASK_RESULT_ADAPTER,
     ReduceSettings,
+    ReplyDelegationEffect,
     RunId,
+    ScheduleEffect,
     Speaker,
     StreamId,
     TelnyxAnswered,
@@ -61,12 +72,26 @@ from call_agent.domain import (
     assess_transcript,
     build_book_instructions,
     build_instructions,
+    exception_reason,
+    next_step_line,
     reduce,
     timeout_failure_reason,
 )
 from call_agent.telnyx import parse_media_frame
 
 AUDIO = base64.b64encode(bytes(640)).decode()
+
+
+def hangup_requested_effects(
+    call_control_id: str = "call-1", delay_s: float = 5.0
+) -> tuple:
+    return (
+        HangupEffect(call_control_id=call_control_id),
+        ScheduleEffect(
+            delay_s=delay_s,
+            event=HangupConfirmTimeoutEvent(),
+        ),
+    )
 
 
 @pytest.fixture
@@ -108,7 +133,11 @@ def speaking_call() -> Call:
                 codec=Codec.L16,
                 sample_rate=16000,
             ),
-            "live": LiveActive(session_id=LiveSessionId("live-1")),
+            "live": LiveActive(
+                session_id=LiveSessionId("live-1"),
+                stall_check_pending=True,
+                activity_seq=1,
+            ),
             "conversation": ConversationOpen(
                 transcript=Transcript().append_delta(
                     Speaker.BUSINESS, "We're open 9 to 5."
@@ -142,7 +171,11 @@ def speaking_book_call(business_text: str = "Yes, we can do that.") -> Call:
             codec=Codec.L16,
             sample_rate=16000,
         ),
-        live=LiveActive(session_id=LiveSessionId("live-1")),
+        live=LiveActive(
+            session_id=LiveSessionId("live-1"),
+            stall_check_pending=True,
+            activity_seq=1,
+        ),
         conversation=ConversationOpen(
             transcript=Transcript().append_delta(
                 Speaker.BUSINESS, business_text
@@ -228,7 +261,7 @@ def test_goodbye_audio_storm_sends_one_final_mark_after_live_closes_and_hangs_up
             "event": {"kind": "hangup_trail_elapsed"},
         }
     ]
-    assert trail_effects == (HangupEffect(call_control_id="call-1"),)
+    assert trail_effects == hangup_requested_effects()
     assert call.hangup == HangupRequested(via="trail")
     assert call.live == LiveClosed()
     assert repeat_effects == ()
@@ -269,7 +302,7 @@ def test_drain_timeout_hangs_up_without_a_mark_echo(
     call, late_echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
 
     assert closed_effects == (MarkEffect(name="hangup"),)
-    assert timeout_effects == (HangupEffect(call_control_id="call-1"),)
+    assert timeout_effects == hangup_requested_effects()
     assert call.hangup == HangupRequested(via="drain_timeout")
     assert late_echo_effects == ()
 
@@ -287,7 +320,7 @@ def test_drain_timeout_before_live_closes_hangs_up_without_a_second_close(
     )
     call, late_closed_effects = reduce(call, LiveClosedEvent(), reduce_settings)
 
-    assert timeout_effects == (HangupEffect(call_control_id="call-1"),)
+    assert timeout_effects == hangup_requested_effects()
     assert call.hangup == HangupRequested(via="drain_timeout")
     assert late_closed_effects == ()
     assert call.live == LiveClosed()
@@ -312,8 +345,7 @@ def test_streaming_failed_during_the_drain_still_hangs_up(
         reduce_settings,
     )
 
-    assert effects == (
-        HangupEffect(call_control_id="call-1"),
+    assert effects == hangup_requested_effects() + (
         FinishEffect(
             result=Failed(
                 call_control_id="call-1",
@@ -392,13 +424,16 @@ def test_streaming_failed_hangs_up_closes_live_and_fails_the_call(
         call_control_id="call-1",
         reason="Telnyx media streaming failed: connection_failed",
     )
-    assert dormant_effects == (
-        HangupEffect(call_control_id="call-1"),
+    assert dormant_effects == hangup_requested_effects() + (
         FinishEffect(result=result),
     )
     assert starting_effects == (
         HangupEffect(call_control_id="call-1"),
         CloseLiveEffect(),
+        ScheduleEffect(
+            delay_s=5.0,
+            event=HangupConfirmTimeoutEvent(),
+        ),
         FinishEffect(result=result),
     )
     assert dormant_call.finished is True
@@ -531,7 +566,7 @@ def test_book_closing_line_hangs_up_through_the_trail_not_far_party(
     assert assess_book(call.conversation.transcript) is None
     assert isinstance(call.conversation, ConversationOpen)
     assert closed_effects == (MarkEffect(name="hangup"),)
-    assert trail_effects == (HangupEffect(call_control_id="call-1"),)
+    assert trail_effects == hangup_requested_effects()
     assert call.hangup == HangupRequested(via="trail")
     assert call.live == LiveClosed()
 
@@ -599,12 +634,16 @@ def test_build_instructions_puts_disclosure_before_ask() -> None:
         "say exactly: Thanks, that's all I needed. Goodbye.\n"
         "Never book, reserve, or hold anything. "
         "Keep every turn under two sentences.\n"
+        "If the other party pauses, keep listening briefly, then continue: "
+        "confirm what you have or ask your next question.\n"
         "Delegation policy:\n"
         "Backend tools:\n"
         "- None. This session has no tool-calling backend.\n"
         "Delegate to the backend when:\n"
         "- Never. There is no backend to hand work to.\n"
         "Do not delegate to the backend when:\n"
+        "- Always. There is no backend; never pause or go quiet waiting for one. "
+        "Continue speaking with the other party yourself.\n"
         "- The other party greets you, repeats a result, or needs a brief clarification.\n"
         "- You can continue from these instructions and what they have already said.\n"
         "Do not guess or promise a result the other party has not said."
@@ -721,12 +760,16 @@ def test_build_book_instructions_puts_disclosure_before_facts() -> None:
         "the reservation, "
         "say exactly: Thanks, that's all I needed. Goodbye.\n"
         "Keep every turn under two sentences.\n"
+        "If the other party pauses, keep listening briefly, then continue: "
+        "confirm what you have or ask your next question.\n"
         "Delegation policy:\n"
         "Backend tools:\n"
         "- None. This session has no tool-calling backend.\n"
         "Delegate to the backend when:\n"
         "- Never. There is no backend to hand work to.\n"
         "Do not delegate to the backend when:\n"
+        "- Always. There is no backend; never pause or go quiet waiting for one. "
+        "Continue speaking with the other party yourself.\n"
         "- The other party greets you, repeats a result, or needs a brief clarification.\n"
         "- You can continue from these instructions and what they have already said.\n"
         "Do not guess or promise a result the other party has not said."
@@ -825,3 +868,214 @@ def test_timeout_during_active_call_stays_generic(
     )
 
     assert effects[-1].result.reason == "event timeout"
+
+
+def test_live_delegation_replies_with_next_step(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_book_call("Friday 7:30pm works for us."),
+        LiveDelegationEvent(delegation_id="item_abc"),
+        reduce_settings,
+    )
+
+    assert [effect.kind for effect in effects] == ["reply_delegation"]
+    assert effects[0] == ReplyDelegationEffect(
+        delegation_id="item_abc",
+        thinking=(
+            "There is no backend. You are the whole agent. Continue the "
+            "conversation yourself from what they have said. "
+            "Task: party 2 at Friday 7:30pm for Nathan; constraints none."
+        ),
+        commentary=(
+            "Can you confirm the reservation for 2 at Friday 7:30pm "
+            "under Nathan?"
+        ),
+    )
+    assert call.live.activity_seq == 2
+
+
+def test_stall_check_rearms_when_activity_advanced(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call = speaking_book_call()
+    call, _ = reduce(
+        call,
+        LiveOutputTranscriptEvent(delta="We need a table."),
+        reduce_settings,
+    )
+    call, effects = reduce(
+        call,
+        LiveStallCheckEvent(activity_seq=1),
+        reduce_settings,
+    )
+
+    assert effects == (
+        ScheduleEffect(
+            delay_s=6.0,
+            event=LiveStallCheckEvent(activity_seq=2),
+        ),
+    )
+    assert call.live.nudges == 0
+
+
+def test_two_stall_nudges_then_give_up_hangs_up_via_stall(
+    reduce_settings: ReduceSettings,
+) -> None:
+    settings = reduce_settings.model_copy(
+        update={"live_stall_s": 0.0, "live_stall_max_nudges": 2}
+    )
+    call = speaking_book_call()
+    call, first = reduce(
+        call, LiveStallCheckEvent(activity_seq=1), settings
+    )
+    call, second = reduce(
+        call, LiveStallCheckEvent(activity_seq=1), settings
+    )
+    call, third = reduce(
+        call, LiveStallCheckEvent(activity_seq=1), settings
+    )
+    call, give_up = reduce(call, LiveStallGiveUpEvent(), settings)
+
+    assert first[0].escalate is False
+    assert second[0].escalate is False
+    assert third[0].escalate is True
+    assert third[0].commentary == CLOSING_LINE
+    assert give_up[-1].result.status == "failed"
+    assert "agent stalled" in give_up[-1].result.reason
+    assert call.hangup == HangupRequested(via="stall")
+    assert call.finished is True
+
+
+def test_stall_watchdog_idle_during_drain_and_while_input_flows(
+    reduce_settings: ReduceSettings,
+) -> None:
+    draining, _ = reduce(
+        speaking_call(),
+        LiveOutputTranscriptEvent(delta=CLOSING_LINE),
+        reduce_settings,
+    )
+    draining, drain_stall = reduce(
+        draining, LiveStallCheckEvent(activity_seq=1), reduce_settings
+    )
+    listening = speaking_book_call()
+    listening, _ = reduce(
+        listening,
+        LiveInputTranscriptEvent(delta="Let me check the book."),
+        reduce_settings,
+    )
+    listening, input_stall = reduce(
+        listening,
+        LiveStallCheckEvent(activity_seq=1),
+        reduce_settings,
+    )
+
+    assert draining.hangup == HangupDraining()
+    assert drain_stall == ()
+    assert input_stall == (
+        ScheduleEffect(
+            delay_s=6.0,
+            event=LiveStallCheckEvent(activity_seq=2),
+        ),
+    )
+    assert listening.live.nudges == 0
+
+
+def test_hangup_confirm_timeout_finishes_with_verdict(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, _ = reduce(
+        speaking_call(),
+        LiveOutputTranscriptEvent(delta=CLOSING_LINE),
+        reduce_settings,
+    )
+    call, _ = reduce(call, LiveClosedEvent(), reduce_settings)
+    call, echo_effects = reduce(call, mark_echo("hangup"), reduce_settings)
+    call, trail_effects = reduce(
+        call, echo_effects[0].event, reduce_settings
+    )
+    call, confirm_effects = reduce(
+        call, trail_effects[1].event, reduce_settings
+    )
+
+    assert call.hangup == HangupUnconfirmed(via="trail")
+    assert call.finished is True
+    assert confirm_effects[-1].result.status == "answered"
+
+
+def test_goodbye_needle_with_booked_verdict_enters_hangup_drain(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_book_call("You're booked. We'll see you Friday."),
+        LiveOutputTranscriptEvent(delta="Alright, goodbye."),
+        reduce_settings,
+    )
+
+    assert isinstance(call.conversation, ConversationTerminal)
+    assert call.conversation.verdict == Booked(
+        confirmation_text="You're booked. We'll see you Friday."
+    )
+    assert call.hangup == HangupDraining()
+    assert [effect.kind for effect in effects] == ["schedule", "close_live"]
+
+
+def test_goodbye_needle_without_verdict_does_not_enter_hangup_drain(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_book_call("Yes, we can do that."),
+        LiveOutputTranscriptEvent(delta="Alright, goodbye."),
+        reduce_settings,
+    )
+
+    assert isinstance(call.conversation, ConversationOpen)
+    assert call.hangup.kind == "hangup_idle"
+    assert all(effect.kind != "close_live" for effect in effects)
+    assert next_step_line(
+        call.request, call.conversation.transcript
+    ) == (
+        "Can you confirm the reservation for 2 at Friday 7:30pm under Nathan?"
+    )
+
+
+def test_live_note_is_a_no_op(reduce_settings: ReduceSettings) -> None:
+    call = speaking_call()
+    reduced, effects = reduce(
+        call,
+        LiveNoteEvent(
+            event_type="session.instructions.appended",
+            client_event_id="speak-first-1",
+        ),
+        reduce_settings,
+    )
+
+    assert reduced == call
+    assert effects == ()
+
+
+def test_media_play_failed_stops_media_and_keeps_the_call_open(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, effects = reduce(
+        speaking_call(),
+        MediaPlayFailedEvent(
+            stream_id=StreamId("stream-1"),
+            error_type="WebSocketDisconnect",
+        ),
+        reduce_settings,
+    )
+
+    assert call.media == MediaStopped()
+    assert call.finished is False
+    assert effects == ()
+
+
+def test_exception_reason_uses_type_name_when_str_is_empty() -> None:
+    class EmptyDisconnect(Exception):
+        def __str__(self) -> str:
+            return "  "
+
+    assert exception_reason(EmptyDisconnect()) == "EmptyDisconnect"
+    assert exception_reason(ValueError("no tables")) == "ValueError: no tables"
+

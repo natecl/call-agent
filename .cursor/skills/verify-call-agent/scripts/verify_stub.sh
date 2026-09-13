@@ -107,7 +107,7 @@ unset RETAIN_CALL_ARTIFACTS
 
 step "verify-book stub checklist"
 run "$CLI" verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 7pm" --mode stub | tee "$EVIDENCE/verify-book.txt" >/dev/null
-grep -q "6/6 passed" "$EVIDENCE/verify-book.txt"
+grep -q "7/7 passed" "$EVIDENCE/verify-book.txt"
 
 step "verify-message stub checklist"
 run "$CLI" verify-message | tee "$EVIDENCE/verify-message.txt" >/dev/null

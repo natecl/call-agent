@@ -64,7 +64,7 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `verify-quick-ask.txt`. The five-line checklist and `5/5 passed`.
 - `book-result.json`. The JSON line `book` printed. Default wipe is proven the same way.
 - `book-artifacts/<call_control_id>/`. A retain run's booking artifacts, copied from the scratch artifacts dir.
-- `verify-book.txt`. The six-line checklist and `6/6 passed`.
+- `verify-book.txt`. The seven-line checklist and `7/7 passed`.
 - `verify-message.txt`. The six-line MessagingPort checklist and `6/6 passed`.
 - `verify-linq-call.txt`. The thirteen-line linq-to-call checklist and `13/13 passed`.
 - `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
