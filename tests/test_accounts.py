@@ -156,10 +156,12 @@ def test_neon_accounts_roundtrip_through_sqlite_bridge(tmp_path: Path) -> None:
             phone=E164("+14155552671"),
             first_name="Nathan",
             user_id=UserId("acctnathan"),
+            from_did=E164("+15555550177"),
         )
     )
 
     assert result.record.first_name == "Nathan"
+    assert result.record.from_did == E164("+15555550177")
     assert store.get_by_phone(E164("+14155552671")) == result.record
 
 
@@ -200,6 +202,8 @@ def test_cli_account_upsert_get_list(tmp_path: Path) -> None:
             "--retain",
             "--user",
             "acctnathan",
+            "--from-did",
+            "+15555550177",
         ],
         env=env,
     )
@@ -214,12 +218,16 @@ def test_cli_account_upsert_get_list(tmp_path: Path) -> None:
     payload = json.loads(upserted.stdout)
     assert payload["user_id"] == "acctnathan"
     assert payload["first_name"] == "Nathan"
+    assert payload["from_did"] == "+15555550177"
     assert fetched.exit_code == 0
     assert json.loads(fetched.stdout)["user_id"] == "acctnathan"
+    assert json.loads(fetched.stdout)["from_did"] == "+15555550177"
     assert listed.exit_code == 0
     assert "acctnathan" in listed.stdout
     assert "+14155552671" in listed.stdout
     assert "Nathan" in listed.stdout
+    assert "+15555550177" in listed.stdout
+    assert "FROM_DID" in listed.stdout
 
 
 def test_cli_account_get_missing_exits_one(tmp_path: Path) -> None:
@@ -307,3 +315,220 @@ def test_accounts_sync_missing_secret_is_401(
         )
 
     assert response.status_code == 401
+
+
+def test_upsert_merges_from_did_when_omitted(tmp_path: Path) -> None:
+    store = Accounts(tmp_path / "ledger.sqlite3")
+    first = store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+            from_did=E164("+15555550177"),
+        )
+    )
+    second = store.upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            stripe_customer_id="cus_123",
+        )
+    )
+
+    assert first.record.from_did == E164("+15555550177")
+    assert second.record.from_did == E164("+15555550177")
+    assert second.record.stripe_customer_id == "cus_123"
+
+
+def test_from_did_equal_to_phone_fails_loud(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not the user's own phone"):
+        AccountWrite(
+            phone=E164("+17272701288"),
+            first_name="Nathan",
+            from_did=E164("+17272701288"),
+        )
+    env = {
+        "CALL_AGENT_DB_PATH": str(tmp_path / "ledger.sqlite3"),
+        "CALL_AGENT_ARTIFACTS_DIR": str(tmp_path / "artifacts"),
+        "QUICK_ASK_LIVE": "0",
+        "NO_COLOR": "1",
+        "TERM": "dumb",
+        "COLUMNS": "120",
+    }
+    result = runner.invoke(
+        app,
+        [
+            "account",
+            "upsert",
+            "--phone",
+            "+17272701288",
+            "--name",
+            "Nathan",
+            "--from-did",
+            "+17272701288",
+        ],
+        env=env,
+    )
+    assert result.exit_code == 2
+    assert "not the user's own phone" in result.output
+
+
+def test_existing_users_table_gains_from_did_column(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE users (
+            user_id TEXT PRIMARY KEY,
+            phone TEXT NOT NULL UNIQUE,
+            first_name TEXT,
+            stripe_customer_id TEXT UNIQUE,
+            plan TEXT,
+            minutes_included INTEGER NOT NULL DEFAULT 0,
+            minutes_used INTEGER NOT NULL DEFAULT 0,
+            retain_call_artifacts INTEGER NOT NULL DEFAULT 0,
+            prefs TEXT NOT NULL DEFAULT '{}',
+            stripe_synced_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO users (
+            user_id, phone, first_name, minutes_included, minutes_used,
+            retain_call_artifacts, prefs, created_at, updated_at
+        ) VALUES (?, ?, ?, 0, 0, 0, '{}', ?, ?)
+        """,
+        (
+            "acctnathan",
+            "+14155552671",
+            "Nathan",
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-01T00:00:00+00:00",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    store = Accounts(path)
+    fetched = store.get_by_phone(E164("+14155552671"))
+    assert fetched is not None
+    assert fetched.from_did is None
+    again = Accounts(path)
+    assert again.get_by_phone(E164("+14155552671")).from_did is None
+
+
+def test_existing_neon_users_table_gains_from_did_column(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "neon.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE users (
+            user_id TEXT PRIMARY KEY,
+            phone TEXT NOT NULL UNIQUE,
+            first_name TEXT,
+            stripe_customer_id TEXT UNIQUE,
+            plan TEXT,
+            minutes_included INTEGER NOT NULL DEFAULT 0,
+            minutes_used INTEGER NOT NULL DEFAULT 0,
+            retain_call_artifacts INTEGER NOT NULL DEFAULT 0,
+            prefs TEXT NOT NULL DEFAULT '{}',
+            stripe_synced_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO users (
+            user_id, phone, first_name, minutes_included, minutes_used,
+            retain_call_artifacts, prefs, created_at, updated_at
+        ) VALUES (?, ?, ?, 0, 0, 0, '{}', ?, ?)
+        """,
+        (
+            "acctnathan",
+            "+14155552671",
+            "Nathan",
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-01T00:00:00+00:00",
+        ),
+    )
+    connection.commit()
+    connection.close()
+    store = NeonAccounts(
+        "postgresql://unused",
+        connect=lambda: _SqlitePg(path),
+    )
+    fetched = store.get_by_phone(E164("+14155552671"))
+    assert fetched is not None
+    assert fetched.from_did is None
+
+
+def test_accounts_sync_without_from_did_preserves_seeded_did(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sync-secret"
+    monkeypatch.setenv("ACCOUNT_SYNC_SECRET", secret)
+    monkeypatch.setenv("CALL_AGENT_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    settings = _settings(tmp_path)
+    open_accounts(settings).upsert(
+        AccountWrite(
+            phone=E164("+14155552671"),
+            first_name="Nathan",
+            user_id=UserId("acctnathan"),
+            from_did=E164("+15555550177"),
+        )
+    )
+    body = json.dumps(
+        {
+            "phone": "+14155552671",
+            "first_name": "Nathan",
+            "user_id": "acctnathan",
+            "stripe_customer_id": "cus_123",
+            "stripe_event_created": "2026-09-13T12:00:00+00:00",
+        }
+    ).encode()
+    assigned = json.dumps(
+        {
+            "phone": "+14155552671",
+            "first_name": "Nathan",
+            "user_id": "acctnathan",
+            "from_did": "+15555550188",
+            "stripe_event_created": "2026-09-13T13:00:00+00:00",
+        }
+    ).encode()
+    with TestClient(fastapi_app) as client:
+        kept = client.post(
+            "/accounts/sync",
+            content=body,
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(secret, body)
+            },
+        )
+        after_omit = open_accounts(settings).get_by_phone(
+            E164("+14155552671")
+        )
+        updated = client.post(
+            "/accounts/sync",
+            content=assigned,
+            headers={
+                ACCOUNT_SYNC_SIGNATURE_HEADER: sign_account_sync(
+                    secret, assigned
+                )
+            },
+        )
+
+    assert kept.status_code == 200
+    assert after_omit is not None
+    assert after_omit.from_did == E164("+15555550177")
+    assert updated.status_code == 200
+    record = open_accounts(settings).get_by_phone(E164("+14155552671"))
+    assert record is not None
+    assert record.from_did == E164("+15555550188")
+

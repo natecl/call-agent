@@ -26,6 +26,7 @@ from .domain import (
     DialEffect,
     DialPlacedEvent,
     DialSpec,
+    E164,
     Effect,
     FinishEffect,
     ForwardAudioEffect,
@@ -62,7 +63,6 @@ from .artifacts import (
     publish_durable_artifacts,
     wipe_run_dir,
 )
-from .ledger import open_ledger
 from .report import JournalRow, Refs, build_call_report, redact_call_report
 from .telnyx import (
     LiveTelnyxHttp,
@@ -567,6 +567,8 @@ def assert_live_dial_origins(settings: Settings) -> None:
 async def run_call(
     request: QuickAskRequest | BookRequest,
     settings: Settings,
+    *,
+    from_did: E164,
     ports: Ports | None = None,
     scenario: StubScenario | None = None,
 ) -> CallResult:
@@ -593,20 +595,11 @@ async def run_call(
     connection_id = (
         settings.telnyx_connection_id or "stub-connection"
     )
-    record = open_ledger(settings).provision(
-        request.user_id,
-        active_ports.telnyx_http,
-        connection_id,
-    )
-    if record.did is None:
-        raise RuntimeError(
-            f"DID order {record.order_id} is still pending"
-        )
     webhook_url, stream_url = webhook_and_stream_urls(settings)
     dial_spec = DialSpec(
         connection_id=connection_id,
         to=request.to,
-        from_did=record.did,
+        from_did=from_did,
         stream_url=stream_url,
         webhook_url=webhook_url,
         codec=codec,
@@ -618,7 +611,7 @@ async def run_call(
     call = Call(
         run_id=run_id,
         request=request,
-        from_did=record.did,
+        from_did=from_did,
     )
     handle = CallHandle(
         call=call,

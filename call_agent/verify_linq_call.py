@@ -12,6 +12,7 @@ from .accounts import AccountWrite, UserRecord, open_accounts
 from .config import Settings
 from .domain import (
     BookRequest,
+    ClientState,
     E164,
     FirstName,
     Mode,
@@ -24,6 +25,7 @@ from .kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
+    NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     KickoffBlocked,
@@ -37,6 +39,7 @@ from .kickoff import (
     parse_kickoff,
     run_kickoff,
 )
+from .ledger import open_ledger
 from .linq import StubLinq, parse_inbound
 from .messaging import IMESSAGE
 from .runtime import normalized_public_host
@@ -61,6 +64,7 @@ APPROVE_FOLLOWUP_TEXT = "approve"
 BOOK_EVENT_ID = "kickoff-book-0001"
 BAD_EVENT_ID = "kickoff-bad-0001"
 STUB_FROM = E164("+15555550100")
+ACCOUNT_FROM_DID = E164("+15555550177")
 
 
 class LinqCallVerifyInput(BaseModel):
@@ -83,6 +87,8 @@ CheckName = Literal[
     "call_ran",
     "cross_link",
     "same_host_dial",
+    "from_did_users_row",
+    "no_number_order",
 ]
 
 
@@ -99,6 +105,8 @@ class LinqCallVerifyReport(BaseModel):
 
     passed: bool
     checks: tuple[
+        LinqCallVerifyCheck,
+        LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
@@ -163,6 +171,7 @@ def verify_linq_call(
             phone=E164(INBOUND_SENDER),
             first_name="Nathan",
             user_id=UserId("acctnathan"),
+            from_did=ACCOUNT_FROM_DID,
         )
     ).record
 
@@ -189,7 +198,7 @@ def verify_linq_call(
     )
 
     expected_book = BookRequest(
-        user_id=UserId("default"),
+        user_id=nathan.user_id,
         to=active.to,
         caller=FirstName("Nathan"),
         mode=Mode.STUB,
@@ -288,7 +297,7 @@ def verify_linq_call(
 
     ask_first = parse_kickoff(ASK_KICKOFF_TEXT, settings, account=nathan)
     expected_ask = QuickAskRequest(
-        user_id=UserId("default"),
+        user_id=nathan.user_id,
         to=active.to,
         question=Question.from_cli(QuestionType.HOURS, None),
         caller=FirstName("Nathan"),
@@ -378,8 +387,17 @@ def verify_linq_call(
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
     )
+    missing_did = UserRecord(
+        user_id=UserId("nofromdid"),
+        phone=E164("+15555550198"),
+        first_name="Nathan",
+        from_did=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
     no_account = intake_kickoff(active.text, settings, account=None)
     no_name = intake_kickoff(active.text, settings, account=unnamed)
+    no_from_did = intake_kickoff(active.text, settings, account=missing_did)
     gate_ok = (
         isinstance(no_account, KickoffBlocked)
         and no_account.reply == NO_ACCOUNT_TEXT
@@ -387,8 +405,12 @@ def verify_linq_call(
         and isinstance(no_name, KickoffBlocked)
         and no_name.reply == NO_NAME_TEXT
         and not no_name.reply.startswith("Call failed:")
+        and isinstance(no_from_did, KickoffBlocked)
+        and no_from_did.reply == NO_FROM_DID_TEXT
+        and not no_from_did.reply.startswith("Call failed:")
         and "missing caller name" not in no_account.reply
         and "missing caller name" not in no_name.reply
+        and "missing caller name" not in no_from_did.reply
         and not (artifacts / "stub-call-0001").exists()
     )
     gate_check = LinqCallVerifyCheck(
@@ -396,7 +418,8 @@ def verify_linq_call(
         passed=gate_ok,
         detail=(
             f"none={type(no_account).__name__} "
-            f"unnamed={type(no_name).__name__}"
+            f"unnamed={type(no_name).__name__} "
+            f"no_from_did={type(no_from_did).__name__}"
         ),
     )
 
@@ -412,11 +435,15 @@ def verify_linq_call(
     link_ok = False
     host_ok = False
     lookup_ok = False
+    from_did_ok = False
+    no_order_ok = False
     reply_detail = "kickoff did not run"
     call_detail = "call did not run"
     link_detail = "cross-link did not run"
     host_detail = "dial did not run"
     lookup_detail = "account lookup did not run"
+    from_did_detail = "from-DID check did not run"
+    no_order_detail = "no-order check did not run"
     try:
         if inbound is None or not isinstance(confirm_parsed, KickoffParsed):
             raise ValueError("confirm follow-up did not parse")
@@ -427,7 +454,13 @@ def verify_linq_call(
             port=port,
             settings=settings,
         )
-        receipt = asyncio.run(run_kickoff(session, confirm_parsed.request))
+        receipt = asyncio.run(
+            run_kickoff(
+                session,
+                confirm_parsed.request,
+                from_did=confirm_parsed.from_did,
+            )
+        )
         rows = _read_jsonl(
             artifacts / "linq" / BOOK_EVENT_ID / "replies.jsonl"
         )
@@ -510,16 +543,50 @@ def verify_linq_call(
         lookup_ok = (
             isinstance(confirm_parsed, KickoffParsed)
             and confirm_parsed.request.caller == FirstName("Nathan")
-            and confirm_parsed.request.user_id == UserId("default")
+            and confirm_parsed.request.user_id == nathan.user_id
             and account_blob.get("user_id") == str(nathan.user_id)
             and account_blob.get("phone") == INBOUND_SENDER
+            and account_blob.get("from_did") == str(ACCOUNT_FROM_DID)
             and "first_name" not in account_blob
             and "name" not in account_blob
         )
         lookup_detail = (
             f"caller={confirm_parsed.request.caller} "
-            f"did_user={confirm_parsed.request.user_id} "
-            f"account_user={account_blob.get('user_id')}"
+            f"request_user={confirm_parsed.request.user_id} "
+            f"account_user={account_blob.get('user_id')} "
+            f"account_from={account_blob.get('from_did')}"
+        )
+
+        client_state = ClientState.decode(str(dial.get("client_state") or ""))
+        from_did_ok = (
+            dial.get("from") == str(ACCOUNT_FROM_DID)
+            and dial.get("from") != INBOUND_SENDER
+            and dial.get("from") != str(active.from_did)
+            and confirm_parsed.from_did == ACCOUNT_FROM_DID
+            and client_state.user_id == nathan.user_id
+        )
+        from_did_detail = (
+            f"dial_from={dial.get('from')} "
+            f"linq_line={active.from_did} "
+            f"sender={INBOUND_SENDER} "
+            f"client_user={client_state.user_id}"
+        )
+
+        source = "".join(
+            (Path(__file__).resolve().parent / name).read_text()
+            for name in ("runtime.py", "kickoff.py", "server.py")
+        )
+        ledger_rows = open_ledger(settings).list()
+        no_order_ok = (
+            ledger_rows == []
+            and "provision(" not in source
+            and "search_and_order_number" not in source
+            and "number_orders" not in source
+            and "open_ledger" not in source
+        )
+        no_order_detail = (
+            f"dids={len(ledger_rows)} "
+            f"provision={'provision(' in source}"
         )
     except (OSError, ValueError, TypeError, KeyError, IndexError) as error:
         if not reply_ok:
@@ -530,8 +597,12 @@ def verify_linq_call(
             link_detail = str(error)
         elif not host_ok:
             host_detail = str(error)
-        else:
+        elif not lookup_ok:
             lookup_detail = str(error)
+        elif not from_did_ok:
+            from_did_detail = str(error)
+        else:
+            no_order_detail = str(error)
 
     checks = (
         book_check,
@@ -555,6 +626,16 @@ def verify_linq_call(
         LinqCallVerifyCheck(
             name="same_host_dial", passed=host_ok, detail=host_detail
         ),
+        LinqCallVerifyCheck(
+            name="from_did_users_row",
+            passed=from_did_ok,
+            detail=from_did_detail,
+        ),
+        LinqCallVerifyCheck(
+            name="no_number_order",
+            passed=no_order_ok,
+            detail=no_order_detail,
+        ),
     )
     return LinqCallVerifyReport(
         passed=all(check.passed for check in checks),
@@ -571,7 +652,7 @@ def format_linq_call_report(report: LinqCallVerifyReport) -> str:
         for check in report.checks
     ]
     passed = sum(check.passed for check in report.checks)
-    lines.append(f"{passed}/11 passed")
+    lines.append(f"{passed}/13 passed")
     return "\n".join(lines)
 
 

@@ -66,7 +66,7 @@ The script writes to `artifacts/verify-call-agent/<RUN_ID>/` in the repo (the `a
 - `book-artifacts/<call_control_id>/`. A retain run's booking artifacts, copied from the scratch artifacts dir.
 - `verify-book.txt`. The six-line checklist and `6/6 passed`.
 - `verify-message.txt`. The six-line MessagingPort checklist and `6/6 passed`.
-- `verify-linq-call.txt`. The eleven-line linq-to-call checklist and `11/11 passed`.
+- `verify-linq-call.txt`. The thirteen-line linq-to-call checklist and `13/13 passed`.
 - `verify-webhooks.txt`. The Worker inbox five-line checklist and `5/5 passed`.
 - `verify-persistence.txt`. The four-line checklist, `sqlite ledger + local artifacts`, and `4/4 passed`. The partial-R2 refusal is in `transcript.txt`.
 

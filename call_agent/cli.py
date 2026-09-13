@@ -70,6 +70,7 @@ app.add_typer(linq_app, name="linq")
 LIVE_GATE_MESSAGE = (
     "live mode is gated: set QUICK_ASK_LIVE=1 and the keys in .env.example"
 )
+STUB_FROM_DID = E164("+15555550100")
 
 
 @did_app.command("provision")
@@ -131,6 +132,7 @@ def did_list() -> None:
 def account_upsert(
     phone: str = typer.Option(..., "--phone"),
     name: str | None = typer.Option(None, "--name"),
+    from_did: str | None = typer.Option(None, "--from-did"),
     retain: bool = typer.Option(False, "--retain"),
     minutes: int = typer.Option(0, "--minutes"),
     user: str | None = typer.Option(None, "--user"),
@@ -141,6 +143,7 @@ def account_upsert(
         write = AccountWrite(
             phone=E164(phone),
             first_name=name,
+            from_did=E164(from_did) if from_did is not None else None,
             user_id=UserId(user) if user is not None else None,
             plan=plan,
             minutes_included=minutes,
@@ -185,12 +188,15 @@ def account_list() -> None:
     except PersistenceConfigError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
-    typer.echo(f"{'USER':<16} {'PHONE':<16} {'NAME':<12} MINUTES RETAIN")
+    typer.echo(
+        f"{'USER':<16} {'PHONE':<16} {'NAME':<12} {'FROM_DID':<16} MINUTES RETAIN"
+    )
     for record in records:
         typer.echo(
             f"{str(record.user_id):<16} "
             f"{str(record.phone):<16} "
             f"{(record.first_name or '-'):<12} "
+            f"{str(record.from_did or '-'):<16} "
             f"{record.minutes_included:<7} "
             f"{'on' if record.retain_call_artifacts else 'off'}"
         )
@@ -204,6 +210,7 @@ def quick_ask(
     item: str | None = typer.Option(None, "--item"),
     user: str = typer.Option("default", "--user"),
     live: bool = typer.Option(False, "--live"),
+    from_did: str | None = typer.Option(None, "--from-did"),
 ) -> None:
     settings = Settings()
     if live:
@@ -216,10 +223,13 @@ def quick_ask(
             caller=FirstName(name),
             mode=Mode.LIVE if live else Mode.STUB,
         )
+        resolved_from = _resolve_from_did(
+            settings, request.user_id, from_did, request.mode
+        )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     try:
-        result = asyncio.run(_run_request(request, settings))
+        result = asyncio.run(_run_request(request, settings, resolved_from))
     except ValueError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
@@ -235,6 +245,7 @@ def book(
     notes: str | None = typer.Option(None, "--notes"),
     user: str = typer.Option("default", "--user"),
     live: bool = typer.Option(False, "--live"),
+    from_did: str | None = typer.Option(None, "--from-did"),
 ) -> None:
     settings = Settings()
     if live:
@@ -249,10 +260,13 @@ def book(
             time_text=time,
             constraints=notes,
         )
+        resolved_from = _resolve_from_did(
+            settings, request.user_id, from_did, request.mode
+        )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     try:
-        result = asyncio.run(_run_request(request, settings))
+        result = asyncio.run(_run_request(request, settings, resolved_from))
     except ValueError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=2) from error
@@ -441,11 +455,31 @@ def _require_live_gate(settings: Settings) -> None:
         raise typer.Exit(code=2)
 
 
+def _resolve_from_did(
+    settings: Settings,
+    user_id: UserId,
+    flag: str | None,
+    mode: Mode,
+) -> E164:
+    if flag:
+        return E164(flag)
+    account = open_accounts(settings).get(user_id)
+    if account is not None and account.from_did is not None:
+        return account.from_did
+    if mode is Mode.STUB:
+        return STUB_FROM_DID
+    raise ValueError(
+        f"no from-DID for user {user_id}: pass --from-did or assign one with "
+        "`call-agent account upsert --phone <iMessage> --from-did "
+        "<Treena DID>`. Live calls never order a number."
+    )
+
+
 async def _run_request(
-    request: CallRequest, settings: Settings
+    request: CallRequest, settings: Settings, from_did: E164
 ) -> CallResult:
     if request.mode is Mode.STUB:
-        return await run_call(request, settings)
+        return await run_call(request, settings, from_did=from_did)
     validate_live(settings)
     assert_live_dial_origins(settings)
     running = await serve_in_process(settings)
@@ -455,6 +489,6 @@ async def _run_request(
             running.serve_token,
             settings.live_ingress_timeout_s,
         )
-        return await run_call(request, settings)
+        return await run_call(request, settings, from_did=from_did)
     finally:
         await running.stop()

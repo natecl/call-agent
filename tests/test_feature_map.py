@@ -63,6 +63,7 @@ def test_verify_feature_index_lists_book_recipes() -> None:
 def test_feature_map_lists_account_rows() -> None:
     required_rows = (
         "| `users` | shipped |",
+        "| `users.from_did` | shipped |",
         "| `open_accounts` | shipped |",
         "| `account upsert` | shipped |",
         "| `account get` | shipped |",
@@ -71,13 +72,17 @@ def test_feature_map_lists_account_rows() -> None:
         "| `Stripe → users sync` | gated |",
         "| `minutes ledger` | not shipped |",
         "| `kickoff account lookup` | shipped |",
+        "| `kickoff from-DID` | shipped |",
         "| `no-account reply` | shipped |",
         "| `no-name reply` | shipped |",
+        "| `no-from-did reply` | shipped |",
+        "| `LINQ_KICKOFF_USER_ID` | not shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]
 
     assert missing == []
+    assert "stays `LINQ_KICKOFF_USER_ID`" not in INVENTORY
     did_at = _heading_index(INVENTORY, "did provision and did list")
     accounts_at = _heading_index(INVENTORY, "accounts")
     quick_ask_at = _heading_index(INVENTORY, "quick-ask")
@@ -98,8 +103,11 @@ def test_feature_map_lists_linq_to_call_rows() -> None:
         "| `verify-linq-call` | shipped |",
         "| mid-call chat | not shipped |",
         "| `kickoff account lookup` | shipped |",
+        "| `kickoff from-DID` | shipped |",
         "| `no-account reply` | shipped |",
         "| `no-name reply` | shipped |",
+        "| `no-from-did reply` | shipped |",
+        "| `no number_orders at dial` | shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]

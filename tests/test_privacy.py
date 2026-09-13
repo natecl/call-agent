@@ -29,6 +29,8 @@ WIPED_NAMES = (
     "dial.json",
 )
 
+FROM_DID = E164("+15555550100")
+
 
 def _settings(tmp_path: Path, **updates: object) -> Settings:
     values = dict(
@@ -85,7 +87,7 @@ async def test_hangup_deletes_call_artifacts_when_opt_in_absent(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
-    result = await run_call(_quick_ask(), settings)
+    result = await run_call(_quick_ask(), settings, from_did=FROM_DID)
     run_dir = settings.call_agent_artifacts_dir / result.call_control_id
 
     assert result.status == "answered"
@@ -101,7 +103,7 @@ async def test_hangup_keeps_call_artifacts_when_settings_opt_in(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path, retain_call_artifacts=True)
-    result = await run_call(_quick_ask(), settings)
+    result = await run_call(_quick_ask(), settings, from_did=FROM_DID)
     run_dir = settings.call_agent_artifacts_dir / result.call_control_id
 
     assert result.status == "answered"
@@ -117,7 +119,7 @@ async def test_hangup_keeps_call_artifacts_when_request_opt_in(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path, retain_call_artifacts=False)
-    result = await run_call(_quick_ask(True), settings)
+    result = await run_call(_quick_ask(True), settings, from_did=FROM_DID)
     run_dir = settings.call_agent_artifacts_dir / result.call_control_id
 
     assert (run_dir / "transcript.json").is_file()
@@ -138,6 +140,7 @@ async def test_book_hangup_wipes_unless_opted_in(tmp_path: Path) -> None:
             constraints="outdoor if possible",
         ),
         settings,
+        from_did=FROM_DID,
     )
     run_dir = settings.call_agent_artifacts_dir / result.call_control_id
 
@@ -165,7 +168,7 @@ async def test_wipe_skips_durable_publish(
         "call_agent.runtime.publish_durable_artifacts", capture
     )
     settings = _settings(tmp_path)
-    result = await run_call(_quick_ask(), settings)
+    result = await run_call(_quick_ask(), settings, from_did=FROM_DID)
 
     assert published == []
     assert not (
@@ -194,7 +197,7 @@ async def test_retain_publishes_durable_artifacts(
         "call_agent.runtime.publish_durable_artifacts", capture
     )
     settings = _settings(tmp_path, retain_call_artifacts=True)
-    result = await run_call(_quick_ask(), settings)
+    result = await run_call(_quick_ask(), settings, from_did=FROM_DID)
 
     assert published == [result.call_control_id]
     assert (

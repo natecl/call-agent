@@ -420,6 +420,9 @@ def _live_book_request() -> BookRequest:
     )
 
 
+_LIVE_FROM_DID = E164("+15555550100")
+
+
 def _port_is_closed(port: int) -> bool:
     with socket.socket() as sock:
         sock.settimeout(0.2)
@@ -441,7 +444,7 @@ async def test_live_request_fails_loud_when_public_base_misses_this_process(
         live_ingress_timeout_s=0.3,
     )
     with pytest.raises(ValueError, match="did not reach this process"):
-        await _run_request(_live_book_request(), live)
+        await _run_request(_live_book_request(), live, _LIVE_FROM_DID)
 
 
 async def test_live_request_fails_loud_when_webhook_host_diverges(
@@ -455,7 +458,7 @@ async def test_live_request_fails_loud_when_webhook_host_diverges(
         public_webhook_url="https://stale-tunnel.trycloudflare.com",
     )
     with pytest.raises(ValueError, match="webhook host"):
-        await _run_request(_live_book_request(), live)
+        await _run_request(_live_book_request(), live, _LIVE_FROM_DID)
     assert _port_is_closed(port)
 
 
@@ -465,7 +468,7 @@ async def test_live_request_fails_loud_when_webhook_url_unset(
     port = unused_port()
     live = live_settings(settings, port, public_webhook_url=None)
     with pytest.raises(ValueError, match="PUBLIC_WEBHOOK_URL"):
-        await _run_request(_live_book_request(), live)
+        await _run_request(_live_book_request(), live, _LIVE_FROM_DID)
     assert _port_is_closed(port)
 
 

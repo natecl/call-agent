@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     linq_from_e164: str | None = None
     linq_webhook_signing_secret: str | None = None
     linq_webhook_url: str | None = None
-    linq_kickoff_user_id: str = "default"
     account_sync_secret: str | None = None
     openai_api_key: str | None = None
     openai_live_model: str = "gpt-live-1"
