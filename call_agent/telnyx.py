@@ -430,12 +430,19 @@ class StubTelnyxMedia:
                 self._dropped = True
                 self._submit(
                     parse_webhook(
-                        StubTelnyxHttp._webhook(
-                            "webhook-hangup-media-drop-0001",
-                            "call.hangup",
-                            hangup_cause="normal_clearing",
-                            hangup_source="callee",
-                        )
+                        json.dumps(
+                            {
+                                "data": {
+                                    "event_type": "call.hangup",
+                                    "id": "webhook-hangup-media-drop-0001",
+                                    "payload": {
+                                        "call_control_id": "stub-call-0001",
+                                        "hangup_cause": "normal_clearing",
+                                        "hangup_source": "callee",
+                                    },
+                                }
+                            }
+                        ).encode()
                     )
                 )
             raise WebSocketDisconnect(code=1006)
@@ -472,12 +479,14 @@ class StubTelnyxHttp:
         write_json: WriteJson = _ignore_json,
         dial_override: dict[str, Any] | None = None,
         far_party_hangs_up: bool = False,
+        placed_call_control_id: str = "stub-call-0001",
     ) -> None:
         self._submit = submit
         self._media = media or StubTelnyxMedia(submit)
         self._write_json = write_json
         self._dial_override = dial_override or {}
         self._far_party_hangs_up = far_party_hangs_up
+        self._placed_call_control_id = placed_call_control_id
         self._orders: dict[str, OrderedNumber] = {}
         self._number_counter = 0
         self._hung_up = False
@@ -502,7 +511,7 @@ class StubTelnyxHttp:
             "dial.json", serialize_dial(spec) | self._dial_override
         )
         placed = DialPlacedEvent(
-            call_control_id="stub-call-0001",
+            call_control_id=CallControlId(self._placed_call_control_id),
             call_leg_id="stub-leg-0001",
             call_session_id="stub-session-0001",
         )
@@ -532,19 +541,24 @@ class StubTelnyxHttp:
             )
         )
         if self._far_party_hangs_up:
-            self._hung_up = True
-            self._media.stop()
-            self._submit(
-                parse_webhook(
-                    self._webhook(
-                        "webhook-hangup-0001",
-                        "call.hangup",
-                        hangup_cause="normal_clearing",
-                        hangup_source="callee",
-                    )
+            self.far_party_hangup()
+        return placed
+
+    def far_party_hangup(self) -> None:
+        if self._hung_up:
+            return
+        self._hung_up = True
+        self._media.stop()
+        self._submit(
+            parse_webhook(
+                self._webhook(
+                    "webhook-hangup-0001",
+                    "call.hangup",
+                    hangup_cause="normal_clearing",
+                    hangup_source="callee",
                 )
             )
-        return placed
+        )
 
     def hangup(self, call_control_id: CallControlId) -> None:
         if self._hung_up:
@@ -573,15 +587,15 @@ class StubTelnyxHttp:
             )
         )
 
-    @staticmethod
     def _webhook(
+        self,
         webhook_id: str,
         event_type: str,
         hangup_cause: str | None = None,
         hangup_source: str | None = None,
     ) -> bytes:
         payload: dict[str, Any] = {
-            "call_control_id": "stub-call-0001",
+            "call_control_id": self._placed_call_control_id,
             "call_leg_id": "stub-leg-0001",
             "call_session_id": "stub-session-0001",
             "connection_id": "stub-connection",

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal, TypeAlias
+from .artifacts import artifact_slug
 
 from .domain import (
     E164,
     HANGUP_MARK,
     Call,
+    ConversationTerminal,
     FirstName,
     FrozenModel,
     HangupConfirmed,
@@ -17,6 +17,7 @@ from .domain import (
     CallResult,
     ReduceSettings,
     TelnyxEnded,
+    VerdictSource,
 )
 
 JournalRow: TypeAlias = dict[str, Any]
@@ -100,6 +101,8 @@ class CallReport(FrozenModel):
     audio: AudioSummary = AudioSummary()
     task: TaskSummary | None = None
     refs: Refs
+    artifact_prefix: str = ""
+    verdict_source: VerdictSource | None = None
 
 
 MaskedE164: TypeAlias = Literal["[phone]"]
@@ -226,6 +229,11 @@ def build_call_report(
     if final_echo is not None:
         timing["final_mark_echoed"] = final_echo["t_ms"]
     ended = call.telnyx if isinstance(call.telnyx, TelnyxEnded) else None
+    verdict_source = (
+        call.conversation.verdict_source
+        if isinstance(call.conversation, ConversationTerminal)
+        else None
+    )
     return CallReport(
         call_control_id=result.call_control_id,
         run_id=str(call.run_id),
@@ -301,4 +309,6 @@ def build_call_report(
             else None
         ),
         refs=refs,
+        artifact_prefix=artifact_slug(result.call_control_id),
+        verdict_source=verdict_source,
     )

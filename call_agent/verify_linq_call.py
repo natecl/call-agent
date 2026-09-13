@@ -45,6 +45,7 @@ from .ledger import open_ledger
 from .linq import StubLinq, parse_inbound
 from .messaging import IMESSAGE
 from .runtime import normalized_public_host
+from .user_text import contains_banned_user_text
 from .verify_message import (
     INBOUND_CHAT_ID,
     INBOUND_SENDER,
@@ -335,7 +336,10 @@ def verify_linq_call(
             and oneshot.pending.waiting_for == "confirm"
             and oneshot.reply == CONFIRM_ASK_TEXT
             and not isinstance(oneshot, KickoffParsed)
-            and failed_reply_text(bad_confirm.reason).startswith("Call failed:")
+            and not contains_banned_user_text(
+                failed_reply_text(bad_confirm.reason)
+            )
+            and "confirm" in bad_confirm.reason
             and isinstance(confirm_parsed, KickoffParsed)
             and confirm_parsed.verb == "book"
             and confirm_parsed.request == expected_book
@@ -426,8 +430,9 @@ def verify_linq_call(
             artifacts / "linq" / BAD_EVENT_ID / "kickoff.json"
         )
         fail_ok = (
-            help_text.startswith("Call failed:")
+            not contains_banned_user_text(help_text)
             and "phone number" in fail_parsed.reason
+            and "phone number" in help_text
             and not kickoff_marker.exists()
             and not (artifacts / "stub-call-0001").exists()
             and fail_port.last_path == f"/chats/{INBOUND_CHAT_ID}/messages"
@@ -466,13 +471,13 @@ def verify_linq_call(
     gate_ok = (
         isinstance(no_account, KickoffBlocked)
         and no_account.reply == NO_ACCOUNT_TEXT
-        and not no_account.reply.startswith("Call failed:")
+        and not contains_banned_user_text(no_account.reply)
         and isinstance(no_name, KickoffBlocked)
         and no_name.reply == NO_NAME_TEXT
-        and not no_name.reply.startswith("Call failed:")
+        and not contains_banned_user_text(no_name.reply)
         and isinstance(no_from_did, KickoffBlocked)
         and no_from_did.reply == NO_FROM_DID_TEXT
-        and not no_from_did.reply.startswith("Call failed:")
+        and not contains_banned_user_text(no_from_did.reply)
         and "missing caller name" not in no_account.reply
         and "missing caller name" not in no_name.reply
         and "missing caller name" not in no_from_did.reply

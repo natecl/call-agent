@@ -8,7 +8,7 @@
 - `book-missing-party` refuses a run with no `--party`.
 - `book-missing-time` refuses a run with no `--time`.
 - `book-artifacts` writes the per-call directory during the call. After hangup those files are deleted unless `RETAIN_CALL_ARTIFACTS=1`.
-- `book-hangup-on-goodbye` hangs up after `end_call` (`hangup.path` is `tool`). Exact `CLOSING_LINE` is a hygiene fallback (`trail`).
+- `book-hangup-on-goodbye` hangs up after a legal terminal `record_task_result` or `end_call` (`hangup.path` is `tool`). Exact `CLOSING_LINE` is hygiene (`trail`).
 - `book-keeps-talking` continues after Responses tool results instead of waiting forever for a backend.
 - `book-live-gate` refuses `--live` unless `QUICK_ASK_LIVE=1` and keys are present.
 

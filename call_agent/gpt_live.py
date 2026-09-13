@@ -480,6 +480,8 @@ class StubScenario(BaseModel):
     skip_disclosure: bool = False
     dial_override: dict[str, Any] = {}
     far_party_hangs_up: bool = False
+    far_party_hangs_up_after_record: bool = False
+    far_party_hangs_up_no_tools: bool = False
     media_sample_rate: SampleRate = 16000
     playback_never_drains: bool = False
     audio_chunks_after_closing_line: int = Field(default=2, ge=0)
@@ -491,6 +493,7 @@ class StubScenario(BaseModel):
     tool_args_invalid: bool = False
     skips_end_call: bool = False
     client_delegation: bool = False
+    placed_call_control_id: str = "stub-call-0001"
 
 
 class StubGptLive:
@@ -499,10 +502,12 @@ class StubGptLive:
         submit: Submit = _ignore_event,
         write_json: WriteJson = _ignore_json,
         scenario: StubScenario | None = None,
+        far_party_hangup: Callable[[], None] | None = None,
     ) -> None:
         self._submit = submit
         self._write_json = write_json
         self._scenario = scenario or StubScenario()
+        self._far_party_hangup = far_party_hangup or (lambda: None)
         self._closed = False
         self.appended_audio: list[str] = []
         self.spoken_lines: list[str] = []
@@ -607,6 +612,20 @@ class StubGptLive:
         self._emit_output(f"Does {facts} work for the time?")
         self._emit_input(f"{facts} works for us.")
         if self._scenario.never_resumes:
+            return
+        if self._scenario.far_party_hangs_up_no_tools:
+            summary = (
+                self._scenario.canned_answer
+                or (
+                    f"You're booked. We'll see you then. "
+                    f"Reservation confirmed. {facts}"
+                )
+            )
+            self._emit_output(f"Any issue with the constraints in {facts}?")
+            self._emit_input(summary)
+            self._emit_output("Great, take care.")
+            self._emit_audio(2)
+            self._far_party_hangup()
             return
         if self._scenario.client_delegation:
             self._submit(
@@ -748,6 +767,10 @@ class StubGptLive:
             )
             return
         self._emit_output(f"I'll wrap this up. {summary}")
+        if self._scenario.far_party_hangs_up_after_record:
+            self._emit_audio(self._scenario.audio_chunks_after_closing_line)
+            self._far_party_hangup()
+            return
         if self._scenario.skips_end_call:
             self._emit_closing()
             self._emit_audio(self._scenario.audio_chunks_after_closing_line)

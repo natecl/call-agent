@@ -743,7 +743,8 @@ def test_linq_webhook_bad_phone_followup_fails_and_does_not_dial(
     assert response.status_code == 200
     assert response.json()["parse_error"] is True
     assert replies[0]["kind"] == "error"
-    assert replies[0]["text"].startswith("Call failed:")
+    assert "phone" in replies[0]["text"].casefold()
+    assert "Call failed:" not in replies[0]["text"]
     assert not (linq_dir / "kickoff.json").exists()
     assert not (artifacts / "stub-call-0001").exists()
     assert not pending_collect_path(artifacts, INBOUND_CHAT_ID).exists()
@@ -801,9 +802,13 @@ def test_linq_webhook_live_host_guard_does_not_dial(
 
     assert response.status_code == 200
     assert response.json()["placed"] is False
-    assert "Call not placed:" in response.json()["reason"]
-    assert "hidden-beacon-080.fly.dev" in response.json()["reason"]
+    assert response.json()["reason"] == (
+        "I couldn't place the call. Please try again in a moment."
+    )
+    assert "Call not placed:" not in response.json()["reason"]
+    assert "PUBLIC_BASE_URL" not in response.json()["reason"]
     assert replies[0]["kind"] == "error"
+    assert replies[0]["text"] == response.json()["reason"]
     assert not (artifacts / "stub-call-0001").exists()
 
 

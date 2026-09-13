@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from call_agent.domain import (
     BOOK_RESULT_ADAPTER,
     CLOSING_LINE,
+    DONE_STATE_LINE,
     Answered,
     Booked,
     BookRequest,
@@ -634,7 +635,8 @@ def test_build_instructions_puts_disclosure_before_ask() -> None:
         "are frustrated acknowledge it briefly then take the next helpful step.\n"
         "Hi, I'm calling on behalf of Nathan. I have one quick question.\n"
         "Do you carry whole milk?\n"
-        "When the task is done, say a short goodbye.\n"
+        "When the task is done, do not end the call yourself. "
+        "Delegate to the backend so it can record the result and end the call.\n"
         "Never book, reserve, or hold anything. "
         "Keep every turn under two sentences.\n"
         "If the other party pauses, keep listening briefly, then continue: "
@@ -645,6 +647,7 @@ def test_build_instructions_puts_disclosure_before_ask() -> None:
         "Delegate to the backend when:\n"
         "- the other party has given a final yes, no, time, or answer; "
         "you must decide whether to accept what they offered; the call should end.\n"
+        "Do not end the call yourself; the backend records the result and ends it.\n"
         "Do not delegate to the backend when:\n"
         "- The other party greets you, repeats a result, or needs a brief clarification.\n"
         "- You can continue from these instructions and what they have already said.\n"
@@ -659,6 +662,8 @@ def test_build_instructions_puts_disclosure_before_ask() -> None:
     assert instructions.splitlines()[2] == "Do you carry whole milk?"
     assert "Backchannel policy:" not in instructions
     assert "Interruption policy:" not in instructions
+    assert DONE_STATE_LINE in instructions
+    assert "say a short goodbye" not in instructions
 
 
 def test_quick_ask_result_is_discriminated_and_answer_is_nonempty() -> None:
@@ -758,7 +763,8 @@ def test_build_book_instructions_puts_disclosure_before_facts() -> None:
         "Do not read a fixed list of questions.\n"
         "Never join a hold queue or waitlist. "
         "If they cannot seat this party at this time, accept the decline.\n"
-        "When the task is done, say a short goodbye.\n"
+        "When the task is done, do not end the call yourself. "
+        "Delegate to the backend so it can record the result and end the call.\n"
         "Keep every turn under two sentences.\n"
         "If the other party pauses, keep listening briefly, then continue: "
         "confirm what you have or ask your next question.\n"
@@ -768,6 +774,7 @@ def test_build_book_instructions_puts_disclosure_before_facts() -> None:
         "Delegate to the backend when:\n"
         "- the other party has given a final yes, no, time, or answer; "
         "you must decide whether to accept what they offered; the call should end.\n"
+        "Do not end the call yourself; the backend records the result and ends it.\n"
         "Do not delegate to the backend when:\n"
         "- The other party greets you, repeats a result, or needs a brief clarification.\n"
         "- You can continue from these instructions and what they have already said.\n"
@@ -790,6 +797,8 @@ def test_build_book_instructions_puts_disclosure_before_facts() -> None:
     assert "Never book, reserve, or hold anything." not in instructions
     assert "Backchannel policy:" not in instructions
     assert "Interruption policy:" not in instructions
+    assert DONE_STATE_LINE in instructions
+    assert "say a short goodbye" not in instructions
 
 
 def test_book_result_is_discriminated_and_confirmation_is_nonempty() -> None:
@@ -1118,16 +1127,12 @@ def test_record_task_result_then_end_call_owns_hangup(
         ),
         reduce_settings,
     )
-    call, end_effects = reduce(
-        call,
-        _tool_call("end_call", {"reason": "task_done"}, call_id="call_end"),
-        reduce_settings,
-    )
 
     assert isinstance(call.conversation, ConversationTerminal)
     assert call.conversation.verdict == Booked(
         confirmation_text="You're booked Friday."
     )
+    assert call.conversation.verdict_source == "tool"
     assert call.task is not None
     assert call.task.outcome == "confirmed"
     assert [effect.kind for effect in record_effects[:3]] == [
@@ -1136,19 +1141,91 @@ def test_record_task_result_then_end_call_owns_hangup(
         "write_task",
     ]
     assert isinstance(record_effects[2], WriteTaskEffect)
-    assert call.hangup == HangupFarewell(via="tool")
+    assert call.hangup == HangupFarewell(via="tool", wait_for_speech=True)
+    idle_before_speech = next(
+        (
+            effect
+            for effect in record_effects
+            if isinstance(effect, ScheduleEffect)
+            and isinstance(effect.event, FarewellIdleCheckEvent)
+        ),
+        None,
+    )
+    assert idle_before_speech is None
+
+    call, end_effects = reduce(
+        call,
+        _tool_call("end_call", {"reason": "task_done"}, call_id="call_end"),
+        reduce_settings,
+    )
+    assert call.hangup == HangupFarewell(via="tool", wait_for_speech=True)
     assert end_effects[0].kind == "tool_result"
     assert json.loads(end_effects[0].output)["ok"] is True
     assert isinstance(end_effects[1], ContinueResponseEffect)
+    assert not any(
+        isinstance(effect, ScheduleEffect)
+        and isinstance(effect.event, FarewellIdleCheckEvent)
+        for effect in end_effects
+    )
+
+    call, audio_effects = reduce(
+        call,
+        LiveOutputAudioEvent(delta_b64=AUDIO),
+        reduce_settings,
+    )
+    assert call.hangup == HangupFarewell(via="tool", wait_for_speech=False)
     idle = next(
         effect
-        for effect in end_effects
+        for effect in audio_effects
         if isinstance(effect, ScheduleEffect)
         and isinstance(effect.event, FarewellIdleCheckEvent)
     )
     call, drain_effects = reduce(call, idle.event, reduce_settings)
     assert call.hangup == HangupDraining(via="tool")
     assert CloseLiveEffect() in drain_effects
+
+
+def test_farewell_wait_for_speech_ignores_idle_until_audio(
+    reduce_settings: ReduceSettings,
+) -> None:
+    call, record_effects = reduce(
+        speaking_book_call("You're booked. We'll see you Friday."),
+        _tool_call(
+            "record_task_result",
+            {
+                "outcome": "confirmed",
+                "summary": "You're booked Friday.",
+                "confirmed_fields": {
+                    "party_size": 2,
+                    "time_text": "Friday 7:30pm",
+                    "name_on_record": "Nathan",
+                    "answer_text": None,
+                },
+            },
+        ),
+        reduce_settings,
+    )
+    assert isinstance(call.live, LiveActive)
+    call, effects = reduce(
+        call,
+        FarewellIdleCheckEvent(activity_seq=call.live.activity_seq),
+        reduce_settings,
+    )
+    assert call.hangup == HangupFarewell(via="tool", wait_for_speech=True)
+    assert effects == ()
+    del record_effects
+
+
+def test_assess_book_final_skips_goodbye_gate() -> None:
+    talk = Transcript().append_delta(
+        Speaker.BUSINESS, "You're booked. We'll see you Friday."
+    )
+    from call_agent.domain import assess_book_final
+
+    assert assess_book(talk) is None
+    assert assess_book_final(talk) == Booked(
+        confirmation_text="You're booked. We'll see you Friday."
+    )
 
 
 def test_invalid_record_task_result_returns_error_and_stays_open(
@@ -1217,6 +1294,6 @@ def test_build_backend_instructions_lists_legal_outcomes() -> None:
 
     assert "answered, declined, or no_result" in ask_text
     assert "confirmed, declined, or no_result" in book_text
-    assert "record_task_result" in ask_text
+    assert "record_task_result then end_call in the same turn" in ask_text
     assert "Never invent a successful action" in book_text
 

@@ -321,8 +321,8 @@ def test_streaming_failed_webhook_hangs_up_and_fails_the_call(
         "status": "failed",
         "answer_text": None,
         "call_control_id": "v3:abc",
-        "transcript_ref": "v3:abc/transcript.json",
-        "audio_ref": "v3:abc/audio/inbound.wav",
+        "transcript_ref": "v3_abc/transcript.json",
+        "audio_ref": "v3_abc/audio/inbound.wav",
         "reason": "Telnyx media streaming failed: connection_failed",
     }
 

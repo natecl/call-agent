@@ -92,8 +92,8 @@ END_CALL_TOOL = FunctionToolSpec(
     description=(
         "Ask the application to hang up. Call after record_task_result, "
         "or when the other party cannot help, it is a wrong number, or "
-        "voicemail. Say goodbye before or as you call this; the "
-        "application drains your speech, then hangs up."
+        "voicemail. A successful record_task_result already arms hangup. "
+        "The application drains remaining speech, then hangs up."
     ),
     parameters={
         "type": "object",

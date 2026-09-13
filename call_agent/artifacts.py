@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -18,6 +19,16 @@ from .persistence import (
     PersistenceConfigError,
     R2ArtifactConfig,
 )
+
+_SLUG_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def artifact_slug(call_control_id: str) -> str:
+    return _SLUG_RE.sub("_", call_control_id)
+
+
+def artifact_dir(root: Path, call_control_id: str) -> Path:
+    return root / artifact_slug(call_control_id)
 
 
 class ArtifactStore(Protocol):
@@ -142,7 +153,7 @@ def sign_r2_request(
     canonical_request = "\n".join(
         [
             method,
-            parsed.path,
+            parsed.raw_path.decode(),
             "",
             canonical_headers,
             signed_names,
@@ -212,7 +223,8 @@ def durable_keys(
         f"audio/{inbound}",
         f"audio/{outbound}",
     )
-    return tuple(f"{call_control_id}/{name}" for name in names)
+    prefix = artifact_slug(call_control_id)
+    return tuple(f"{prefix}/{name}" for name in names)
 
 
 def publish_durable_artifacts(
@@ -221,9 +233,10 @@ def publish_durable_artifacts(
     audio_names: tuple[str, str],
     store: ArtifactStore,
 ) -> None:
-    run_dir = root / call_control_id
+    prefix = artifact_slug(call_control_id)
+    run_dir = root / prefix
     for key in durable_keys(call_control_id, audio_names):
-        relative = key.removeprefix(f"{call_control_id}/")
+        relative = key.removeprefix(f"{prefix}/")
         path = run_dir / relative
         if not path.is_file():
             raise FileNotFoundError(key)

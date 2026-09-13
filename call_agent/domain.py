@@ -20,6 +20,7 @@ from .tools import (
     ASK_OUTCOMES,
     BOOK_OUTCOMES,
     SESSION_TOOLS,
+    ConfirmedFields,
     FunctionToolSpec,
     RecordedTask,
     RecordTaskResultArgs,
@@ -193,6 +194,11 @@ SILENCE_CONTINUE_LINE = (
     "confirm what you have or ask your next question."
 )
 
+DONE_STATE_LINE = (
+    "When the task is done, do not end the call yourself. "
+    "Delegate to the backend so it can record the result and end the call."
+)
+
 DELEGATION_POLICY_LINES = (
     "Delegation policy:",
     "Backend tools:",
@@ -200,6 +206,7 @@ DELEGATION_POLICY_LINES = (
     "Delegate to the backend when:",
     "- the other party has given a final yes, no, time, or answer; "
     "you must decide whether to accept what they offered; the call should end.",
+    "Do not end the call yourself; the backend records the result and ends it.",
     "Do not delegate to the backend when:",
     "- The other party greets you, repeats a result, or needs a brief clarification.",
     "- You can continue from these instructions and what they have already said.",
@@ -232,7 +239,7 @@ def build_instructions(caller: FirstName, question: Question) -> str:
             _role_line(caller, "business"),
             first_spoken_line(caller),
             question.text,
-            "When the task is done, say a short goodbye.",
+            DONE_STATE_LINE,
             (
                 "Never book, reserve, or hold anything. "
                 "Keep every turn under two sentences."
@@ -292,7 +299,7 @@ def build_book_instructions(
                 "Never join a hold queue or waitlist. "
                 "If they cannot seat this party at this time, accept the decline."
             ),
-            "When the task is done, say a short goodbye.",
+            DONE_STATE_LINE,
             "Keep every turn under two sentences.",
             SILENCE_CONTINUE_LINE,
             *DELEGATION_POLICY_LINES,
@@ -344,10 +351,10 @@ def build_backend_instructions(request: QuickAskRequest | BookRequest) -> str:
             "Never join a hold queue or waitlist. Never invent a successful action.",
             f"Legal outcomes: {outcomes}.",
             "## Return the result",
-            "Call record_task_result exactly once with confirmed values, then "
-            "end_call. Return the relevant facts, whether the task is complete, "
-            "and what comes next. Use confirmed values. Do not invent a "
-            "successful action.",
+            "Call record_task_result then end_call in the same turn with "
+            "confirmed values. Return the relevant facts, whether the task "
+            "is complete, and what comes next. Use confirmed values. Do not "
+            "invent a successful action.",
         )
     )
 
@@ -618,10 +625,14 @@ class ConversationOpen(FrozenModel):
     transcript: Transcript = Transcript()
 
 
+VerdictSource: TypeAlias = Literal["tool", "transcript"]
+
+
 class ConversationTerminal(FrozenModel):
     kind: Literal["conversation_terminal"] = "conversation_terminal"
     transcript: Transcript
     verdict: Verdict
+    verdict_source: VerdictSource = "transcript"
 
 
 ConversationTrack: TypeAlias = Annotated[
@@ -642,6 +653,7 @@ class HangupIdle(FrozenModel):
 class HangupFarewell(FrozenModel):
     kind: Literal["hangup_farewell"] = "hangup_farewell"
     via: HangupVia
+    wait_for_speech: bool = False
 
 
 class HangupDraining(FrozenModel):
@@ -1076,6 +1088,12 @@ def assess_transcript(
 ) -> Answered | Declined | None:
     if not _ready_to_assess(transcript):
         return None
+    return assess_transcript_final(transcript, question)
+
+
+def assess_transcript_final(
+    transcript: Transcript, question: Question
+) -> Answered | Declined | None:
     business_text = transcript.business_text()
     if not business_text.strip():
         return None
@@ -1096,6 +1114,10 @@ def assess_transcript(
 def assess_book(transcript: Transcript) -> Booked | Declined | None:
     if not _ready_to_assess(transcript):
         return None
+    return assess_book_final(transcript)
+
+
+def assess_book_final(transcript: Transcript) -> Booked | Declined | None:
     business_text = transcript.business_text()
     if not business_text.strip():
         return None
@@ -1120,6 +1142,14 @@ def assess_conversation(
     if isinstance(request, BookRequest):
         return assess_book(transcript)
     return assess_transcript(transcript, request.question)
+
+
+def assess_conversation_final(
+    transcript: Transcript, request: QuickAskRequest | BookRequest
+) -> Answered | Booked | Declined | None:
+    if isinstance(request, BookRequest):
+        return assess_book_final(transcript)
+    return assess_transcript_final(transcript, request.question)
 
 
 def _should_enter_hangup_drain(call: Call, transcript: Transcript) -> bool:
@@ -1157,7 +1187,11 @@ def _enter_hangup_drain(
 
 
 def _enter_farewell(
-    call: Call, settings: ReduceSettings, via: HangupVia
+    call: Call,
+    settings: ReduceSettings,
+    via: HangupVia,
+    *,
+    wait_for_speech: bool = False,
 ) -> tuple[Call, tuple[Effect, ...]]:
     if not isinstance(call.hangup, HangupIdle) or not isinstance(
         call.dial, DialPlaced
@@ -1166,16 +1200,24 @@ def _enter_farewell(
     if not isinstance(call.live, LiveActive):
         updates, effects = _enter_hangup_drain(call, settings, {}, via=via)
         return call.model_copy(update=updates), effects
-    return call.model_copy(update={"hangup": HangupFarewell(via=via)}), (
-        ScheduleEffect(
-            delay_s=settings.farewell_idle_s,
-            event=FarewellIdleCheckEvent(activity_seq=call.live.activity_seq),
-        ),
+    effects: tuple[Effect, ...] = (
         ScheduleEffect(
             delay_s=settings.farewell_max_s,
             event=FarewellElapsedEvent(),
         ),
     )
+    if not wait_for_speech:
+        effects = (
+            ScheduleEffect(
+                delay_s=settings.farewell_idle_s,
+                event=FarewellIdleCheckEvent(activity_seq=call.live.activity_seq),
+            ),
+        ) + effects
+    return call.model_copy(
+        update={
+            "hangup": HangupFarewell(via=via, wait_for_speech=wait_for_speech)
+        }
+    ), effects
 
 
 def _maybe_open_live(
@@ -1259,7 +1301,26 @@ def _maybe_fallback_verdict(call: Call) -> Call:
         return call
     if not isinstance(call.conversation, ConversationOpen):
         return call
-    verdict = assess_conversation(call.conversation.transcript, call.request)
+    if call.task is not None:
+        verdict = _verdict_from_record_fields(
+            call.task.outcome,
+            call.task.summary,
+            call.task.confirmed_fields,
+        )
+        if verdict is None:
+            return call
+        return call.model_copy(
+            update={
+                "conversation": ConversationTerminal(
+                    transcript=call.conversation.transcript,
+                    verdict=verdict,
+                    verdict_source="tool",
+                )
+            }
+        )
+    verdict = assess_conversation_final(
+        call.conversation.transcript, call.request
+    )
     if verdict is None:
         return call
     return call.model_copy(
@@ -1267,6 +1328,7 @@ def _maybe_fallback_verdict(call: Call) -> Call:
             "conversation": ConversationTerminal(
                 transcript=call.conversation.transcript,
                 verdict=verdict,
+                verdict_source="transcript",
             )
         }
     )
@@ -1427,18 +1489,26 @@ def _allowed_outcomes(request: QuickAskRequest | BookRequest) -> frozenset[str]:
     return BOOK_OUTCOMES if isinstance(request, BookRequest) else ASK_OUTCOMES
 
 
+def _verdict_from_record_fields(
+    outcome: str,
+    summary: str,
+    confirmed_fields: ConfirmedFields,
+) -> Answered | Booked | Declined | None:
+    if outcome == "confirmed":
+        return Booked(confirmation_text=summary)
+    if outcome == "answered":
+        return Answered(answer_text=confirmed_fields.answer_text or summary)
+    if outcome == "declined":
+        return Declined()
+    return None
+
+
 def _verdict_from_record(
     args: RecordTaskResultArgs,
 ) -> Answered | Booked | Declined | None:
-    if args.outcome == "confirmed":
-        return Booked(confirmation_text=args.summary)
-    if args.outcome == "answered":
-        return Answered(
-            answer_text=args.confirmed_fields.answer_text or args.summary
-        )
-    if args.outcome == "declined":
-        return Declined()
-    return None
+    return _verdict_from_record_fields(
+        args.outcome, args.summary, args.confirmed_fields
+    )
 
 
 def _handle_tool_call(
@@ -1493,10 +1563,11 @@ def _handle_tool_call(
             call_updates["conversation"] = ConversationTerminal(
                 transcript=call.conversation.transcript,
                 verdict=verdict,
+                verdict_source="tool",
             )
         output = tool_ok(
             recorded=args.outcome,
-            next="say goodbye, then call end_call",
+            next="the application will hang up; you may still call end_call",
         )
         result_effects = (
             result_effects[0].model_copy(update={"output": output}),
@@ -1514,7 +1585,13 @@ def _handle_tool_call(
                 }
             ),
         )
-        return call.model_copy(update=call_updates), result_effects + stall_effects
+        call = call.model_copy(update=call_updates)
+        farewell_effects: tuple[Effect, ...] = ()
+        if verdict is not None and isinstance(call.hangup, HangupIdle):
+            call, farewell_effects = _enter_farewell(
+                call, settings, via="tool", wait_for_speech=True
+            )
+        return call, result_effects + stall_effects + farewell_effects
     if event.name == "end_call":
         try:
             args = parse_end_call(event.arguments_json)
@@ -1540,6 +1617,7 @@ def _handle_tool_call(
                 call_updates["conversation"] = ConversationTerminal(
                     transcript=call.conversation.transcript,
                     verdict=Declined(),
+                    verdict_source="tool",
                 )
             elif args.reason in {"wrong_number", "voicemail"}:
                 pass
@@ -1556,6 +1634,11 @@ def _handle_tool_call(
                 call, f"end_call:{args.reason}", settings, via="tool"
             )
             return call, result_effects + stall_effects + fail_effects
+        if isinstance(
+            call.hangup,
+            (HangupFarewell, HangupDraining, HangupMarked, HangupRequested),
+        ):
+            return call, result_effects + stall_effects
         farewell_call, farewell_effects = _enter_farewell(
             call, settings, via="tool"
         )
@@ -1690,9 +1773,13 @@ def reduce(
             call.live, LiveActive
         ):
             next_seq = call.live.activity_seq + 1
+            hangup = call.hangup
+            if hangup.wait_for_speech:
+                hangup = hangup.model_copy(update={"wait_for_speech": False})
             updates["live"] = call.live.model_copy(
                 update={"activity_seq": next_seq}
             )
+            updates["hangup"] = hangup
             call = call.model_copy(update=updates)
             return call, play + (
                 ScheduleEffect(
@@ -1749,6 +1836,8 @@ def reduce(
         if not isinstance(call.hangup, HangupFarewell) or not isinstance(
             call.live, LiveActive
         ):
+            return call, ()
+        if call.hangup.wait_for_speech:
             return call, ()
         if event.activity_seq != call.live.activity_seq:
             return call, ()

@@ -9,7 +9,7 @@ Closed alpha testers text Treena on iMessage. A natural book ask on that chat co
 - `parse-ask` `ask <+E164> hours|stock <item>|aisle <item>` still collects confirm before a `QuickAskRequest`. A leftover `name` token is ignored.
 - `collect-phone` Treena texts `okay, sounds good. What's the restaurant's phone number?` and does not dial. The next text on that chat supplies the E164, then Treena asks to confirm.
 - `confirm-before-dial` After the number, Treena texts `Okay, I'm going to call this number. Do you confirm? Reply "approve"`. User must say confirm / approve / yes. Then Treena texts `Okay, I'm going to call them now.` and dials. A first message that already has +E164 never dials.
-- `parse-fail` A phone follow-up that is not a number, or a confirm follow-up that is not an affirmative, texts `Call failed:`. No dial.
+- `parse-fail` A phone follow-up that is not a number, or a confirm follow-up that is not an affirmative, texts a plain intake line. No `Call failed:` / `Call not placed:` prefix. No dial.
 - `account-lookup` Inbound phone must match a `users` row. The call uses that row's first name, `user_id`, and `from_did`.
 - `account-gate` No row, a row with no first name, or a row with no `from_did` texts a plain line. Never `Call failed: missing caller name`. Never `ledger.provision`.
 - `from-did` Confirm/dial uses `users.from_did` as `DialSpec.from_did`. `run_call` takes a required `from_did` kwarg. `KickoffSession.from_did` stays the Linq iMessage line.
@@ -18,7 +18,7 @@ Closed alpha testers text Treena on iMessage. A natural book ask on that chat co
 - `async-b` HMAC verify, parse, event-id dedupe, then 202 `{ok, kicked_off, event_id}` on the approve follow-up. `BackgroundTasks` runs `run_kickoff` in this process.
 - `same-chat` Collect, confirm, ack, and result go to `POST /chats/{chat_id}/messages`.
 - `cross-link` `linq/<event_id>/` points at `call_control_id`; the call run dir has `linq.json`.
-- `no-mid-call` `KickoffSession.ask` is reserved. Clarification needed texts `Call failed:`.
+- `no-mid-call` `KickoffSession.ask` is reserved. Clarification needed texts a plain intake line.
 
 ## How to get to it (user POV)
 
