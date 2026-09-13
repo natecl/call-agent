@@ -77,6 +77,7 @@ def test_feature_map_lists_account_rows() -> None:
         "| `users` | shipped |",
         "| `users.from_did` | shipped |",
         "| `shared Treena iMessage bot` | shipped |",
+        "| `shared Telnyx from` | shipped |",
         "| `open_accounts` | shipped |",
         "| `account upsert` | shipped |",
         "| `account get` | shipped |",
@@ -90,7 +91,7 @@ def test_feature_map_lists_account_rows() -> None:
         "| `kickoff from-DID` | shipped |",
         "| `no-account reply` | shipped |",
         "| `no-name reply` | shipped |",
-        "| `no-from-did reply` | shipped |",
+        "| `no-from-did reply` | not shipped |",
         "| `LINQ_KICKOFF_USER_ID` | not shipped |",
     )
 
@@ -121,7 +122,7 @@ def test_feature_map_lists_linq_to_call_rows() -> None:
         "| `kickoff from-DID` | shipped |",
         "| `no-account reply` | shipped |",
         "| `no-name reply` | shipped |",
-        "| `no-from-did reply` | shipped |",
+        "| `no-from-did reply` | not shipped |",
         "| `no number_orders at dial` | shipped |",
         "| friendly iMessage errors | shipped |",
     )
@@ -217,8 +218,11 @@ def test_feature_map_records_cap_locks() -> None:
     assert "Dashboard UI stays on Pages" in INVENTORY
     assert "Intended Fly route" in INVENTORY
     assert "shared Treena iMessage bot" in INVENTORY
+    assert "shared Telnyx from" in INVENTORY
     assert "LINQ_FROM_E164" in INVENTORY
+    assert "TELNYX_FROM_NUMBER" in INVENTORY
     assert "+12138653024" in INVENTORY
+    assert "+12135690899" in INVENTORY
     assert "missing_public_key" in INVENTORY
     assert "bad_signature" in INVENTORY
     assert "website `/start`" in INVENTORY

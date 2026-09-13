@@ -25,7 +25,6 @@ from .kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
-    NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
     PARTY_AND_TIME_ASK_TEXT,
     PHONE_ASK_TEXT,
@@ -70,7 +69,7 @@ APPROVE_FOLLOWUP_TEXT = "approve"
 BOOK_EVENT_ID = "kickoff-book-0001"
 BAD_EVENT_ID = "kickoff-bad-0001"
 STUB_FROM = E164("+15555550100")
-ACCOUNT_FROM_DID = E164("+15555550177")
+SHARED_FROM_DID = E164("+12135690899")
 
 
 class LinqCallVerifyInput(BaseModel):
@@ -94,7 +93,7 @@ CheckName = Literal[
     "call_ran",
     "cross_link",
     "same_host_dial",
-    "from_did_users_row",
+    "shared_from_did",
     "no_number_order",
 ]
 
@@ -167,6 +166,7 @@ def verify_linq_call(
         _env_file=None,
         linq_api_token=None,
         linq_from_e164=str(active.from_did),
+        telnyx_from_number=str(SHARED_FROM_DID),
         call_agent_db_path=root / "ledger.sqlite3",
         call_agent_artifacts_dir=artifacts,
         hangup_trailing_silence_s=0,
@@ -179,7 +179,6 @@ def verify_linq_call(
             phone=E164(INBOUND_SENDER),
             first_name="Nathan",
             user_id=UserId("acctnathan"),
-            from_did=ACCOUNT_FROM_DID,
         )
     ).record
 
@@ -475,12 +474,10 @@ def verify_linq_call(
         and isinstance(no_name, KickoffBlocked)
         and no_name.reply == NO_NAME_TEXT
         and not contains_banned_user_text(no_name.reply)
-        and isinstance(no_from_did, KickoffBlocked)
-        and no_from_did.reply == NO_FROM_DID_TEXT
-        and not contains_banned_user_text(no_from_did.reply)
+        and isinstance(no_from_did, KickoffCollecting)
+        and no_from_did.verb == "book"
         and "missing caller name" not in no_account.reply
         and "missing caller name" not in no_name.reply
-        and "missing caller name" not in no_from_did.reply
         and not (artifacts / "stub-call-0001").exists()
     )
     gate_check = LinqCallVerifyCheck(
@@ -616,7 +613,8 @@ def verify_linq_call(
             and confirm_parsed.request.user_id == nathan.user_id
             and account_blob.get("user_id") == str(nathan.user_id)
             and account_blob.get("phone") == INBOUND_SENDER
-            and account_blob.get("from_did") == str(ACCOUNT_FROM_DID)
+            and account_blob.get("from_did") is None
+            and kickoff_payload.get("dial_from") == str(SHARED_FROM_DID)
             and "first_name" not in account_blob
             and "name" not in account_blob
         )
@@ -624,15 +622,16 @@ def verify_linq_call(
             f"caller={confirm_parsed.request.caller} "
             f"request_user={confirm_parsed.request.user_id} "
             f"account_user={account_blob.get('user_id')} "
-            f"account_from={account_blob.get('from_did')}"
+            f"dial_from={kickoff_payload.get('dial_from')}"
         )
 
         client_state = ClientState.decode(str(dial.get("client_state") or ""))
         from_did_ok = (
-            dial.get("from") == str(ACCOUNT_FROM_DID)
+            dial.get("from") == str(SHARED_FROM_DID)
             and dial.get("from") != INBOUND_SENDER
             and dial.get("from") != str(active.from_did)
-            and confirm_parsed.from_did == ACCOUNT_FROM_DID
+            and confirm_parsed.from_did == SHARED_FROM_DID
+            and nathan.from_did is None
             and client_state.user_id == nathan.user_id
         )
         from_did_detail = (
@@ -698,7 +697,7 @@ def verify_linq_call(
             name="same_host_dial", passed=host_ok, detail=host_detail
         ),
         LinqCallVerifyCheck(
-            name="from_did_users_row",
+            name="shared_from_did",
             passed=from_did_ok,
             detail=from_did_detail,
         ),

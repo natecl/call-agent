@@ -364,6 +364,7 @@ def live_settings(
         "quick_ask_live": True,
         "telnyx_api_key": "test-key",
         "telnyx_connection_id": "connection-1",
+        "telnyx_from_number": "+12135690899",
         "openai_api_key": "test-openai",
         "openai_responses_model": "gpt-5.6-terra",
         "public_base_url": public_base,

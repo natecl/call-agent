@@ -37,7 +37,6 @@ from call_agent.kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
-    NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     pending_collect_path,
@@ -307,6 +306,7 @@ def _webhook_env(
     artifacts.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("LINQ_WEBHOOK_SIGNING_SECRET", STUB_WEBHOOK_SECRET)
     monkeypatch.setenv("LINQ_FROM_E164", "+15555550100")
+    monkeypatch.setenv("TELNYX_FROM_NUMBER", "+12135690899")
     monkeypatch.delenv("LINQ_API_TOKEN", raising=False)
     monkeypatch.setenv("CALL_AGENT_ARTIFACTS_DIR", str(artifacts))
     db_path = artifacts.parent / "ledger.sqlite3"
@@ -716,6 +716,7 @@ def test_linq_webhook_two_step_collects_then_dials(
     assert not pending_collect_path(artifacts, INBOUND_CHAT_ID).exists()
     kickoff_payload = json.loads((approve_dir / "kickoff.json").read_text())
     assert kickoff_payload["account"]["from_did"] == "+15555550177"
+    assert kickoff_payload["dial_from"] == "+12135690899"
     assert kickoff_payload["request"]["user_id"] == kickoff_payload["account"][
         "user_id"
     ]
@@ -884,7 +885,7 @@ def test_linq_webhook_no_name_replies_plain_and_does_not_dial(
     assert not (artifacts / "stub-call-0001").exists()
 
 
-def test_linq_webhook_no_from_did_replies_plain_and_does_not_dial(
+def test_linq_webhook_without_users_from_did_still_collects(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     artifacts = tmp_path / "artifacts"
@@ -911,8 +912,7 @@ def test_linq_webhook_no_from_did_replies_plain_and_does_not_dial(
     ]
 
     assert response.status_code == 200
-    assert response.json()["blocked"] is True
-    assert replies[0]["text"] == NO_FROM_DID_TEXT
-    assert not replies[0]["text"].startswith("Call failed:")
+    assert response.json()["collecting"] is True
+    assert replies[0]["text"] == PHONE_ASK_TEXT
     assert not (linq_dir / "kickoff.json").exists()
     assert not (artifacts / "stub-call-0001").exists()

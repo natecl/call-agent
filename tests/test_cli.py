@@ -53,7 +53,8 @@ def test_verify_quick_ask_live_names_missing_keys(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert (
         "live mode requires: TELNYX_API_KEY, TELNYX_CONNECTION_ID, "
-        "OPENAI_API_KEY, OPENAI_RESPONSES_MODEL, PUBLIC_BASE_URL"
+        "TELNYX_FROM_NUMBER, OPENAI_API_KEY, OPENAI_RESPONSES_MODEL, "
+        "PUBLIC_BASE_URL"
     ) in result.output
 
 
@@ -366,7 +367,8 @@ def test_verify_linq_call_stub_exits_zero(tmp_path: Path) -> None:
     assert "[PASS] account_gate" in result.stdout
     assert "[PASS] kickoff_reply" in result.stdout
     assert "[PASS] cross_link" in result.stdout
-    assert "[PASS] from_did_users_row" in result.stdout
+    assert "[PASS] from_did_users_row" not in result.stdout
+    assert "[PASS] shared_from_did" in result.stdout
     assert "[PASS] no_number_order" in result.stdout
 
 
@@ -387,7 +389,7 @@ def test_verify_accounts_stub_exits_zero(tmp_path: Path) -> None:
     assert "[PASS] no_name_column" in result.stdout
 
 
-def test_book_live_without_from_did_exits_two_before_any_socket(
+def test_book_live_without_shared_from_exits_two_before_any_socket(
     tmp_path: Path,
 ) -> None:
     result = runner.invoke(
@@ -417,16 +419,18 @@ def test_book_live_without_from_did_exits_two_before_any_socket(
     )
 
     assert result.exit_code == 2
-    assert "--from-did" in result.output
-    assert "account upsert" in result.output
+    assert "TELNYX_FROM_NUMBER" in result.output
     artifacts = tmp_path / "artifacts"
     assert not artifacts.exists() or not any(artifacts.iterdir())
 
 
-def test_book_stub_uses_users_row_from_did_when_present(
+def test_book_stub_uses_shared_telnyx_from_not_users_row(
     tmp_path: Path,
 ) -> None:
-    env = environment(tmp_path) | {"RETAIN_CALL_ARTIFACTS": "1"}
+    env = environment(tmp_path) | {
+        "RETAIN_CALL_ARTIFACTS": "1",
+        "TELNYX_FROM_NUMBER": "+12135690899",
+    }
     seeded = runner.invoke(
         app,
         [
@@ -472,7 +476,8 @@ def test_book_stub_uses_users_row_from_did_when_present(
             / "dial.json"
         ).read_text()
     )
-    assert dial["from"] == "+15555550177"
+    assert dial["from"] == "+12135690899"
+    assert dial["from"] != "+15555550177"
 
 
 def test_verify_webhooks_broken_url_fails_loud(tmp_path: Path) -> None:

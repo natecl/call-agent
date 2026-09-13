@@ -6,10 +6,11 @@ This is the contract for the follow-up **call-agent-web** PR. This repository (`
 
 1. One shared Treena iMessage bot for everyone. People text `LINQ_FROM_E164` (Linq sandbox `+12138653024` until ~Sep 18). Not a unique Treena DID per user.
 2. Each account stores the user's own phone on `users.phone` (the inbound iMessage sender). That is the kickoff key.
+3. One shared Telnyx FROM for everyone. Fly sets `TELNYX_FROM_NUMBER` and alias `TELNYX_PHONE_NUMBER` to `+12135690899`. Not hardcoded in product code. Not the Linq bot and not the user's phone.
 
-The website "Text Treena" number is that one env key. Signed `GET /accounts/dashboard` includes `bot_number` from it (`null` when unset). Do not invent a second bot env var.
+The website "Text Treena" number is `LINQ_FROM_E164`. Signed `GET /accounts/dashboard` includes `bot_number` from it (`null` when unset). Do not invent a second bot env var.
 
-Telnyx outbound caller ID is a separate field: `users.from_did` (nullable, **not unique**). Kickoff still requires it before dial. Cap has not named a shared Telnyx from-number. Do not use the Linq bot as Telnyx `from`, and do not use the user's phone. See **Cap decision** below.
+Kickoff does **not** require `users.from_did`. That column stays nullable/legacy (not unique). See **Shared Telnyx FROM** below.
 
 Name is collected on website `/start`. After signup that copy is in account settings. Fly `users.first_name` is that name (website POSTs `/accounts/sync`). Kickoff never collects a name over iMessage.
 
@@ -19,7 +20,7 @@ This tree does not contain `call-agent-web`. Builder’s second climb implements
 
 ## Runtime account
 
-Fly reads `users` (same DB as `dids`: SQLite on a laptop, Neon when `NEON_DATABASE_URL` is set). Kickoff looks up `phone = inbound iMessage sender`. `BookRequest.caller` is `users.first_name`. `BookRequest.user_id` is `users.user_id`. The outbound Telnyx caller ID is `users.from_did` (not unique; not the shared iMessage bot). Confirm/dial never calls `ledger.provision` and never `POST /v2/number_orders`. `LINQ_KICKOFF_USER_ID` is gone. `kickoff.json` records `account.user_id`, phone, `from_did`, and minutes.
+Fly reads `users` (same DB as `dids`: SQLite on a laptop, Neon when `NEON_DATABASE_URL` is set). Kickoff looks up `phone = inbound iMessage sender`. `BookRequest.caller` is `users.first_name`. `BookRequest.user_id` is `users.user_id`. The outbound Telnyx caller ID is `resolve_telnyx_from` (`TELNYX_FROM_NUMBER` / `TELNYX_PHONE_NUMBER`), not `users.from_did`, not the shared iMessage bot, and not `ledger.provision`. Confirm/dial never calls `ledger.provision` and never `POST /v2/number_orders`. `LINQ_KICKOFF_USER_ID` is gone. `kickoff.json` records `account.user_id`, phone, legacy `from_did`, minutes, and `dial_from` (the shared FROM).
 
 Columns (see `USERS_SCHEMA` in `call_agent/accounts.py`):
 
@@ -28,7 +29,7 @@ Columns (see `USERS_SCHEMA` in `call_agent/accounts.py`):
 | `user_id` | lowercase `UserId` (uuid4 hex on insert if omitted). Kickoff `BookRequest.user_id`. |
 | `phone` | E.164, unique, kickoff key. The user's own number on the account. Not the shared Treena iMessage bot and not the Telnyx from-number. |
 | `first_name` | nullable. Missing → Treena texts a plain account-settings line. Never collected in iMessage. Omitted on upsert keeps the existing value so Stripe webhooks without a name cannot wipe it. |
-| `from_did` | nullable E.164 Telnyx caller ID. **Not unique.** Rejected when equal to `phone`. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables. Omitted on upsert keeps the existing value. Not the iMessage bot (`LINQ_FROM_E164`). |
+| `from_did` | nullable legacy E.164. **Not unique.** Not required at kickoff. Rejected when equal to `phone`. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables. Omitted on upsert keeps the existing value. Not the iMessage bot (`LINQ_FROM_E164`) and not the live Telnyx FROM. |
 | `stripe_customer_id` | unique billing link |
 | `plan` | Stripe/TRE-20 plan metadata |
 | `minutes_included` / `minutes_used` | recorded; kickoff does not refuse at zero or decrement. Omitted `minutes_used` keeps the existing value. Explicit `0` writes 0. |
@@ -62,7 +63,7 @@ Body:
 }
 ```
 
-`phone` is required. `first_name` may be omitted (row exists, kickoff will ask them to set it in account settings). Omitted `first_name` keeps the existing value so a later Stripe webhook without a name cannot wipe it. `from_did` is optional. The website is not expected to send `from_did` this climb; omitted `from_did` keeps the ops-seeded value so Stripe sync cannot wipe it. Omitted `prefs` keeps the existing object. Omitted `minutes_used` keeps the existing count; explicit `0` writes 0. `stripe_event_created` is ISO-8601. Equal or older than `stripe_synced_at` returns `{"ok": true, "skipped": true, "user_id": "..."}`.
+`phone` is required. `first_name` may be omitted (row exists, kickoff will ask them to set it in account settings). Omitted `first_name` keeps the existing value so a later Stripe webhook without a name cannot wipe it. `from_did` is optional (legacy). The website is not expected to send `from_did`; omitted `from_did` keeps the existing value. Kickoff dials from `TELNYX_FROM_NUMBER`, not this field. Omitted `prefs` keeps the existing object. Omitted `minutes_used` keeps the existing count; explicit `0` writes 0. `stripe_event_created` is ISO-8601. Equal or older than `stripe_synced_at` returns `{"ok": true, "skipped": true, "user_id": "..."}`.
 
 Status:
 
@@ -127,10 +128,10 @@ Retry on 5xx (Fly down). Do not fall back to writing Neon from the website.
 ## L1 before the website PR
 
 ```bash
-call-agent account upsert --phone +17272701288 --name Nathan --from-did +12135690899
+call-agent account upsert --phone +17272701288 --name Nathan
 ```
 
-That writes the same table. `--phone` is the user's own number (linked iMessage sender). `--from-did` is the Telnyx caller ID, not the shared bot people text. The bot is `LINQ_FROM_E164=+12138653024`. Do not pass the same E.164 as `--phone` and `--from-did`. Set Fly `ACCOUNT_SYNC_SECRET` when the website PR is ready. This climb does not `fly deploy`.
+That writes the same table. `--phone` is the user's own number (linked iMessage sender). Kickoff does not need `--from-did`. Set Fly `TELNYX_FROM_NUMBER` and `TELNYX_PHONE_NUMBER` to `+12135690899`. The bot people text is `LINQ_FROM_E164=+12138653024`. Do not pass the same E.164 as `--phone` and `--from-did` if you still seed the legacy column. Set Fly `ACCOUNT_SYNC_SECRET` when the website PR is ready. This climb does not `fly deploy`.
 
 ## Kickoff copy
 
@@ -142,14 +143,12 @@ Row exists but `first_name` is empty:
 
 `I need your name for the call. Add it in your account settings, then text me again.`
 
-Row exists but `from_did` is empty:
+None of these is prefixed `Call failed:`. There is no `Call failed: missing caller name`. Empty `users.from_did` does not block. Live missing `TELNYX_FROM_NUMBER` texts `I couldn't place the call.` `LINQ_KICKOFF_CALLER` and `LINQ_KICKOFF_USER_ID` are gone.
 
-`This account doesn't have a Treena calling number assigned yet. Ask support to assign one, then text me again.`
+## Shared Telnyx FROM (Cap GO)
 
-None of these is prefixed `Call failed:`. There is no `Call failed: missing caller name`. `LINQ_KICKOFF_CALLER` and `LINQ_KICKOFF_USER_ID` are gone.
+One sitewide Telnyx caller ID for every Treena user. Fly live sets both `TELNYX_FROM_NUMBER` and `TELNYX_PHONE_NUMBER` to `+12135690899`. Settings read those env keys (no default digits in product code). Stub without the env uses `+15555550100`. Live without the env fails before dial.
 
-## Cap decision (Telnyx from-DID)
+Kickoff does **not** require `users.from_did`. That column stays nullable/legacy (not unique, rejected when equal to `phone`) so existing rows and CLI `--from-did` still work. `run_call` still takes a required `from_did` kwarg; kickoff fills it from the shared env. `did provision` still assigns unique rows in the separate `dids` table (ops verb; confirm/dial never uses it).
 
-Schema does **not** unique-constrain `users.from_did`. Two accounts may share one Telnyx from-number. Kickoff still **requires** a non-null `users.from_did` before dial, and `run_call` still takes a required `from_did` kwarg. `did provision` still assigns unique rows in the separate `dids` table (ops verb; confirm/dial never uses it).
-
-Cap said no per-user Treena DID. If Telnyx should also use one shared number, Cap/Nathan must name that E.164. Do not invent it. Do not reuse the Linq sandbox bot as Telnyx `from` (Linq line and Telnyx from stay distinct). Stripe live flip is not this climb.
+Do not reuse the Linq sandbox bot as Telnyx `from` (`LINQ_FROM_E164=+12138653024` is iMessage only). Do not use the user's phone as Telnyx `from`. Stripe live flip is not this climb.

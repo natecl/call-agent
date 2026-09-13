@@ -22,10 +22,10 @@ from .persistence import NeonLedgerConfig, PersistenceConfigError, SqliteLedgerC
 ACCOUNT_SYNC_SIGNATURE_HEADER = "x-account-sync-signature"
 
 # Cap account model: `phone` is the user's own number (unique kickoff
-# key). The Treena iMessage bot is shared sitewide (`LINQ_FROM_E164`),
-# not a unique DID per user. `from_did` is the Telnyx caller ID: nullable,
-# not unique. Kickoff still requires it until Cap names a shared Telnyx
-# from-number. Do not store the shared bot on this column.
+# key). The Treena iMessage bot is shared sitewide (`LINQ_FROM_E164`).
+# Telnyx FROM is shared sitewide (`TELNYX_FROM_NUMBER` /
+# `TELNYX_PHONE_NUMBER`). `users.from_did` is a nullable legacy column,
+# not unique, not required at kickoff. Do not store the shared bot here.
 
 USERS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (

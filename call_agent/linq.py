@@ -332,7 +332,7 @@ def shared_bot_e164(settings: Settings) -> E164 | None:
     """Sitewide Treena iMessage bot. One number for everyone.
 
     Driven by `LINQ_FROM_E164`. Not a unique Treena DID per user and not
-    the Telnyx caller ID (`users.from_did`).
+    the Telnyx FROM (`TELNYX_FROM_NUMBER`).
     """
     raw = (settings.linq_from_e164 or "").strip()
     if not raw:
