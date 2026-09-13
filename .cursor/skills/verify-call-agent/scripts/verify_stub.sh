@@ -43,7 +43,7 @@ SECOND="$(run "$CLI" did provision --user default | tail -n1)"
 run "$CLI" did list
 
 step "account upsert then get and list"
-run "$CLI" account upsert --phone +14155552671 --name Nathan --user acctnathan
+run "$CLI" account upsert --phone +14155552671 --name Nathan --user acctnathan --from-did +15555550177
 run "$CLI" account get --phone +14155552671
 run "$CLI" account list
 
@@ -115,7 +115,7 @@ grep -q "6/6 passed" "$EVIDENCE/verify-message.txt"
 
 step "verify-linq-call stub checklist"
 run "$CLI" verify-linq-call | tee "$EVIDENCE/verify-linq-call.txt" >/dev/null
-grep -q "11/11 passed" "$EVIDENCE/verify-linq-call.txt"
+grep -q "13/13 passed" "$EVIDENCE/verify-linq-call.txt"
 
 step "linq register-webhook fails loud without token"
 set +e

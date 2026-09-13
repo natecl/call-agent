@@ -105,6 +105,7 @@ def _account_roundtrip(path: Path) -> PersistenceCheck:
         phone=E164("+14155552671"),
         first_name="Nathan",
         user_id=UserId("acctnathan"),
+        from_did=E164("+15555550177"),
         minutes_included=30,
         retain_call_artifacts=True,
     )
@@ -117,6 +118,7 @@ def _account_roundtrip(path: Path) -> PersistenceCheck:
         and fetched is not None
         and fetched.user_id == UserId("acctnathan")
         and fetched.first_name == "Nathan"
+        and fetched.from_did == E164("+15555550177")
         and fetched.retain_call_artifacts is True
         and fetched.minutes_included == 30
         and second.record.user_id == first.record.user_id

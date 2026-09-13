@@ -58,6 +58,10 @@ NO_NAME_TEXT = (
     "I need your name for the call. "
     "Add it in your account settings, then text me again."
 )
+NO_FROM_DID_TEXT = (
+    "This account doesn't have a Treena calling number assigned yet. "
+    "Ask support to assign one, then text me again."
+)
 
 _BOOK_RE = re.compile(
     r"^book\s+(?P<to>\+[1-9]\d{7,14})\s+party\s+(?P<party>\d+)\s+at\s+"
@@ -133,8 +137,15 @@ _AFFIRM_RE = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class KickoffParsed:
+    """Confirmed book/ask ready to dial.
+
+    `from_did` is the Telnyx caller ID from the users row. Not
+    `KickoffSession.from_did`, which is the Linq iMessage line.
+    """
+
     request: BookRequest | QuickAskRequest
     verb: Literal["book", "ask"]
+    from_did: E164
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +459,9 @@ def claim_kickoff(
             {
                 "user_id": str(account.user_id),
                 "phone": str(account.phone),
+                "from_did": (
+                    str(account.from_did) if account.from_did else None
+                ),
                 "minutes_included": account.minutes_included,
                 "minutes_used": account.minutes_used,
             }
@@ -525,6 +539,8 @@ def write_call_cross_links(
 async def run_kickoff(
     session: KickoffSession,
     request: BookRequest | QuickAskRequest,
+    *,
+    from_did: E164,
 ) -> KickoffReceipt:
     write_inbound_artifact(
         session.settings.call_agent_artifacts_dir,
@@ -534,7 +550,9 @@ async def run_kickoff(
     claim_kickoff(session.settings, session.inbound, request)
     ack_receipt = session.text(kickoff_ack_text(request), kind="ack")
     try:
-        result = await run_call(request, session.settings)
+        result = await run_call(
+            request, session.settings, from_did=from_did
+        )
     except (ValueError, RuntimeError, OSError, PersistenceConfigError) as error:
         text = f"Call not placed: {error}"
         result_receipt = session.text(text, kind="result")
@@ -617,15 +635,26 @@ def _decide(
         return KickoffBlocked(blocked, verb)
     assert account is not None
     caller = FirstName(account.first_name or "")
-    user_id = _resolve_user_id(settings)
-    if user_id is None:
-        return KickoffFailed("missing user id", verb)
+    user_id = account.user_id
+    assert account.from_did is not None
     if verb == "ask":
         return _decide_ask(
-            extracted, settings, caller, user_id, account, confirmed=confirmed
+            extracted,
+            settings,
+            caller,
+            user_id,
+            account,
+            account.from_did,
+            confirmed=confirmed,
         )
     return _decide_book(
-        extracted, settings, caller, user_id, account, confirmed=confirmed
+        extracted,
+        settings,
+        caller,
+        user_id,
+        account,
+        account.from_did,
+        confirmed=confirmed,
     )
 
 
@@ -635,6 +664,7 @@ def _decide_book(
     caller: FirstName,
     user_id: UserId,
     account: UserRecord,
+    from_did: E164,
     *,
     confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
@@ -679,7 +709,7 @@ def _decide_book(
         )
     except ValueError:
         return KickoffFailed("I need a bit more to place the call.", "book")
-    return KickoffParsed(request=request, verb="book")
+    return KickoffParsed(request=request, verb="book", from_did=from_did)
 
 
 def _decide_ask(
@@ -688,6 +718,7 @@ def _decide_ask(
     caller: FirstName,
     user_id: UserId,
     account: UserRecord,
+    from_did: E164,
     *,
     confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
@@ -729,7 +760,7 @@ def _decide_ask(
         )
     except ValueError:
         return KickoffFailed("I need a bit more to place the call.", "ask")
-    return KickoffParsed(request=request, verb="ask")
+    return KickoffParsed(request=request, verb="ask", from_did=from_did)
 
 
 def _pending_from_extracted(
@@ -986,14 +1017,9 @@ def _account_gate(account: UserRecord | None) -> str | None:
         FirstName(raw)
     except ValueError:
         return NO_NAME_TEXT
+    if account.from_did is None:
+        return NO_FROM_DID_TEXT
     return None
-
-
-def _resolve_user_id(settings: Settings) -> UserId | None:
-    try:
-        return UserId(settings.linq_kickoff_user_id)
-    except ValueError:
-        return None
 
 
 def _mode(settings: Settings) -> Mode:

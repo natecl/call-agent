@@ -373,7 +373,9 @@ async def test_dial_uses_worker_webhook_and_tunnel_media(
         caller=FirstName("Nathan"),
         mode=Mode.STUB,
     )
-    result = await run_quick_ask(request, split)
+    result = await run_quick_ask(
+        request, split, from_did=E164("+15555550100")
+    )
     dial = json.loads(
         (
             split.call_agent_artifacts_dir
@@ -594,4 +596,55 @@ async def test_run_call_live_fails_when_webhook_host_diverges(
         mode=Mode.LIVE,
     )
     with pytest.raises(ValueError, match="webhook host"):
-        await run_quick_ask(request, split)
+        await run_quick_ask(
+            request, split, from_did=E164("+15555550100")
+        )
+
+
+async def test_run_call_never_orders_a_number(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    retained = Settings(
+        _env_file=None,
+        call_agent_db_path=settings.call_agent_db_path,
+        call_agent_artifacts_dir=settings.call_agent_artifacts_dir,
+        retain_call_artifacts=True,
+        hangup_trailing_silence_s=0,
+    )
+
+    def boom(self: object, connection_id: str) -> object:
+        del self, connection_id
+        raise AssertionError("search_and_order_number must not run on dial")
+
+    monkeypatch.setattr(StubTelnyxHttp, "search_and_order_number", boom)
+    from_did = E164("+15555550177")
+    request = QuickAskRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        question=Question.from_cli(QuestionType.HOURS, None),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+    )
+    result = await run_quick_ask(request, retained, from_did=from_did)
+    dial = json.loads(
+        (
+            retained.call_agent_artifacts_dir
+            / result.call_control_id
+            / "dial.json"
+        ).read_text()
+    )
+    from call_agent.ledger import open_ledger
+
+    assert dial["from"] == str(from_did)
+    assert open_ledger(retained).list() == []
+
+
+def test_dial_path_source_has_no_provision() -> None:
+    root = Path(__file__).resolve().parents[1] / "call_agent"
+    for name in ("runtime.py", "kickoff.py", "server.py"):
+        text = (root / name).read_text()
+        assert "provision(" not in text, name
+        assert "search_and_order_number" not in text, name
+        assert "number_orders" not in text, name
+        assert "open_ledger" not in text, name
+

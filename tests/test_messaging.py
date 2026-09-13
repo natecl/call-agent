@@ -36,6 +36,7 @@ from call_agent.kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
+    NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     pending_collect_path,
@@ -308,6 +309,7 @@ def _webhook_env(
             AccountWrite(
                 phone=E164(INBOUND_SENDER),
                 first_name="Nathan",
+                from_did=E164("+15555550177"),
             )
         )
 
@@ -700,6 +702,11 @@ def test_linq_webhook_two_step_collects_then_dials(
     assert replies[1]["text"].startswith("Booked:")
     assert call_link["call_control_id"] == "stub-call-0001"
     assert not pending_collect_path(artifacts, INBOUND_CHAT_ID).exists()
+    kickoff_payload = json.loads((approve_dir / "kickoff.json").read_text())
+    assert kickoff_payload["account"]["from_did"] == "+15555550177"
+    assert kickoff_payload["request"]["user_id"] == kickoff_payload["account"][
+        "user_id"
+    ]
 
 
 def test_linq_webhook_bad_phone_followup_fails_and_does_not_dial(
@@ -855,6 +862,40 @@ def test_linq_webhook_no_name_replies_plain_and_does_not_dial(
     assert response.status_code == 200
     assert response.json()["blocked"] is True
     assert replies[0]["text"] == NO_NAME_TEXT
+    assert not replies[0]["text"].startswith("Call failed:")
+    assert not (linq_dir / "kickoff.json").exists()
+    assert not (artifacts / "stub-call-0001").exists()
+
+
+def test_linq_webhook_no_from_did_replies_plain_and_does_not_dial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    _webhook_env(monkeypatch, artifacts, seed_account=False)
+    settings = Settings(
+        _env_file=None,
+        call_agent_db_path=artifacts.parent / "ledger.sqlite3",
+        call_agent_artifacts_dir=artifacts,
+    )
+    open_accounts(settings).upsert(
+        AccountWrite(phone=E164(INBOUND_SENDER), first_name="Nathan")
+    )
+    event_id = "kickoff-route-no-from-did"
+    body = kickoff_inbound_bytes(NATURAL_BOOK_TEXT, event_id)
+    with TestClient(app) as client:
+        response = client.post(
+            "/linq/webhook", content=body, headers=_signed_headers(body)
+        )
+
+    linq_dir = artifacts / "linq" / event_id
+    replies = [
+        json.loads(line)
+        for line in (linq_dir / "replies.jsonl").read_text().splitlines()
+    ]
+
+    assert response.status_code == 200
+    assert response.json()["blocked"] is True
+    assert replies[0]["text"] == NO_FROM_DID_TEXT
     assert not replies[0]["text"].startswith("Call failed:")
     assert not (linq_dir / "kickoff.json").exists()
     assert not (artifacts / "stub-call-0001").exists()

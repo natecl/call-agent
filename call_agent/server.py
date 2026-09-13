@@ -280,7 +280,9 @@ async def process_linq_webhook(
         )
     except OSError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
-    background_tasks.add_task(run_kickoff, session, parsed.request)
+    background_tasks.add_task(
+        run_kickoff, session, parsed.request, from_did=parsed.from_did
+    )
     return JSONResponse(
         status_code=202,
         content={

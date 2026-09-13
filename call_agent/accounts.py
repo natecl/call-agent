@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import Settings
 from .domain import E164, FirstName, UserId
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     phone TEXT NOT NULL UNIQUE,
     first_name TEXT,
+    from_did TEXT,
     stripe_customer_id TEXT UNIQUE,
     plan TEXT,
     minutes_included INTEGER NOT NULL DEFAULT 0,
@@ -38,11 +39,14 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """
 
+USERS_FROM_DID_MIGRATION = "ALTER TABLE users ADD COLUMN from_did TEXT"
+
 USERS_SELECT = """
     SELECT
         user_id,
         phone,
         first_name,
+        from_did,
         stripe_customer_id,
         plan,
         minutes_included,
@@ -54,6 +58,31 @@ USERS_SELECT = """
         updated_at
     FROM users
 """
+
+
+def _reject_from_did_equal_to_phone(phone: E164, from_did: E164 | None) -> None:
+    if from_did is not None and str(from_did) == str(phone):
+        raise ValueError(
+            "from_did must be the assigned Treena number, "
+            "not the user's own phone"
+        )
+
+
+def _ensure_from_did_column(add_column: Callable[[], None]) -> None:
+    try:
+        add_column()
+    except Exception as error:
+        if not _is_duplicate_column(error):
+            raise
+
+
+def _is_duplicate_column(error: Exception) -> bool:
+    text = str(error).casefold()
+    return (
+        "duplicate column" in text
+        or "already exists" in text
+        or type(error).__name__ == "DuplicateColumn"
+    )
 
 
 class AccountConflict(ValueError):
@@ -74,6 +103,7 @@ class UserRecord(BaseModel):
     user_id: UserId
     phone: E164
     first_name: str | None = None
+    from_did: E164 | None = None
     stripe_customer_id: str | None = None
     plan: str | None = None
     minutes_included: int = 0
@@ -84,12 +114,18 @@ class UserRecord(BaseModel):
     created_at: str
     updated_at: str
 
+    @model_validator(mode="after")
+    def _from_did_is_not_the_users_phone(self) -> UserRecord:
+        _reject_from_did_equal_to_phone(self.phone, self.from_did)
+        return self
+
 
 class AccountWrite(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     phone: E164
     first_name: str | None = None
+    from_did: E164 | None = None
     user_id: UserId | None = None
     stripe_customer_id: str | None = None
     plan: str | None = None
@@ -134,6 +170,11 @@ class AccountWrite(BaseModel):
                 raise ValueError("prefs keys and values must be strings")
             cleaned[key] = item
         return cleaned
+
+    @model_validator(mode="after")
+    def _from_did_is_not_the_users_phone(self) -> AccountWrite:
+        _reject_from_did_equal_to_phone(self.phone, self.from_did)
+        return self
 
 
 class AccountUpsertResult(BaseModel):
@@ -236,6 +277,7 @@ def upsert_account(
             user_id=user_id,
             phone=write.phone,
             first_name=write.first_name,
+            from_did=write.from_did,
             stripe_customer_id=write.stripe_customer_id,
             plan=write.plan,
             minutes_included=write.minutes_included,
@@ -255,6 +297,9 @@ def upsert_account(
         user_id=target.user_id,
         phone=write.phone,
         first_name=write.first_name,
+        from_did=(
+            write.from_did if write.from_did is not None else target.from_did
+        ),
         stripe_customer_id=(
             write.stripe_customer_id or target.stripe_customer_id
         ),
@@ -362,6 +407,7 @@ def _record(row: Any) -> UserRecord:
         user_id=row["user_id"],
         phone=row["phone"],
         first_name=row["first_name"] or None,
+        from_did=row["from_did"] or None,
         stripe_customer_id=row["stripe_customer_id"],
         plan=row["plan"],
         minutes_included=int(row["minutes_included"]),
@@ -379,6 +425,7 @@ def _row_values(record: UserRecord) -> tuple[object, ...]:
         str(record.user_id),
         str(record.phone),
         record.first_name,
+        str(record.from_did) if record.from_did is not None else None,
         record.stripe_customer_id,
         record.plan,
         record.minutes_included,
@@ -388,6 +435,23 @@ def _row_values(record: UserRecord) -> tuple[object, ...]:
         record.stripe_synced_at,
         record.created_at,
         record.updated_at,
+    )
+
+
+def _update_values(record: UserRecord) -> tuple[object, ...]:
+    return (
+        str(record.phone),
+        record.first_name,
+        str(record.from_did) if record.from_did is not None else None,
+        record.stripe_customer_id,
+        record.plan,
+        record.minutes_included,
+        record.minutes_used,
+        1 if record.retain_call_artifacts else 0,
+        _prefs_json(record.prefs),
+        record.stripe_synced_at,
+        record.updated_at,
+        str(record.user_id),
     )
 
 
@@ -404,6 +468,11 @@ class Accounts:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.execute(USERS_SCHEMA)
+        _ensure_from_did_column(self._add_from_did_column)
+
+    def _add_from_did_column(self) -> None:
+        with self._connect() as connection:
+            connection.execute(USERS_FROM_DID_MIGRATION)
 
     def get(self, user_id: UserId) -> UserRecord | None:
         with self._connect() as connection:
@@ -450,6 +519,7 @@ class Accounts:
                         user_id,
                         phone,
                         first_name,
+                        from_did,
                         stripe_customer_id,
                         plan,
                         minutes_included,
@@ -459,7 +529,7 @@ class Accounts:
                         stripe_synced_at,
                         created_at,
                         updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _row_values(record),
                 )
@@ -477,6 +547,7 @@ class Accounts:
                     SET
                         phone = ?,
                         first_name = ?,
+                        from_did = ?,
                         stripe_customer_id = ?,
                         plan = ?,
                         minutes_included = ?,
@@ -487,19 +558,7 @@ class Accounts:
                         updated_at = ?
                     WHERE user_id = ?
                     """,
-                    (
-                        str(record.phone),
-                        record.first_name,
-                        record.stripe_customer_id,
-                        record.plan,
-                        record.minutes_included,
-                        record.minutes_used,
-                        1 if record.retain_call_artifacts else 0,
-                        _prefs_json(record.prefs),
-                        record.stripe_synced_at,
-                        record.updated_at,
-                        str(record.user_id),
-                    ),
+                    _update_values(record),
                 )
             except sqlite3.IntegrityError as error:
                 raise AccountConflict(
@@ -530,6 +589,11 @@ class NeonAccounts:
         self._connect_factory = connect or _psycopg_connect(database_url)
         with self._connect() as connection:
             connection.execute(USERS_SCHEMA)
+        _ensure_from_did_column(self._add_from_did_column)
+
+    def _add_from_did_column(self) -> None:
+        with self._connect() as connection:
+            connection.execute(USERS_FROM_DID_MIGRATION)
 
     def get(self, user_id: UserId) -> UserRecord | None:
         with self._connect() as connection:
@@ -576,6 +640,7 @@ class NeonAccounts:
                         user_id,
                         phone,
                         first_name,
+                        from_did,
                         stripe_customer_id,
                         plan,
                         minutes_included,
@@ -585,7 +650,7 @@ class NeonAccounts:
                         stripe_synced_at,
                         created_at,
                         updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     _row_values(record),
                 )
@@ -605,6 +670,7 @@ class NeonAccounts:
                     SET
                         phone = %s,
                         first_name = %s,
+                        from_did = %s,
                         stripe_customer_id = %s,
                         plan = %s,
                         minutes_included = %s,
@@ -615,19 +681,7 @@ class NeonAccounts:
                         updated_at = %s
                     WHERE user_id = %s
                     """,
-                    (
-                        str(record.phone),
-                        record.first_name,
-                        record.stripe_customer_id,
-                        record.plan,
-                        record.minutes_included,
-                        record.minutes_used,
-                        1 if record.retain_call_artifacts else 0,
-                        _prefs_json(record.prefs),
-                        record.stripe_synced_at,
-                        record.updated_at,
-                        str(record.user_id),
-                    ),
+                    _update_values(record),
                 )
             except Exception as error:
                 if _is_unique_violation(error):

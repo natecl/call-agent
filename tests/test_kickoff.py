@@ -20,6 +20,7 @@ from call_agent.kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
+    NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     TIME_ASK_TEXT,
@@ -60,6 +61,7 @@ def _account(**updates: object) -> UserRecord:
         user_id=UserId("acctnathan"),
         phone=E164("+14155552671"),
         first_name="Nathan",
+        from_did=E164("+15555550177"),
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
     )
@@ -152,7 +154,7 @@ def test_approve_after_phone_completes_book_request(tmp_path: Path) -> None:
 
     assert isinstance(parsed, KickoffParsed)
     assert parsed.request == BookRequest(
-        user_id=UserId("default"),
+        user_id=UserId("acctnathan"),
         to=E164("+14155552671"),
         caller=FirstName("Nathan"),
         mode=Mode.STUB,
@@ -202,7 +204,7 @@ def test_parse_quick_ask_hours(tmp_path: Path) -> None:
     )
     assert isinstance(parsed, KickoffParsed)
     assert parsed.request == QuickAskRequest(
-        user_id=UserId("default"),
+        user_id=UserId("acctnathan"),
         to=E164("+14155552671"),
         question=Question.from_cli(QuestionType.HOURS, None),
         caller=FirstName("Nathan"),
@@ -303,6 +305,21 @@ def test_account_retain_flag_reaches_request(tmp_path: Path) -> None:
     assert parsed.request.retain_call_artifacts is True
 
 
+def test_no_from_did_replies_plain_and_does_not_dial(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    parsed = parse_kickoff(
+        "book +14155552671 party 2 at Friday 7pm",
+        settings,
+        account=_account(from_did=None),
+    )
+
+    assert isinstance(parsed, KickoffBlocked)
+    assert parsed.reply == NO_FROM_DID_TEXT
+    assert not parsed.reply.startswith("Call failed:")
+    assert "missing caller name" not in parsed.reply
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+
+
 def test_no_missing_caller_name_path() -> None:
     root = Path(__file__).resolve().parents[1] / "call_agent"
     hits = []
@@ -314,6 +331,10 @@ def test_no_missing_caller_name_path() -> None:
             "missing caller name" in text
             or "LINQ_KICKOFF_CALLER" in text
             or "linq_kickoff_caller" in text
+            or "LINQ_KICKOFF_USER_ID" in text
+            or "linq_kickoff_user_id" in text
+            or "TELNYX_FROM_NUMBER" in text
+            or "telnyx_from_number" in text
         ):
             hits.append(path)
     assert hits == []
@@ -541,7 +562,9 @@ async def test_run_kickoff_cross_links_and_replies(tmp_path: Path) -> None:
     port = StubLinq()
     session = make_session(inbound, settings, port)
 
-    receipt = await run_kickoff(session, parsed.request)
+    receipt = await run_kickoff(
+        session, parsed.request, from_did=parsed.from_did
+    )
 
     assert receipt.result is not None
     assert receipt.result.status == "booked"
@@ -585,7 +608,7 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
     )
     assert inbound is not None
     request = BookRequest(
-        user_id=UserId("default"),
+        user_id=UserId("acctnathan"),
         to=E164("+14155552671"),
         caller=FirstName("Nathan"),
         mode=Mode.LIVE,
@@ -595,7 +618,9 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
     port = StubLinq()
     session = make_session(inbound, settings, port)
 
-    receipt = await run_kickoff(session, request)
+    receipt = await run_kickoff(
+        session, request, from_did=E164("+15555550177")
+    )
 
     assert receipt.result is None
     assert receipt.error is not None
@@ -655,7 +680,9 @@ async def test_run_kickoff_uses_session_text(tmp_path: Path) -> None:
         settings=settings,
     )
 
-    await run_kickoff(session, parsed.request)
+    await run_kickoff(
+        session, parsed.request, from_did=parsed.from_did
+    )
 
     assert len(port.texts) == 2
     assert port.texts[0] == DIAL_NOW_TEXT
@@ -678,6 +705,8 @@ def test_verify_linq_call_passes() -> None:
         "call_ran",
         "cross_link",
         "same_host_dial",
+        "from_did_users_row",
+        "no_number_order",
     ]
     assert all(check.passed for check in report.checks)
 
@@ -685,3 +714,48 @@ def test_verify_linq_call_passes() -> None:
 def test_sender_constant_is_imessage_handle() -> None:
     assert INBOUND_SENDER.startswith("+")
     assert IMESSAGE == "iMessage"
+
+
+async def test_run_kickoff_dials_from_users_row_not_linq_line(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, retain_call_artifacts=True)
+    inbound = parse_inbound(
+        kickoff_inbound_bytes(APPROVE_FOLLOWUP_TEXT, "evt-from-did")
+    )
+    assert inbound is not None
+    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    phone = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(phone, KickoffCollecting)
+    parsed = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=phone.pending
+    )
+    assert isinstance(parsed, KickoffParsed)
+    session = KickoffSession(
+        inbound=inbound,
+        from_did=E164("+15555550100"),
+        port=StubLinq(),
+        settings=settings,
+    )
+
+    await run_kickoff(
+        session, parsed.request, from_did=parsed.from_did
+    )
+
+    dial = json.loads(
+        (tmp_path / "artifacts" / "stub-call-0001" / "dial.json").read_text()
+    )
+    from call_agent.domain import ClientState
+    from call_agent.ledger import open_ledger
+
+    assert dial["from"] == "+15555550177"
+    assert dial["from"] != str(session.from_did)
+    assert dial["from"] != INBOUND_SENDER
+    assert ClientState.decode(dial["client_state"]).user_id == UserId(
+        "acctnathan"
+    )
+    assert open_ledger(settings).list() == []
+

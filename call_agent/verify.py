@@ -131,6 +131,7 @@ def verify_quick_ask(
         run_call(
             request,
             settings,
+            from_did=first_provision.did or verify_input.from_did,
             scenario=scenario,
         )
     )
@@ -397,6 +398,7 @@ def verify_book(
         run_call(
             request,
             settings,
+            from_did=first_provision.did or verify_input.from_did,
             scenario=scenario,
         )
     )

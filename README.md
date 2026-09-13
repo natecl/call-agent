@@ -24,7 +24,7 @@ fly secrets set ACCOUNT_SYNC_SECRET=...
 fly deploy
 ```
 
-`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan` until the website PR POSTs sync. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
+`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan --from-did +1...` until the website PR POSTs sync. `from_did` is the assigned Treena number, not the tester's iMessage phone. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
 
 Then point the Worker at the Fly origin (no path) and deploy the Worker:
 
@@ -75,7 +75,7 @@ call-agent verify-message
 
 You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send shape, inbound `message.received` mapping, inbound reply + artifact text, Standard Webhooks signature accept/reject, live constructor without `LINQ_API_TOKEN`, and SMS ignored. See [docs/linq.md](docs/linq.md).
 
-`call-agent verify-linq-call` proves iMessage natural collect + confirm-before-dial → stub `run_call` → result reply on the same chat, plus artifact cross-links. Eleven `[PASS]` lines and `11/11 passed`. It fails if dial happens before confirm. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
+`call-agent verify-linq-call` proves iMessage natural collect + confirm-before-dial → stub `run_call` → result reply on the same chat, plus artifact cross-links. Thirteen `[PASS]` lines and `13/13 passed`, including `from_did_users_row` and `no_number_order`. It fails if dial happens before confirm. It does not dial Telnyx or hit Linq live. qa owns the Fly prove.
 
 `call-agent verify-persistence` checks the Neon and R2 ports. With those vars unset it uses SQLite and a local directory, prints three `[PASS]` lines, and exits 0. If some `R2_*` vars are set and others are not, or if `NEON_DATABASE_URL` is not a `postgresql://` URL, it exits 2 and names the problem. CI runs it with the vars unset. It never opens Neon or R2.
 
@@ -84,6 +84,7 @@ You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send sha
 ```bash
 call-agent did provision --user default
 call-agent did list
+call-agent account upsert --phone +14155552671 --name Nathan --from-did +15555550177
 call-agent quick-ask --to +14155552671 --ask hours --name Nathan
 call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nathan
 call-agent book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible"
@@ -108,8 +109,8 @@ Live mode places a real call. It is gated so that no test or CI run can reach th
 1. Copy `.env.example` to `.env` and fill in `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, and `OPENAI_API_KEY`. Keep `.env` out of git.
 2. Start a public tunnel to `CALL_AGENT_PORT` (default 8000), for example `ngrok http 8000` or `cloudflared tunnel --url http://localhost:8000`, and put that tunnel's `https://` URL in **both** `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL`. CLI `--live` hosts CallHandle in this process. Telnyx must open `/media-stream` and post the per-call `webhook_url` on that same host. Process env overrides `.env`, so a leftover `PUBLIC_WEBHOOK_URL` can send webhooks to a stale host while media follows `PUBLIC_BASE_URL` (Fly media + old tunnel). The verb fails before dial if webhook host != stream host after wss/https normalize, or if `{PUBLIC_BASE_URL}/health` is not HTTP 200 with this process's `serve_token`. Fly `https://hidden-beacon-080.fly.dev` is a different process with no BOOK entry; it is not valid as `PUBLIC_BASE_URL` for Mac CLI live. The verb waits until local `/health` accepts, then probes `{PUBLIC_BASE_URL}/health` until HTTP 200 and this process's `serve_token` match (and `/media-stream` accepts) before it dials. A printed trycloudflare URL is not enough: DNS can lag after the URL is advertised. The Call Control application `webhook_event_url` is independently `https://call-agent-webhooks.usetreena.workers.dev/webhooks/telnyx` (always-on, laptop-off). That Worker does not terminate media: `/media-stream` returns 501. Optional delivery proof through a working tunnel: `POST /webhooks/telnyx` with an unknown `call_control_id` returns 404 `unknown call` from this process (the Worker unsigned POST is 401). Linq registers `https://call-agent-webhooks.usetreena.workers.dev/linq/webhook` (alias `/webhooks/linq`). See [workers/webhooks/README.md](workers/webhooks/README.md).
 3. Set `QUICK_ASK_LIVE=1`.
-4. Provision a real number once with `call-agent did provision --user default --live`. The Numbers API orders a voice-capable US number and records it in the ledger. Without `--live` the verb records a stub number.
-5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends. `call-agent book --to +1... --name Nathan --party 2 --time "Friday 7pm" --live` is the same path with a `BookRequest`. The later live target for book is `+17272701288`. Do not dial it until `{PUBLIC_BASE_URL}/health` returns HTTP 200 with this process's `serve_token`. Cap GO on this fail-loud climb. HOLD REDIAL for the live book. This tree does not place that call.
+4. Assign the outbound caller ID. Live CLI takes `--from-did` or reads `users.from_did` for `--user`. Seed with `call-agent account upsert --phone +1... --name Nathan --from-did +1...`. Confirm/dial never calls `ledger.provision` and never `POST /v2/number_orders`. `did provision --live` is an ops verb that can order a number into the `dids` table; it is not a live-call prerequisite.
+5. Run `call-agent quick-ask --to +1... --ask hours --name Nathan --live --from-did +1...`. The command hosts the two FastAPI routes in the same process, dials, bridges audio between Telnyx and GPT-Live, and prints the result when the call ends. `call-agent book --to +1... --name Nathan --party 2 --time "Friday 7pm" --live --from-did +1...` is the same path with a `BookRequest`. The later live target for book is `+17272701288`. Do not dial it until `{PUBLIC_BASE_URL}/health` returns HTTP 200 with this process's `serve_token`. Cap GO on this fail-loud climb. HOLD REDIAL for the live book. This tree does not place that call.
 
 `call-agent verify-quick-ask --mode live` runs the same five checks against a real call. `call-agent verify-book --mode live` is gated the same way and still runs the stub adapters unless you change the code. Only call numbers you control until you have reviewed consent, calling-hour, and AI-disclosure rules for your destination.
 

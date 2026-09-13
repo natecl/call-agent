@@ -6,15 +6,16 @@ This tree does not contain `call-agent-web`. Builder’s second climb implements
 
 ## Runtime account
 
-Fly reads `users` (same DB as `dids`: SQLite on a laptop, Neon when `NEON_DATABASE_URL` is set). Kickoff looks up `phone = inbound iMessage sender`. `BookRequest.caller` is `users.first_name`. The outbound DID still comes from `dids` for `LINQ_KICKOFF_USER_ID=default`. `kickoff.json` records `account.user_id` so a later per-user DID climb can join.
+Fly reads `users` (same DB as `dids`: SQLite on a laptop, Neon when `NEON_DATABASE_URL` is set). Kickoff looks up `phone = inbound iMessage sender`. `BookRequest.caller` is `users.first_name`. `BookRequest.user_id` is `users.user_id`. The outbound Telnyx caller ID is `users.from_did` (the assigned Treena number). Confirm/dial never calls `ledger.provision` and never `POST /v2/number_orders`. `LINQ_KICKOFF_USER_ID` is gone. `kickoff.json` records `account.user_id`, phone, `from_did`, and minutes.
 
 Columns (see `USERS_SCHEMA` in `call_agent/accounts.py`):
 
 | column | role |
 | --- | --- |
-| `user_id` | lowercase `UserId` (uuid4 hex on insert if omitted) |
-| `phone` | E.164, unique, kickoff key |
+| `user_id` | lowercase `UserId` (uuid4 hex on insert if omitted). Kickoff `BookRequest.user_id`. |
+| `phone` | E.164, unique, kickoff key (linked iMessage number). Not the Telnyx from-number. |
 | `first_name` | nullable. Missing → Treena texts a plain account-settings line. Never collected in iMessage. |
+| `from_did` | nullable E.164 assigned Treena number. Telnyx `DialSpec.from_did`. Rejected when equal to `phone`. Not unique. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables. Omitted on upsert keeps the existing value. |
 | `stripe_customer_id` | unique billing link |
 | `plan` | Stripe/TRE-20 plan metadata |
 | `minutes_included` / `minutes_used` | recorded; kickoff does not refuse at zero or decrement |
@@ -48,7 +49,7 @@ Body:
 }
 ```
 
-`phone` is required. `first_name` may be omitted (row exists, kickoff will ask them to set it in account settings). `stripe_event_created` is ISO-8601. Equal or older than `stripe_synced_at` returns `{"ok": true, "skipped": true, "user_id": "..."}`.
+`phone` is required. `first_name` may be omitted (row exists, kickoff will ask them to set it in account settings). `from_did` is optional. The website is not expected to send `from_did` this climb; omitted `from_did` keeps the ops-seeded value so Stripe sync cannot wipe it. `stripe_event_created` is ISO-8601. Equal or older than `stripe_synced_at` returns `{"ok": true, "skipped": true, "user_id": "..."}`.
 
 Status:
 
@@ -74,10 +75,10 @@ Retry on 5xx (Fly down). Do not fall back to writing Neon from the website.
 ## L1 before the website PR
 
 ```bash
-call-agent account upsert --phone +1... --name Nathan
+call-agent account upsert --phone +17272701288 --name Nathan --from-did +12135690899
 ```
 
-That writes the same table. Set Fly `ACCOUNT_SYNC_SECRET` when the website PR is ready. This climb does not `fly deploy`.
+That writes the same table, including the assigned Treena `from_did`. Personal phone stays the linked iMessage number, not the from-number. Do not pass the same E.164 as `--phone` and `--from-did`. Set Fly `ACCOUNT_SYNC_SECRET` when the website PR is ready. This climb does not `fly deploy`.
 
 ## Kickoff copy
 
@@ -89,4 +90,8 @@ Row exists but `first_name` is empty:
 
 `I need your name for the call. Add it in your account settings, then text me again.`
 
-Neither is prefixed `Call failed:`. There is no `Call failed: missing caller name`. `LINQ_KICKOFF_CALLER` is gone.
+Row exists but `from_did` is empty:
+
+`This account doesn't have a Treena calling number assigned yet. Ask support to assign one, then text me again.`
+
+None of these is prefixed `Call failed:`. There is no `Call failed: missing caller name`. `LINQ_KICKOFF_CALLER` and `LINQ_KICKOFF_USER_ID` are gone.

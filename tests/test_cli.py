@@ -356,8 +356,8 @@ def test_verify_linq_call_stub_exits_zero(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "11/11 passed" in result.stdout
-    assert result.stdout.count("[PASS]") == 11
+    assert "13/13 passed" in result.stdout
+    assert result.stdout.count("[PASS]") == 13
     assert "[PASS] parse_book" in result.stdout
     assert "[PASS] collect_phone" in result.stdout
     assert "[PASS] confirm_before_dial" in result.stdout
@@ -365,6 +365,95 @@ def test_verify_linq_call_stub_exits_zero(tmp_path: Path) -> None:
     assert "[PASS] account_gate" in result.stdout
     assert "[PASS] kickoff_reply" in result.stdout
     assert "[PASS] cross_link" in result.stdout
+    assert "[PASS] from_did_users_row" in result.stdout
+    assert "[PASS] no_number_order" in result.stdout
+
+
+def test_book_live_without_from_did_exits_two_before_any_socket(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--party",
+            "2",
+            "--time",
+            "Friday 7pm",
+            "--live",
+        ],
+        env=environment(tmp_path)
+        | {
+            "QUICK_ASK_LIVE": "1",
+            "TELNYX_API_KEY": "k",
+            "TELNYX_CONNECTION_ID": "c",
+            "OPENAI_API_KEY": "o",
+            "PUBLIC_BASE_URL": "https://example.test",
+            "PUBLIC_WEBHOOK_URL": "https://example.test",
+        },
+    )
+
+    assert result.exit_code == 2
+    assert "--from-did" in result.output
+    assert "account upsert" in result.output
+    artifacts = tmp_path / "artifacts"
+    assert not artifacts.exists() or not any(artifacts.iterdir())
+
+
+def test_book_stub_uses_users_row_from_did_when_present(
+    tmp_path: Path,
+) -> None:
+    env = environment(tmp_path) | {"RETAIN_CALL_ARTIFACTS": "1"}
+    seeded = runner.invoke(
+        app,
+        [
+            "account",
+            "upsert",
+            "--phone",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--user",
+            "acctnathan",
+            "--from-did",
+            "+15555550177",
+        ],
+        env=env,
+    )
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "--to",
+            "+14155552671",
+            "--name",
+            "Nathan",
+            "--party",
+            "2",
+            "--time",
+            "Friday 7pm",
+            "--user",
+            "acctnathan",
+        ],
+        env=env,
+    )
+
+    assert seeded.exit_code == 0
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    dial = json.loads(
+        (
+            tmp_path
+            / "artifacts"
+            / payload["call_control_id"]
+            / "dial.json"
+        ).read_text()
+    )
+    assert dial["from"] == "+15555550177"
 
 
 def test_verify_webhooks_broken_url_fails_loud(tmp_path: Path) -> None:
