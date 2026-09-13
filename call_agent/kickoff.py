@@ -19,7 +19,6 @@ from .domain import (
     QuestionType,
     QuickAskRequest,
     UserId,
-    exception_reason,
 )
 from .linq import (
     claim_path,
@@ -38,6 +37,8 @@ from .messaging import (
 )
 from .persistence import PersistenceConfigError
 from .runtime import normalized_public_host, run_call
+from .artifacts import artifact_dir, artifact_slug
+from .user_text import intake_text, not_placed_text, result_text
 
 PHONE_ASK_TEXT = "okay, sounds good. What's the restaurant's phone number?"
 TIME_ASK_TEXT = "okay, sounds good. What time should I book?"
@@ -219,6 +220,7 @@ class KickoffReceipt:
     result_receipt: SendReceipt | None
     call_control_id: str
     error: str | None = None
+    publish_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -257,8 +259,8 @@ class KickoffSession:
 
     async def ask(self, prompt: str) -> str:
         raise NotImplementedError(
-            "mid-call chat is not shipped; L1 texts "
-            "Call failed: instead of pausing the live call"
+            "mid-call chat is not shipped; L1 texts a friendly "
+            "intake line instead of pausing the live call"
         )
 
 
@@ -290,8 +292,7 @@ def collect_reply_text(waiting_for: WaitingFor) -> str:
 
 
 def failed_reply_text(reason: str) -> str:
-    text = reason.strip() or "unknown"
-    return f"Call failed: {text}"
+    return intake_text(reason)
 
 
 def parse_kickoff(
@@ -352,16 +353,7 @@ def kickoff_ack_text(request: BookRequest | QuickAskRequest) -> str:
 
 
 def result_reply_text(result: CallResult, to: E164) -> str:
-    if result.status == "booked":
-        return f"Booked: {result.confirmation_text}"
-    if result.status == "answered":
-        return f"Answer: {result.answer_text}"
-    if result.status == "declined":
-        return "They declined."
-    if result.status == "no_answer":
-        return f"No answer at {to}."
-    reason = (result.reason or "").strip() or "unknown"
-    return f"Call failed: {reason}"
+    return result_text(result, to)
 
 
 def kickoff_host_mismatch(
@@ -376,10 +368,7 @@ def kickoff_host_mismatch(
     )
     if expected == actual:
         return None
-    return (
-        "Call not placed: PUBLIC_BASE_URL host "
-        f"{expected} != this host {actual}"
-    )
+    return not_placed_text()
 
 
 def kickoff_json_path(root: Path, event_id: str) -> Path:
@@ -502,11 +491,10 @@ def write_call_cross_links(
         result.call_control_id if result is not None else ""
     )
     status = result.status if result is not None else "failed"
-    result_ref = (
-        f"{call_control_id}/result.json" if call_control_id else None
-    )
+    prefix = artifact_slug(call_control_id) if call_control_id else ""
+    result_ref = f"{prefix}/result.json" if prefix else None
     call_report_ref = (
-        f"{call_control_id}/call_report.json" if call_control_id else None
+        f"{prefix}/call_report.json" if prefix else None
     )
     reply_payload = None
     if result_receipt is not None:
@@ -534,7 +522,7 @@ def write_call_cross_links(
     )
     if not call_control_id:
         return
-    call_dir = settings.call_agent_artifacts_dir / call_control_id
+    call_dir = artifact_dir(settings.call_agent_artifacts_dir, call_control_id)
     if not call_dir.is_dir():
         return
     (call_dir / "linq.json").write_text(
@@ -571,7 +559,7 @@ async def run_kickoff(
             request, session.settings, from_did=from_did
         )
     except (ValueError, RuntimeError, OSError, PersistenceConfigError) as error:
-        text = f"Call not placed: {error}"
+        text = not_placed_text()
         result_receipt = session.text(text, kind="result")
         write_call_cross_links(
             session.settings,
@@ -590,7 +578,7 @@ async def run_kickoff(
             error=str(error),
         )
     except Exception as error:
-        text = f"Call failed: {exception_reason(error)}"
+        text = not_placed_text()
         result_receipt = session.text(text, kind="result")
         write_call_cross_links(
             session.settings,
@@ -610,12 +598,16 @@ async def run_kickoff(
         )
     text = result_reply_text(result, request.to)
     result_receipt = session.text(text, kind="result")
+    publish_error = _read_publish_error(
+        session.settings, result.call_control_id
+    )
     write_call_cross_links(
         session.settings,
         inbound=session.inbound,
         result=result,
         result_receipt=result_receipt,
         result_text=text,
+        error=publish_error,
     )
     return KickoffReceipt(
         request=request,
@@ -623,6 +615,7 @@ async def run_kickoff(
         ack_receipt=ack_receipt,
         result_receipt=result_receipt,
         call_control_id=result.call_control_id,
+        publish_error=publish_error,
     )
 
 
@@ -1075,3 +1068,20 @@ def _require_artifacts_root(root: Path) -> Path:
             f"CALL_AGENT_ARTIFACTS_DIR is not a directory: {root}"
         )
     return root
+
+
+def _read_publish_error(settings: Settings, call_control_id: str) -> str | None:
+    path = (
+        artifact_dir(settings.call_agent_artifacts_dir, call_control_id)
+        / "publish_error.json"
+    )
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    error = raw.get("error")
+    return error if isinstance(error, str) and error.strip() else None

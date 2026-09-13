@@ -9,9 +9,9 @@
 - `parse-book` the natural reservation fixture collects party and time and asks for the restaurant phone number. No dial.
 - `collect-time` `can you make a reservation at poke palace for me?` asks for party and time. `2 people` asks for time, not the restaurant number. `7:30` then asks for the number. No dial.
 - `collect-phone` the +E164 follow-up asks to confirm and does not become a `BookRequest`. No dial.
-- `confirm-before-dial` `approve` / `yes` / `I confirm` become a `BookRequest`. A complete first-message one-shot never dials. A non-affirmative while waiting for confirm texts `Call failed:`.
+- `confirm-before-dial` `approve` / `yes` / `I confirm` become a `BookRequest`. A complete first-message one-shot never dials. A non-affirmative while waiting for confirm texts a plain intake line.
 - `parse-ask` `ask +14155552671 hours name Nathan` asks to confirm, then `approve` becomes a hours `QuickAskRequest`. The `name` token is ignored; caller comes from the `users` row.
-- `parse-fail` a non-number follow-up while waiting for the phone texts `Call failed:`, writes no `kickoff.json`.
+- `parse-fail` a non-number follow-up while waiting for the phone texts a plain intake line, writes no `kickoff.json`.
 - `account-lookup` approve builds `BookRequest.caller` and `user_id` from the seeded `users` row. `kickoff.json` records `account.user_id` and `from_did`.
 - `account-gate` no row, a row with no first name, and a row with no `from_did` reply plain lines. Never `Call failed: missing caller name`. No dial.
 - `kickoff-reply` two `POST /chats/{chat_id}/messages` sends: `Okay, I'm going to call them now.` then `Booked:`.

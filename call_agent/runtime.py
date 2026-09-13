@@ -71,6 +71,7 @@ from .gpt_live import (
 )
 from .artifacts import (
     ArtifactStore,
+    artifact_slug,
     open_artifact_store,
     publish_durable_artifacts,
     wipe_run_dir,
@@ -107,7 +108,8 @@ class RunDir:
     ) -> None:
         self.root = root
         self.call_control_id = call_control_id
-        self.path = root / call_control_id
+        self.artifact_prefix = artifact_slug(call_control_id)
+        self.path = root / self.artifact_prefix
         self.started_at = datetime.now(UTC)
         self.rows: list[JournalRow] = []
         self._clock_start = time.monotonic()
@@ -121,13 +123,14 @@ class RunDir:
 
     def bind(self, call_control_id: CallControlId) -> None:
         self._close_events()
-        target = self.root / str(call_control_id)
+        target = self.root / artifact_slug(str(call_control_id))
         if target != self.path:
             if target.exists():
                 shutil.rmtree(target)
             self.path.rename(target)
             self.path = target
         self.call_control_id = str(call_control_id)
+        self.artifact_prefix = artifact_slug(self.call_control_id)
         self._events = (self.path / "events.jsonl").open("a")
 
     def write_json(self, name: str, payload: dict[str, Any]) -> None:
@@ -202,15 +205,16 @@ class RunDir:
         self.write_transcript(call.conversation.transcript)
         self._write_audio()
         self._close_events()
+        prefix = self.artifact_prefix
         refs = Refs(
-            result=f"{self.call_control_id}/result.json",
-            transcript=f"{self.call_control_id}/transcript.json",
-            events=f"{self.call_control_id}/events.jsonl",
+            result=f"{prefix}/result.json",
+            transcript=f"{prefix}/transcript.json",
+            events=f"{prefix}/events.jsonl",
             inbound_audio=(
-                f"{self.call_control_id}/audio/{self._audio_name('inbound')}"
+                f"{prefix}/audio/{self._audio_name('inbound')}"
             ),
             outbound_audio=(
-                f"{self.call_control_id}/audio/{self._audio_name('outbound')}"
+                f"{prefix}/audio/{self._audio_name('outbound')}"
             ),
         )
         final_result = result.model_copy(
@@ -303,19 +307,22 @@ def build_ports(
                 1 if faults.media_drops_before_hangup else None
             ),
         )
+        http = StubTelnyxHttp(
+            submit=submit,
+            media=media,
+            write_json=run_dir.write_json,
+            dial_override=faults.dial_override,
+            far_party_hangs_up=faults.far_party_hangs_up,
+            placed_call_control_id=faults.placed_call_control_id,
+        )
         return Ports(
-            telnyx_http=StubTelnyxHttp(
-                submit=submit,
-                media=media,
-                write_json=run_dir.write_json,
-                dial_override=faults.dial_override,
-                far_party_hangs_up=faults.far_party_hangs_up,
-            ),
+            telnyx_http=http,
             telnyx_media=media,
             gpt_live=StubGptLive(
                 submit=submit,
                 write_json=run_dir.write_json,
                 scenario=scenario,
+                far_party_hangup=http.far_party_hangup,
             ),
         )
     return Ports(
@@ -706,16 +713,25 @@ async def run_call(
     BOOK.register(run_id, handle)
     try:
         result = await handle.run()
-        if should_retain_call_artifacts(settings, request):
-            if handle.artifact_store is not None:
-                publish_durable_artifacts(
-                    handle.run_dir.root,
-                    handle.run_dir.call_control_id,
-                    handle.run_dir.audio_names(),
-                    handle.artifact_store,
+        try:
+            if should_retain_call_artifacts(settings, request):
+                if handle.artifact_store is not None:
+                    publish_durable_artifacts(
+                        handle.run_dir.root,
+                        handle.run_dir.call_control_id,
+                        handle.run_dir.audio_names(),
+                        handle.artifact_store,
+                    )
+            else:
+                wipe_run_dir(handle.run_dir.path)
+        except Exception as error:
+            try:
+                handle.run_dir.write_json(
+                    "publish_error.json",
+                    {"error": exception_reason(error)},
                 )
-        else:
-            wipe_run_dir(handle.run_dir.path)
+            except OSError:
+                pass
         return result
     finally:
         BOOK._drop_handle(handle)

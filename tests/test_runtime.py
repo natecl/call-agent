@@ -38,7 +38,7 @@ from call_agent.domain import (
     Transcript,
     UserId,
 )
-from call_agent.gpt_live import StubGptLive
+from call_agent.gpt_live import StubGptLive, StubScenario
 from call_agent.runtime import (
     CallHandle,
     Ports,
@@ -46,9 +46,12 @@ from call_agent.runtime import (
     assert_live_dial_origins,
     normalized_public_host,
     public_url_host,
+    run_call,
     run_quick_ask,
 )
 from call_agent.telnyx import StubTelnyxHttp, parse_media_frame
+from call_agent.artifacts import artifact_dir, artifact_slug
+from call_agent.user_text import result_text
 
 AUDIO = base64.b64encode(bytes(640)).decode()
 
@@ -779,4 +782,146 @@ async def test_run_loop_empty_websocket_disconnect_fails_with_type_name(
     assert result.reason == "WebSocketDisconnect"
     assert result.reason != ""
     assert any(row.get("kind") == "runtime_failure" for row in rows)
+
+
+def _book_request() -> BookRequest:
+    return BookRequest(
+        user_id=UserId("user-1"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="Friday 7pm",
+        constraints="outdoor if possible",
+        retain_call_artifacts=True,
+    )
+
+
+def _fast_settings(settings: Settings) -> Settings:
+    return Settings(
+        _env_file=None,
+        call_agent_db_path=settings.call_agent_db_path,
+        call_agent_artifacts_dir=settings.call_agent_artifacts_dir,
+        retain_call_artifacts=True,
+        hangup_trailing_silence_s=0,
+        farewell_idle_s=0,
+        farewell_max_s=0.2,
+    )
+
+
+async def test_done_state_hangup_skips_end_call_path_is_tool(
+    settings: Settings,
+) -> None:
+    result = await run_call(
+        _book_request(),
+        _fast_settings(settings),
+        from_did=E164("+15555550100"),
+        scenario=StubScenario(skips_end_call=True),
+    )
+    run_dir = artifact_dir(
+        settings.call_agent_artifacts_dir, result.call_control_id
+    )
+    report = json.loads((run_dir / "call_report.json").read_text())
+    assert result.status == "booked"
+    assert report["hangup"]["path"] == "tool"
+    assert report["verdict_source"] == "tool"
+
+
+async def test_far_party_hangs_up_after_record_keeps_booked(
+    settings: Settings,
+) -> None:
+    result = await run_call(
+        _book_request(),
+        _fast_settings(settings),
+        from_did=E164("+15555550100"),
+        scenario=StubScenario(far_party_hangs_up_after_record=True),
+    )
+    run_dir = artifact_dir(
+        settings.call_agent_artifacts_dir, result.call_control_id
+    )
+    report = json.loads((run_dir / "call_report.json").read_text())
+    assert result.status == "booked"
+    assert result_text(result, E164("+14155552671")).startswith("Booked:")
+    assert report["hangup"]["path"] == "far_party"
+    assert report["verdict_source"] == "tool"
+
+
+async def test_far_party_hangs_up_no_tools_books_from_transcript(
+    settings: Settings,
+) -> None:
+    result = await run_call(
+        _book_request(),
+        _fast_settings(settings),
+        from_did=E164("+15555550100"),
+        scenario=StubScenario(far_party_hangs_up_no_tools=True),
+    )
+    run_dir = artifact_dir(
+        settings.call_agent_artifacts_dir, result.call_control_id
+    )
+    report = json.loads((run_dir / "call_report.json").read_text())
+    assert result.status == "booked"
+    assert result.confirmation_text
+    assert "booked" in result.confirmation_text.casefold()
+    assert report["hangup"]["path"] == "far_party"
+    assert report["verdict_source"] == "transcript"
+    assert report["counts"]["tool_calls"] == 0
+    assert result_text(result, E164("+14155552671")).startswith("Booked:")
+
+
+async def test_artifact_key_slug_colon_ccid_keeps_raw_in_result(
+    settings: Settings,
+) -> None:
+    ccid = "v3:stub_colon_0001"
+    result = await run_call(
+        _book_request(),
+        _fast_settings(settings),
+        from_did=E164("+15555550100"),
+        scenario=StubScenario(placed_call_control_id=ccid),
+    )
+    prefix = artifact_slug(ccid)
+    run_dir = settings.call_agent_artifacts_dir / prefix
+    assert result.call_control_id == ccid
+    assert prefix == "v3_stub_colon_0001"
+    assert run_dir.is_dir()
+    assert not (settings.call_agent_artifacts_dir / ccid).exists()
+    assert result.transcript_ref == f"{prefix}/transcript.json"
+    report = json.loads((run_dir / "call_report.json").read_text())
+    assert report["call_control_id"] == ccid
+    assert report["artifact_prefix"] == prefix
+    result_json = json.loads((run_dir / "result.json").read_text())
+    assert result_json["call_control_id"] == ccid
+
+
+async def test_publish_failure_keeps_result(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class RaisingStore:
+        def put(
+            self,
+            key: str,
+            body: bytes,
+            content_type: str = "",
+        ) -> None:
+            del key, body, content_type
+            raise RuntimeError("R2 put failed for key: HTTP 403")
+
+        def get(self, key: str) -> bytes:
+            raise FileNotFoundError(key)
+
+    monkeypatch.setattr(
+        "call_agent.runtime.open_artifact_store", lambda _settings: RaisingStore()
+    )
+    result = await run_call(
+        _book_request(),
+        _fast_settings(settings),
+        from_did=E164("+15555550100"),
+    )
+    run_dir = artifact_dir(
+        settings.call_agent_artifacts_dir, result.call_control_id
+    )
+    assert result.status == "booked"
+    assert result_text(result, E164("+14155552671")).startswith("Booked:")
+    payload = json.loads((run_dir / "publish_error.json").read_text())
+    assert "R2 put failed" in payload["error"]
+    assert "HTTP 403" in payload["error"]
 

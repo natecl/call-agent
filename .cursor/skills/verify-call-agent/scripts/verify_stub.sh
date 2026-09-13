@@ -103,6 +103,22 @@ for key in ("transcript_ref", "audio_ref"):
 print("book result ok (retained):", result["status"])
 EOF
 cp -r "$CALL_AGENT_ARTIFACTS_DIR" "$EVIDENCE/book-artifacts"
+"$PY" - "$CALL_AGENT_ARTIFACTS_DIR" <<'EOF'
+import json, sys, pathlib
+from call_agent.domain import DONE_STATE_LINE
+root = pathlib.Path(sys.argv[1])
+starts = list(root.glob("*/session_start.json"))
+assert starts, f"no session_start.json under {root}"
+for path in starts:
+    payload = json.loads(path.read_text())
+    session = payload.get("session") or payload
+    instructions = str(session.get("instructions") or "")
+    responses = (session.get("delegation") or {}).get("responses") or {}
+    assert DONE_STATE_LINE in instructions, path
+    assert "say a short goodbye" not in instructions
+    assert responses.get("tool_choice") == "auto", path
+print("session_start ok:", len(starts), "files")
+EOF
 unset RETAIN_CALL_ARTIFACTS
 
 step "verify-book stub checklist"

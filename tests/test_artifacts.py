@@ -7,6 +7,8 @@ import pytest
 from call_agent.artifacts import (
     LocalArtifactStore,
     R2ArtifactStore,
+    artifact_slug,
+    durable_keys,
     open_artifact_store,
     publish_durable_artifacts,
     sign_r2_request,
@@ -117,3 +119,48 @@ def test_publish_durable_artifacts_puts_documented_subset(tmp_path: Path) -> Non
         "stub-call-0001/audio/inbound.wav": b"in",
         "stub-call-0001/audio/outbound.wav": b"out",
     }
+
+
+def test_artifact_slug_sanitizes_colon_and_keeps_safe_chars() -> None:
+    assert artifact_slug("v3:stub_colon_0001") == "v3_stub_colon_0001"
+    assert artifact_slug("stub-call-0001") == "stub-call-0001"
+    assert artifact_slug("a.b-c_d") == "a.b-c_d"
+
+
+def test_durable_keys_use_slug_not_raw_ccid() -> None:
+    keys = durable_keys("v3:stub_colon_0001", ("inbound.wav", "outbound.wav"))
+    assert keys[0] == "v3_stub_colon_0001/transcript.json"
+    assert all(":" not in key for key in keys)
+
+
+def test_sign_r2_request_uses_raw_path() -> None:
+    from urllib.parse import quote
+
+    key = "v3:stub_colon_0001/result.json"
+    url = (
+        "https://acct.r2.cloudflarestorage.com/calls/"
+        f"{quote(key, safe='/')}"
+    )
+    parsed = httpx.URL(url)
+    assert ":" in parsed.path
+    assert "%3A" in parsed.raw_path.decode()
+    headers = sign_r2_request(
+        "PUT",
+        url,
+        b"{}",
+        "application/json",
+        "key",
+        "secret",
+        datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+    )
+    decoded_headers = sign_r2_request(
+        "PUT",
+        f"https://acct.r2.cloudflarestorage.com/calls/{key}",
+        b"{}",
+        "application/json",
+        "key",
+        "secret",
+        datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+    )
+    assert headers["authorization"] != decoded_headers["authorization"]
+    assert "AWS4-HMAC-SHA256" in headers["authorization"]

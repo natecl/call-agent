@@ -508,7 +508,8 @@ def test_bad_phone_followup_fails_loud(tmp_path: Path) -> None:
 
     assert isinstance(parsed, KickoffFailed)
     assert "phone number" in parsed.reason
-    assert failed_reply_text(parsed.reason).startswith("Call failed:")
+    assert failed_reply_text(parsed.reason) == parsed.reason
+    assert "Call failed:" not in failed_reply_text(parsed.reason)
 
 
 def test_bad_confirm_followup_fails_loud(tmp_path: Path) -> None:
@@ -523,7 +524,8 @@ def test_bad_confirm_followup_fails_loud(tmp_path: Path) -> None:
 
     assert isinstance(parsed, KickoffFailed)
     assert "confirm" in parsed.reason
-    assert failed_reply_text(parsed.reason).startswith("Call failed:")
+    assert failed_reply_text(parsed.reason) == parsed.reason
+    assert "Call failed:" not in failed_reply_text(parsed.reason)
     assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
 
 
@@ -608,8 +610,9 @@ def test_result_reply_text_covers_statuses() -> None:
     assert result_reply_text(NoAnswer(), to) == "No answer at +14155552671."
     assert (
         result_reply_text(Failed(reason="no tables"), to)
-        == "Call failed: no tables"
+        == "I couldn't finish the call. Please try again."
     )
+    assert "Call failed:" not in result_reply_text(Failed(reason="no tables"), to)
 
 
 def test_kickoff_ack_text() -> None:
@@ -651,9 +654,9 @@ def test_kickoff_host_mismatch_names_hosts() -> None:
     )
     message = kickoff_host_mismatch(settings, "other.example")
     assert message is not None
-    assert "hidden-beacon-080.fly.dev" in message
-    assert "other.example" in message
-    assert message.startswith("Call not placed:")
+    assert message == "I couldn't place the call. Please try again in a moment."
+    assert "Call not placed:" not in message
+    assert "PUBLIC_BASE_URL" not in message
 
 
 async def test_run_kickoff_cross_links_and_replies(tmp_path: Path) -> None:
@@ -704,6 +707,56 @@ async def test_run_kickoff_cross_links_and_replies(tmp_path: Path) -> None:
     assert linq_link["chat_id"] == INBOUND_CHAT_ID
 
 
+async def test_run_kickoff_publish_failure_keeps_booked_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class RaisingStore:
+        def put(
+            self, key: str, body: bytes, content_type: str = ""
+        ) -> None:
+            del key, body, content_type
+            raise RuntimeError("R2 put failed for key: HTTP 403")
+
+        def get(self, key: str) -> bytes:
+            raise FileNotFoundError(key)
+
+    monkeypatch.setattr(
+        "call_agent.runtime.open_artifact_store",
+        lambda _settings: RaisingStore(),
+    )
+    settings = _settings(tmp_path, retain_call_artifacts=True)
+    inbound = parse_inbound(
+        kickoff_inbound_bytes(PHONE_FOLLOWUP_TEXT, "evt-publish-1")
+    )
+    assert inbound is not None
+    request = BookRequest(
+        user_id=UserId("acctnathan"),
+        to=E164("+14155552671"),
+        caller=FirstName("Nathan"),
+        mode=Mode.STUB,
+        party_size=2,
+        time_text="7:30",
+        retain_call_artifacts=True,
+    )
+    port = StubLinq()
+    session = make_session(inbound, settings, port)
+
+    receipt = await run_kickoff(
+        session, request, from_did=E164("+15555550177")
+    )
+
+    result_text = port.sent[-1][1]["message"]["parts"][0]["value"]
+    assert receipt.result is not None
+    assert receipt.result.status == "booked"
+    assert result_text.startswith("Booked:")
+    assert "Call not placed:" not in result_text
+    assert receipt.publish_error is not None
+    assert "R2 put failed" in receipt.publish_error
+    assert (
+        tmp_path / "artifacts" / "stub-call-0001" / "publish_error.json"
+    ).is_file()
+
+
 async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
     tmp_path: Path,
 ) -> None:
@@ -740,7 +793,9 @@ async def test_run_kickoff_live_preflight_fails_loud_without_sockets(
     assert receipt.error is not None
     assert "PUBLIC_WEBHOOK_URL" in receipt.error
     result_text = port.sent[-1][1]["message"]["parts"][0]["value"]
-    assert result_text.startswith("Call not placed:")
+    assert result_text == "I couldn't place the call. Please try again in a moment."
+    assert "Call not placed:" not in result_text
+    assert "PUBLIC_WEBHOOK_URL" not in result_text
     assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
 
 
@@ -773,8 +828,9 @@ async def test_run_kickoff_empty_disconnect_reason_is_not_blank(
 
     assert receipt.result is None
     result_text = port.sent[-1][1]["message"]["parts"][0]["value"]
-    assert result_text == "Call failed: WebSocketDisconnect"
-    assert not result_text.endswith("Call failed: ")
+    assert result_text == "I couldn't place the call. Please try again in a moment."
+    assert "Call failed:" not in result_text
+    assert "WebSocketDisconnect" not in result_text
     assert str(WebSocketDisconnect(code=1006)).strip() == ""
 
 

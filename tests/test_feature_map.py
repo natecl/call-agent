@@ -27,6 +27,7 @@ def test_feature_map_lists_shipped_book_rows() -> None:
         "| `build_book_instructions` | shipped |",
         "| goodbye needles | shipped |",
         "| hangup confirm timeout | shipped |",
+        "| done-state hangup | shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]
@@ -119,6 +120,7 @@ def test_feature_map_lists_linq_to_call_rows() -> None:
         "| `no-name reply` | shipped |",
         "| `no-from-did reply` | shipped |",
         "| `no number_orders at dial` | shipped |",
+        "| friendly iMessage errors | shipped |",
     )
 
     missing = [row for row in required_rows if row not in INVENTORY]
@@ -198,3 +200,13 @@ def test_book_feature_recipes_use_the_entry_contract() -> None:
         positions = [text.find(section) for section in required]
         assert all(index != -1 for index in positions), name
         assert positions == sorted(positions), name
+
+
+def test_feature_map_lists_slug_and_publish_isolation_rows() -> None:
+    required_rows = (
+        "| `artifact_slug` | shipped |",
+        "| publish failure isolation | shipped |",
+    )
+    missing = [row for row in required_rows if row not in INVENTORY]
+    assert missing == []
+

@@ -36,7 +36,7 @@ Preconditions:
 - The verb makes its own temporary workspace. It never reads artifacts from an earlier run.
 - This lever retains call artifacts so `result_artifact` can read them. Default `book` wipes those files after hangup.
 - `multi_turn_booking` fails when the stub emits one ask and one answer. That is the loud fail for a theater path. The call still hangs up after goodbye (`hangup.path=trail`, `marks_sent=1`).
-- `clean_hangup` expects `booked` or `declined` and `hangup.path=tool`. A goodbye without tools fails this check with `status=failed` and `hangup_path=trail`. That is the TRE-14 live miss, not `far_party`.
+- `clean_hangup` expects `booked` or `declined` and `hangup.path=tool`. A legal terminal `record_task_result` arms that hangup even when the stub skips `end_call`. A goodbye without tools fails this check with `status=failed` and `hangup_path=trail`. That is the TRE-14 live miss, not `far_party`.
 - `keeps_talking` fails when the model goes quiet after the time turn (`never_resumes`, `hangup_path=stall`). A media socket that dies before hangup fails `clean_hangup` with `far_party` and still leaves `result.json`.
 - `pytest` and the CLI call the same function. A green pytest with a red CLI means the CLI wiring changed.
 - Live book against `+17272701288` needs `QUICK_ASK_LIVE=1`, Telnyx and OpenAI keys, and both `PUBLIC_BASE_URL` and `PUBLIC_WEBHOOK_URL` set to the same tunnel to the local BOOK process. Fly `PUBLIC_BASE_URL` is not valid for Mac CLI live. This skill never sets them.
