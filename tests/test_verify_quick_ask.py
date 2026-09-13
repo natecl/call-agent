@@ -198,10 +198,11 @@ def test_verify_passes_with_one_final_mark_when_goodbye_audio_storms(
         "final_mark": "hangup",
         "trailing_silence_s": 0.0,
         "drain_timeout_s": 10.0,
+        "confirmed": True,
     }
     assert call_report["counts"] == {
         "events": 121,
-        "effects": 113,
+        "effects": 115,
         "marks_sent": 1,
         "mark_echoes": 1,
         "stale_mark_echoes": 0,

@@ -196,6 +196,8 @@ def test_media_stream_disconnect_without_stop_submits_media_stop(
     with pytest.raises(asyncio.QueueEmpty):
         answered_handle.queue.get_nowait()
 
+
+def test_media_stream_accepts_8k_l16_start_and_opens_live_at_16k(
     answered_handle: CallHandle,
 ) -> None:
     client = TestClient(app)
