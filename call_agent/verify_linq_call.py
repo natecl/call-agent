@@ -27,7 +27,9 @@ from .kickoff import (
     NO_ACCOUNT_TEXT,
     NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
+    PARTY_AND_TIME_ASK_TEXT,
     PHONE_ASK_TEXT,
+    TIME_ASK_TEXT,
     KickoffBlocked,
     KickoffCollecting,
     KickoffFailed,
@@ -52,6 +54,9 @@ NATURAL_BOOK_TEXT = (
     "can you make a reservation with this restaurant at 7:30 "
     "for a party of two?"
 )
+POKE_PALACE_BOOK_TEXT = "can you make a reservation at poke palace for me?"
+PARTY_FOLLOWUP_TEXT = "2 people"
+TIME_FOLLOWUP_TEXT = "7:30"
 BOOK_KICKOFF_TEXT = NATURAL_BOOK_TEXT
 ONESHOT_BOOK_TEXT = (
     "book +14155552671 party 2 at Friday 7pm name Nathan "
@@ -77,6 +82,7 @@ class LinqCallVerifyInput(BaseModel):
 
 CheckName = Literal[
     "parse_book",
+    "collect_time",
     "collect_phone",
     "confirm_before_dial",
     "parse_quick_ask",
@@ -105,6 +111,7 @@ class LinqCallVerifyReport(BaseModel):
 
     passed: bool
     checks: tuple[
+        LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
         LinqCallVerifyCheck,
@@ -194,6 +201,64 @@ def verify_linq_call(
             f"waiting={getattr(getattr(book_parsed, 'pending', None), 'waiting_for', None)} "
             f"party={getattr(getattr(book_parsed, 'pending', None), 'party_size', None)} "
             f"time={getattr(getattr(book_parsed, 'pending', None), 'time_text', None)}"
+        ),
+    )
+
+    poke_first = intake_kickoff(POKE_PALACE_BOOK_TEXT, settings, account=nathan)
+    party_follow = None
+    time_follow = None
+    collect_time_ok = (
+        isinstance(poke_first, KickoffCollecting)
+        and poke_first.verb == "book"
+        and poke_first.reply == PARTY_AND_TIME_ASK_TEXT
+        and poke_first.pending.waiting_for == "party_and_time"
+        and poke_first.pending.party_size is None
+        and poke_first.pending.time_text is None
+        and poke_first.reply != PHONE_ASK_TEXT
+        and poke_first.reply != TIME_ASK_TEXT
+        and not (artifacts / "stub-call-0001").exists()
+    )
+    if collect_time_ok and isinstance(poke_first, KickoffCollecting):
+        party_follow = intake_kickoff(
+            PARTY_FOLLOWUP_TEXT,
+            settings,
+            pending=poke_first.pending,
+            account=nathan,
+        )
+        collect_time_ok = (
+            isinstance(party_follow, KickoffCollecting)
+            and party_follow.verb == "book"
+            and party_follow.reply == TIME_ASK_TEXT
+            and party_follow.pending.waiting_for == "time"
+            and party_follow.pending.party_size == 2
+            and party_follow.pending.time_text is None
+            and party_follow.reply != PHONE_ASK_TEXT
+            and not (artifacts / "stub-call-0001").exists()
+        )
+    if collect_time_ok and isinstance(party_follow, KickoffCollecting):
+        time_follow = intake_kickoff(
+            TIME_FOLLOWUP_TEXT,
+            settings,
+            pending=party_follow.pending,
+            account=nathan,
+        )
+        collect_time_ok = (
+            isinstance(time_follow, KickoffCollecting)
+            and time_follow.verb == "book"
+            and time_follow.reply == PHONE_ASK_TEXT
+            and time_follow.pending.waiting_for == "to"
+            and time_follow.pending.party_size == 2
+            and time_follow.pending.time_text == "7:30"
+            and not (artifacts / "stub-call-0001").exists()
+        )
+    time_check = LinqCallVerifyCheck(
+        name="collect_time",
+        passed=collect_time_ok,
+        detail=(
+            f"first={getattr(getattr(poke_first, 'pending', None), 'waiting_for', None)} "
+            f"time={getattr(getattr(poke_first, 'pending', None), 'time_text', None)} "
+            f"party={getattr(getattr(party_follow, 'pending', None), 'waiting_for', None)} "
+            f"after_time={getattr(getattr(time_follow, 'pending', None), 'waiting_for', None)}"
         ),
     )
 
@@ -606,6 +671,7 @@ def verify_linq_call(
 
     checks = (
         book_check,
+        time_check,
         phone_check,
         confirm_check,
         ask_check,
@@ -652,7 +718,7 @@ def format_linq_call_report(report: LinqCallVerifyReport) -> str:
         for check in report.checks
     ]
     passed = sum(check.passed for check in report.checks)
-    lines.append(f"{passed}/13 passed")
+    lines.append(f"{passed}/{len(report.checks)} passed")
     return "\n".join(lines)
 
 

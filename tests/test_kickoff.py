@@ -30,6 +30,7 @@ from call_agent.kickoff import (
     KickoffFailed,
     KickoffParsed,
     KickoffSession,
+    PendingCollect,
     collect_reply_text,
     failed_reply_text,
     intake_kickoff as _intake_kickoff,
@@ -50,7 +51,10 @@ from call_agent.verify_linq_call import (
     ASK_KICKOFF_TEXT,
     NATURAL_BOOK_TEXT,
     ONESHOT_BOOK_TEXT,
+    PARTY_FOLLOWUP_TEXT,
     PHONE_FOLLOWUP_TEXT,
+    POKE_PALACE_BOOK_TEXT,
+    TIME_FOLLOWUP_TEXT,
     kickoff_inbound_bytes,
     verify_linq_call,
 )
@@ -361,6 +365,114 @@ def test_missing_party_and_time_does_not_ask_for_phone(tmp_path: Path) -> None:
     assert isinstance(parsed, KickoffCollecting)
     assert parsed.pending.waiting_for == "party_and_time"
     assert parsed.reply == collect_reply_text("party_and_time")
+    assert parsed.reply != PHONE_ASK_TEXT
+
+
+def test_at_restaurant_does_not_invent_time(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    parsed = intake_kickoff(POKE_PALACE_BOOK_TEXT, settings)
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "party_and_time"
+    assert parsed.reply == collect_reply_text("party_and_time")
+    assert parsed.pending.party_size is None
+    assert parsed.pending.time_text is None
+    assert parsed.reply != PHONE_ASK_TEXT
+    assert parsed.reply != TIME_ASK_TEXT
+
+
+def test_party_only_followup_asks_for_time_not_phone(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    first = intake_kickoff(POKE_PALACE_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+
+    parsed = intake_kickoff(
+        PARTY_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "time"
+    assert parsed.reply == TIME_ASK_TEXT
+    assert parsed.pending.party_size == 2
+    assert parsed.pending.time_text is None
+    assert parsed.reply != PHONE_ASK_TEXT
+
+
+def test_poke_palace_collects_time_before_phone(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    first = intake_kickoff(POKE_PALACE_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    second = intake_kickoff(
+        PARTY_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(second, KickoffCollecting)
+    assert second.pending.waiting_for == "time"
+    third = intake_kickoff(
+        TIME_FOLLOWUP_TEXT, settings, pending=second.pending
+    )
+    assert isinstance(third, KickoffCollecting)
+    assert third.reply == PHONE_ASK_TEXT
+    assert third.pending.waiting_for == "to"
+    assert third.pending.time_text == "7:30"
+    fourth = intake_kickoff(
+        PHONE_FOLLOWUP_TEXT, settings, pending=third.pending
+    )
+    assert isinstance(fourth, KickoffCollecting)
+    assert fourth.pending.waiting_for == "confirm"
+    fifth = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=fourth.pending
+    )
+    assert isinstance(fifth, KickoffParsed)
+    assert isinstance(fifth.request, BookRequest)
+    assert fifth.request.party_size == 2
+    assert fifth.request.time_text == "7:30"
+
+
+def test_bundled_phone_and_time_after_party(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    first = intake_kickoff(POKE_PALACE_BOOK_TEXT, settings)
+    assert isinstance(first, KickoffCollecting)
+    second = intake_kickoff(
+        PARTY_FOLLOWUP_TEXT, settings, pending=first.pending
+    )
+    assert isinstance(second, KickoffCollecting)
+
+    parsed = intake_kickoff(
+        "7272701288 and at 7:30", settings, pending=second.pending
+    )
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "confirm"
+    assert parsed.pending.party_size == 2
+    assert parsed.pending.time_text == "7:30"
+    assert parsed.pending.to == "+17272701288"
+    assert parsed.reply != PHONE_ASK_TEXT
+    approved = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT, settings, pending=parsed.pending
+    )
+    assert isinstance(approved, KickoffParsed)
+    assert isinstance(approved.request, BookRequest)
+    assert approved.request.time_text == "7:30"
+    assert approved.request.to == E164("+17272701288")
+
+
+def test_stale_invented_time_does_not_skip_to_phone(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    pending = PendingCollect(
+        verb="book",
+        waiting_for="party",
+        time_text="poke palace for me?",
+    )
+
+    parsed = intake_kickoff(
+        PARTY_FOLLOWUP_TEXT, settings, pending=pending
+    )
+
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "time"
+    assert parsed.reply == TIME_ASK_TEXT
+    assert parsed.pending.party_size == 2
+    assert parsed.pending.time_text is None
     assert parsed.reply != PHONE_ASK_TEXT
 
 
@@ -731,6 +843,7 @@ def test_verify_linq_call_passes() -> None:
     assert report.passed
     assert [check.name for check in report.checks] == [
         "parse_book",
+        "collect_time",
         "collect_phone",
         "confirm_before_dial",
         "parse_quick_ask",

@@ -111,9 +111,23 @@ _BARE_PARTY_RE = re.compile(
     r"^\s*(" + _PARTY_TOKEN + r")\s*(?:people|guests|persons?)?\s*$",
     re.IGNORECASE,
 )
-_AT_TIME_RE = re.compile(
-    r"\bat\s+(.+?)(?=\s+for\s+a\s+party|\s+for\s+a\s+table|\s+party\b"
-    r"|\s+name\b|\s+notes\b|$)",
+_DAY_WORD = (
+    r"today|tonight|tomorrow|"
+    r"this\s+(?:morning|afternoon|evening)|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+)
+_CLOCK = (
+    r"(?:noon|midnight|midday)"
+    r"|(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?)"
+    r"|(?:[01]?\d|2[0-3]):[0-5]\d"
+    r"|(?:1[0-2]|0?[1-9])\s*o'?clock"
+)
+_TIME_LIKE_RE = re.compile(
+    rf"(?:at\s+)?(?:(?P<day>{_DAY_WORD})\s+)?(?:at\s+)?(?P<clock>{_CLOCK})",
+    re.IGNORECASE,
+)
+_AT_BARE_HOUR_RE = re.compile(
+    r"\bat\s+(?P<clock>(?:1[0-2]|0?[1-9]|2[0-3]))\b(?!:)",
     re.IGNORECASE,
 )
 _NOTES_RE = re.compile(r"\bnotes\s+(.+)$", re.IGNORECASE)
@@ -672,9 +686,10 @@ def _decide_book(
     confirmed: bool,
 ) -> KickoffParsed | KickoffCollecting | KickoffFailed:
     missing: list[WaitingFor] = []
+    time_text = _time_span(extracted.time_text or "")
     if extracted.party_size is None:
         missing.append("party")
-    if not extracted.time_text:
+    if not time_text:
         missing.append("time")
     if missing:
         waiting: WaitingFor = (
@@ -704,7 +719,7 @@ def _decide_book(
             caller=caller,
             mode=_mode(settings),
             party_size=extracted.party_size or 0,
-            time_text=extracted.time_text or "",
+            time_text=time_text or "",
             constraints=extracted.constraints,
             retain_call_artifacts=(
                 True if account.retain_call_artifacts else None
@@ -776,7 +791,7 @@ def _pending_from_extracted(
         waiting_for=waiting_for,
         to=str(extracted.to) if extracted.to is not None else None,
         party_size=extracted.party_size,
-        time_text=extracted.time_text,
+        time_text=_time_span(extracted.time_text or ""),
         constraints=extracted.constraints,
         question_kind=(
             extracted.question_kind.value
@@ -796,12 +811,16 @@ def _extract_fields(
     return _Extracted(
         intent=_intent(text, waiting_for),
         to=_extract_e164(text),
-        party_size=_extract_party(text, loose=waiting_for in {"party", "party_and_time"}),
-        time_text=_extract_time(text, loose=waiting_for in {"time", "party_and_time"}),
-            constraints=_extract_notes(text),
-            question_kind=_extract_kind(text),
-            question_item=_extract_item(text),
-        )
+        party_size=_extract_party(
+            text, loose=waiting_for in {"party", "party_and_time"}
+        ),
+        time_text=_extract_time(
+            text, loose=waiting_for in {"time", "party_and_time"}
+        ),
+        constraints=_extract_notes(text),
+        question_kind=_extract_kind(text),
+        question_item=_extract_item(text),
+    )
 
 
 def _extract_cli(text: str) -> _Extracted | None:
@@ -888,21 +907,23 @@ def _extract_party(text: str, *, loose: bool) -> int | None:
 
 
 def _extract_time(text: str, *, loose: bool) -> str | None:
-    matched = _AT_TIME_RE.search(text)
+    del loose
+    return _time_span(text)
+
+
+def _time_span(text: str) -> str | None:
+    """Clock, am/pm, noon, or `at <hour>`. Not `at <restaurant>`."""
+    matched = _TIME_LIKE_RE.search(text)
     if matched is not None:
-        value = " ".join(matched.group(1).split()).strip(" .,")
-        if value and not _E164_RE.fullmatch(value):
-            return value
-    if not loose:
+        day = " ".join((matched.group("day") or "").split())
+        clock = " ".join((matched.group("clock") or "").split())
+        if clock:
+            return f"{day} {clock}".strip()
+    bare = _AT_BARE_HOUR_RE.search(text)
+    if bare is None:
         return None
-    stripped = " ".join(text.split()).strip(" .,")
-    if not stripped or _extract_e164(stripped) is not None:
-        return None
-    if _BARE_PARTY_RE.fullmatch(stripped) is not None:
-        return None
-    if re.search(r"\d", stripped) is None:
-        return None
-    return stripped
+    clock = (bare.group("clock") or "").strip()
+    return clock or None
 
 
 def _extract_notes(text: str) -> str | None:
@@ -955,7 +976,8 @@ def _merge(pending: PendingCollect, extracted: _Extracted) -> _Extracted:
         intent=pending.verb,
         to=to,
         party_size=extracted.party_size or pending.party_size,
-        time_text=extracted.time_text or pending.time_text,
+        time_text=_time_span(extracted.time_text or "")
+        or _time_span(pending.time_text or ""),
         constraints=extracted.constraints or pending.constraints,
         question_kind=kind,
         question_item=extracted.question_item or pending.question_item,
@@ -967,11 +989,13 @@ def _progressed(pending: PendingCollect, extracted: _Extracted) -> bool:
     if waiting == "to":
         return extracted.to is not None
     if waiting == "time":
-        return bool(extracted.time_text)
+        return bool(_time_span(extracted.time_text or ""))
     if waiting == "party":
         return extracted.party_size is not None
     if waiting == "party_and_time":
-        return extracted.party_size is not None or bool(extracted.time_text)
+        return extracted.party_size is not None or bool(
+            _time_span(extracted.time_text or "")
+        )
     if waiting == "kind":
         return extracted.question_kind is not None
     if waiting == "item":

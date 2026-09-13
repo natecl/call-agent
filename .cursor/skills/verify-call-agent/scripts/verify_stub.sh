@@ -115,7 +115,7 @@ grep -q "6/6 passed" "$EVIDENCE/verify-message.txt"
 
 step "verify-linq-call stub checklist"
 run "$CLI" verify-linq-call | tee "$EVIDENCE/verify-linq-call.txt" >/dev/null
-grep -q "13/13 passed" "$EVIDENCE/verify-linq-call.txt"
+grep -q "14/14 passed" "$EVIDENCE/verify-linq-call.txt"
 
 step "linq register-webhook fails loud without token"
 set +e

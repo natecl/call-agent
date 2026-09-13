@@ -1,10 +1,11 @@
 # Linq to call (closed alpha)
 
-Closed alpha testers text Treena on iMessage. A natural book ask on that chat collects party and time, then the restaurant phone number, then confirm/approve, then kicks off the same general `run_call` path FastAPI already uses for CLI book and quick-ask. Caller name, kickoff `user_id`, and Telnyx from-DID come from the `users` row for the inbound phone, not from the chat. The Worker forwards Linq POST to Fly. Collect and confirm reply 200. Approve returns 202, texts `Okay, I'm going to call them now.`, places the call, hangs up, and texts the result on the same Linq chat. The first message never dials. It does not pause the live call for mid-call chat. qa owns live prove.
+Closed alpha testers text Treena on iMessage. A natural book ask on that chat collects party and time, then the restaurant phone number, then confirm/approve, then kicks off the same general `run_call` path FastAPI already uses for CLI book and quick-ask. If time is missing, Treena asks for time (or party+time) before the phone number. Caller name, kickoff `user_id`, and Telnyx from-DID come from the `users` row for the inbound phone, not from the chat. The Worker forwards Linq POST to Fly. Collect and confirm reply 200. Approve returns 202, texts `Okay, I'm going to call them now.`, places the call, hangs up, and texts the result on the same Linq chat. The first message never dials. It does not pause the live call for mid-call chat. qa owns live prove.
 
 ## Sub-features
 
 - `parse-book` Natural book intent with party and time, and no restaurant number, becomes a pending collect. A complete first message `book <+E164> party <n> at <time>` asks to confirm and does not become a `BookRequest`.
+- `collect-time` A reservation without time (including `at <restaurant>`) asks for time, or party+time together. "2 people" does not unlock the phone ask. Time is a clock / am/pm / noon span, not a place name.
 - `parse-ask` `ask <+E164> hours|stock <item>|aisle <item>` still collects confirm before a `QuickAskRequest`. A leftover `name` token is ignored.
 - `collect-phone` Treena texts `okay, sounds good. What's the restaurant's phone number?` and does not dial. The next text on that chat supplies the E164, then Treena asks to confirm.
 - `confirm-before-dial` After the number, Treena texts `Okay, I'm going to call this number. Do you confirm? Reply "approve"`. User must say confirm / approve / yes. Then Treena texts `Okay, I'm going to call them now.` and dials. A first message that already has +E164 never dials.
@@ -23,6 +24,7 @@ Closed alpha testers text Treena on iMessage. A natural book ask on that chat co
 
 - Have an account (website checkout, or `call-agent account upsert --phone <your iMessage> --name Nathan --from-did <Treena DID>`) with a first name and assigned Treena number.
 - Text Treena `can you make a reservation with this restaurant at 7:30 for a party of two?`.
+- If she asks for time (or party and time), reply with those before the restaurant number.
 - Reply with the restaurant phone number when she asks.
 - Reply `approve` (or confirm / yes) when she asks to confirm.
 - Wait for `Okay, I'm going to call them now.`, then the result on the same chat.
@@ -34,7 +36,7 @@ Preconditions:
 
 - Baseline env from `README.md`. Stub mode needs no Telnyx, OpenAI, or Linq keys.
 
-- **Stub lever.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Thirteen `[PASS]` lines and `13/13 passed`.
+- **Stub lever.** Run `.venv/bin/call-agent verify-linq-call`. Exit code `0`. Fourteen `[PASS]` lines and `14/14 passed`.
 - **Echo still works.** Run `.venv/bin/call-agent verify-message`. The `inbound_reply` line is `[PASS]`.
 - **Proof.** Save stdout as `verify-linq-call.txt` in the evidence directory.
 
