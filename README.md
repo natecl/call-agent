@@ -24,7 +24,7 @@ fly secrets set ACCOUNT_SYNC_SECRET=...
 fly deploy
 ```
 
-`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. `LINQ_FROM_E164` is the one shared Treena iMessage bot (Cap/ops sandbox `+12138653024` until ~Sep 18). Live dial also needs `TELNYX_FROM_NUMBER` and `TELNYX_PHONE_NUMBER` (`+12135690899`). HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan` until the website PR POSTs sync. `--phone` is the user's own number. Kickoff does not need `users.from_did`. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
+`LINQ_WEBHOOK_SIGNING_SECRET` is required for inbound HMAC. `ACCOUNT_SYNC_SECRET` is required for `POST /accounts/sync` (call-agent-web checkout/settings). Live inbound reply also needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on this process. `LINQ_FROM_E164` is the one shared Treena iMessage bot (Cap/ops sandbox `+12138653024` until ~Sep 18). Live dial also needs `TELNYX_FROM_NUMBER` and `TELNYX_PHONE_NUMBER` (`+12135690899`). HMAC verify without a token still ACKs ignored events; `message.received` send uses StubLinq when the token is unset. Seed L1 testers with `call-agent account upsert --phone +1... --name Nathan --minutes 30` until the website PR POSTs sync. `--phone` is the user's own number. Kickoff does not need `users.from_did`. The sync contract is [docs/accounts.md](docs/accounts.md). This tree does not `fly deploy`.
 
 Then point the Worker at the Fly origin (no path) and deploy the Worker:
 
@@ -84,12 +84,14 @@ You should see six `[PASS]` lines and `6/6 passed`. The checks are stub send sha
 
 `call-agent verify-accounts` proves the `users` row, omit-preserve, in-process HMAC `POST /accounts/sync`, signed `GET /accounts/dashboard`, and no `users.name` column. Five `[PASS]` lines and `5/5 passed`. It never POSTs Fly.
 
+`call-agent verify-minutes` proves the minute cap: remaining 0 refuses kickoff, included remaining still collects, a 5-minute prepaid pack unlocks, max 12 packs / 60 minutes, pack price is **$1.00** (Cap locked), and Stripe stays TEST. Six `[PASS]` lines and `6/6 passed`. It never dials and never charges Stripe live.
+
 ## Use the CLI in stub mode
 
 ```bash
 call-agent did provision --user default
 call-agent did list
-call-agent account upsert --phone +14155552671 --name Nathan --from-did +15555550177
+call-agent account upsert --phone +14155552671 --name Nathan --from-did +15555550177 --minutes 30
 call-agent quick-ask --to +14155552671 --ask hours --name Nathan
 call-agent quick-ask --to +14155552671 --ask stock --item "oat milk" --name Nathan
 call-agent book --to +14155552671 --name Nathan --party 2 --time "Friday 7pm" --notes "outdoor if possible"

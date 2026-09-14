@@ -14,4 +14,4 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest -q
 ```
 
-Levers: `verify-quick-ask` (8/8), `verify-book` (10/10), `verify-message` (6/6), `verify-linq-call` (14/14), `verify-webhooks` (5/5), `verify-persistence` (4/4), `verify-accounts` (5/5).
+Levers: `verify-quick-ask` (8/8), `verify-book` (10/10), `verify-message` (6/6), `verify-linq-call` (14/14), `verify-webhooks` (5/5), `verify-persistence` (4/4), `verify-accounts` (5/5), `verify-minutes` (6/6).

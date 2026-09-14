@@ -443,8 +443,10 @@ def test_existing_users_table_gains_from_did_column(tmp_path: Path) -> None:
     fetched = store.get_by_phone(E164("+14155552671"))
     assert fetched is not None
     assert fetched.from_did is None
+    assert fetched.minutes_prepaid == 0
     again = Accounts(path)
     assert again.get_by_phone(E164("+14155552671")).from_did is None
+    assert again.get_by_phone(E164("+14155552671")).minutes_prepaid == 0
 
 
 def test_existing_neon_users_table_gains_from_did_column(
@@ -579,6 +581,7 @@ def test_users_schema_has_no_name_column(tmp_path: Path) -> None:
     assert "name" not in columns
     assert "first_name" in columns
     assert "prefs" in columns
+    assert "minutes_prepaid" in columns
 
 
 def test_upsert_keeps_first_name_prefs_and_minutes_used_when_omitted(
@@ -591,6 +594,7 @@ def test_upsert_keeps_first_name_prefs_and_minutes_used_when_omitted(
             first_name="Nathan",
             user_id=UserId("acctnathan"),
             minutes_used=7,
+            minutes_prepaid=10,
             prefs={"full_name": "Nathan Tester"},
         )
     )
@@ -611,9 +615,11 @@ def test_upsert_keeps_first_name_prefs_and_minutes_used_when_omitted(
     assert first.record.first_name == "Nathan"
     assert first.record.prefs == {"full_name": "Nathan Tester"}
     assert first.record.minutes_used == 7
+    assert first.record.minutes_prepaid == 10
     assert second.record.first_name == "Nathan"
     assert second.record.prefs == {"full_name": "Nathan Tester"}
     assert second.record.minutes_used == 7
+    assert second.record.minutes_prepaid == 10
     assert second.record.stripe_customer_id == "cus_123"
     assert zeroed.record.minutes_used == 0
     assert zeroed.record.first_name == "Nathan"
@@ -877,6 +883,12 @@ def test_accounts_dashboard_includes_shared_bot_number(
     assert payload["ok"] is True
     assert payload["user"] is None
     assert payload["bot_number"] == "+12138653024"
+    assert payload["metered_pack"]["price_cents"] == 100
+    assert payload["metered_pack"]["price_usd"] == 1.0
+    assert payload["metered_pack"]["increment_minutes"] == 5
+    assert payload["metered_pack"]["max_packs"] == 12
+    assert payload["metered_pack"]["max_prepaid_minutes"] == 60
+    assert payload["metered_pack"]["stripe_mode"] == "test"
 
 
 def test_cli_account_upsert_omitted_name_preserves(

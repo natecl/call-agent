@@ -35,6 +35,12 @@ from .messaging import (
     SendReceipt,
     followup_chat,
 )
+from .minutes import (
+    MinutesCapError,
+    NO_MINUTES_TEXT,
+    can_place_call,
+    remaining_minutes,
+)
 from .persistence import PersistenceConfigError
 from .runtime import (
     TelnyxFromConfigError,
@@ -472,6 +478,8 @@ def claim_kickoff(
                 ),
                 "minutes_included": account.minutes_included,
                 "minutes_used": account.minutes_used,
+                "minutes_prepaid": account.minutes_prepaid,
+                "minutes_remaining": remaining_minutes(account),
             }
             if account is not None
             else None
@@ -555,11 +563,50 @@ async def run_kickoff(
         session.inbound,
         received_at=datetime.now(UTC),
     )
+    account = lookup_account(session.settings, session.inbound.sender)
+    if account is not None and remaining_minutes(account) <= 0:
+        text = NO_MINUTES_TEXT
+        result_receipt = session.text(text, kind="error")
+        write_call_cross_links(
+            session.settings,
+            session.inbound,
+            None,
+            result_receipt,
+            text,
+            error=text,
+        )
+        return KickoffReceipt(
+            request=request,
+            result=None,
+            ack_receipt=result_receipt,
+            result_receipt=result_receipt,
+            call_control_id="",
+            error=text,
+        )
     claim_kickoff(session.settings, session.inbound, request)
     ack_receipt = session.text(kickoff_ack_text(request), kind="ack")
     try:
         result = await run_call(
             request, session.settings, from_did=from_did
+        )
+    except MinutesCapError as error:
+        text = str(error) or NO_MINUTES_TEXT
+        result_receipt = session.text(text, kind="error")
+        write_call_cross_links(
+            session.settings,
+            session.inbound,
+            None,
+            result_receipt,
+            text,
+            error=text,
+        )
+        return KickoffReceipt(
+            request=request,
+            result=None,
+            ack_receipt=ack_receipt,
+            result_receipt=result_receipt,
+            call_control_id="",
+            error=text,
         )
     except (ValueError, RuntimeError, OSError, PersistenceConfigError) as error:
         text = not_placed_text()
@@ -1043,6 +1090,8 @@ def _account_gate(account: UserRecord | None) -> str | None:
         FirstName(raw)
     except ValueError:
         return NO_NAME_TEXT
+    if not can_place_call(account):
+        return NO_MINUTES_TEXT
     return None
 
 

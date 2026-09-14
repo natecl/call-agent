@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
     plan TEXT,
     minutes_included INTEGER NOT NULL DEFAULT 0,
     minutes_used INTEGER NOT NULL DEFAULT 0,
+    minutes_prepaid INTEGER NOT NULL DEFAULT 0,
     retain_call_artifacts INTEGER NOT NULL DEFAULT 0,
     prefs TEXT NOT NULL DEFAULT '{}',
     stripe_synced_at TEXT,
@@ -46,6 +47,9 @@ CREATE TABLE IF NOT EXISTS users (
 """
 
 USERS_FROM_DID_MIGRATION = "ALTER TABLE users ADD COLUMN from_did TEXT"
+USERS_MINUTES_PREPAID_MIGRATION = (
+    "ALTER TABLE users ADD COLUMN minutes_prepaid INTEGER NOT NULL DEFAULT 0"
+)
 
 USERS_SELECT = """
     SELECT
@@ -57,6 +61,7 @@ USERS_SELECT = """
         plan,
         minutes_included,
         minutes_used,
+        minutes_prepaid,
         retain_call_artifacts,
         prefs,
         stripe_synced_at,
@@ -64,6 +69,16 @@ USERS_SELECT = """
         updated_at
     FROM users
 """
+
+
+def _optional_int(row: Any, key: str) -> int:
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return 0
+    if value is None:
+        return 0
+    return int(value)
 
 
 def _reject_from_did_equal_to_phone(phone: E164, from_did: E164 | None) -> None:
@@ -75,6 +90,10 @@ def _reject_from_did_equal_to_phone(phone: E164, from_did: E164 | None) -> None:
 
 
 def _ensure_from_did_column(add_column: Callable[[], None]) -> None:
+    _ensure_additive_column(add_column)
+
+
+def _ensure_additive_column(add_column: Callable[[], None]) -> None:
     try:
         add_column()
     except Exception as error:
@@ -114,6 +133,7 @@ class UserRecord(BaseModel):
     plan: str | None = None
     minutes_included: int = 0
     minutes_used: int = 0
+    minutes_prepaid: int = 0
     retain_call_artifacts: bool = False
     prefs: dict[str, str] = Field(default_factory=dict)
     stripe_synced_at: str | None = None
@@ -137,6 +157,7 @@ class AccountWrite(BaseModel):
     plan: str | None = None
     minutes_included: int = 0
     minutes_used: int | None = None
+    minutes_prepaid: int | None = None
     retain_call_artifacts: bool = False
     prefs: dict[str, str] | None = None
     stripe_event_created: str | None = None
@@ -148,7 +169,7 @@ class AccountWrite(BaseModel):
             raise ValueError("minutes cannot be negative")
         return value
 
-    @field_validator("minutes_used")
+    @field_validator("minutes_used", "minutes_prepaid")
     @classmethod
     def _minutes_used_non_negative(cls, value: int | None) -> int | None:
         if value is None:
@@ -301,6 +322,7 @@ def upsert_account(
             plan=write.plan,
             minutes_included=write.minutes_included,
             minutes_used=_keep(write.minutes_used, 0),
+            minutes_prepaid=_keep(write.minutes_prepaid, 0),
             retain_call_artifacts=write.retain_call_artifacts,
             prefs=_keep(write.prefs, {}),
             stripe_synced_at=synced_at,
@@ -323,6 +345,7 @@ def upsert_account(
         plan=write.plan if write.plan is not None else target.plan,
         minutes_included=write.minutes_included,
         minutes_used=_keep(write.minutes_used, target.minutes_used),
+        minutes_prepaid=_keep(write.minutes_prepaid, target.minutes_prepaid),
         retain_call_artifacts=write.retain_call_artifacts,
         prefs=_keep(write.prefs, target.prefs),
         stripe_synced_at=synced_at or target.stripe_synced_at,
@@ -433,6 +456,7 @@ def _record(row: Any) -> UserRecord:
         plan=row["plan"],
         minutes_included=int(row["minutes_included"]),
         minutes_used=int(row["minutes_used"]),
+        minutes_prepaid=_optional_int(row, "minutes_prepaid"),
         retain_call_artifacts=bool(retain),
         prefs=prefs,
         stripe_synced_at=row["stripe_synced_at"],
@@ -451,6 +475,7 @@ def _row_values(record: UserRecord) -> tuple[object, ...]:
         record.plan,
         record.minutes_included,
         record.minutes_used,
+        record.minutes_prepaid,
         1 if record.retain_call_artifacts else 0,
         _prefs_json(record.prefs),
         record.stripe_synced_at,
@@ -468,6 +493,7 @@ def _update_values(record: UserRecord) -> tuple[object, ...]:
         record.plan,
         record.minutes_included,
         record.minutes_used,
+        record.minutes_prepaid,
         1 if record.retain_call_artifacts else 0,
         _prefs_json(record.prefs),
         record.stripe_synced_at,
@@ -489,11 +515,16 @@ class Accounts:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.execute(USERS_SCHEMA)
-        _ensure_from_did_column(self._add_from_did_column)
+        _ensure_additive_column(self._add_from_did_column)
+        _ensure_additive_column(self._add_minutes_prepaid_column)
 
     def _add_from_did_column(self) -> None:
         with self._connect() as connection:
             connection.execute(USERS_FROM_DID_MIGRATION)
+
+    def _add_minutes_prepaid_column(self) -> None:
+        with self._connect() as connection:
+            connection.execute(USERS_MINUTES_PREPAID_MIGRATION)
 
     def get(self, user_id: UserId) -> UserRecord | None:
         with self._connect() as connection:
@@ -545,12 +576,13 @@ class Accounts:
                         plan,
                         minutes_included,
                         minutes_used,
+                        minutes_prepaid,
                         retain_call_artifacts,
                         prefs,
                         stripe_synced_at,
                         created_at,
                         updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _row_values(record),
                 )
@@ -573,6 +605,7 @@ class Accounts:
                         plan = ?,
                         minutes_included = ?,
                         minutes_used = ?,
+                        minutes_prepaid = ?,
                         retain_call_artifacts = ?,
                         prefs = ?,
                         stripe_synced_at = ?,
@@ -610,11 +643,16 @@ class NeonAccounts:
         self._connect_factory = connect or _psycopg_connect(database_url)
         with self._connect() as connection:
             connection.execute(USERS_SCHEMA)
-        _ensure_from_did_column(self._add_from_did_column)
+        _ensure_additive_column(self._add_from_did_column)
+        _ensure_additive_column(self._add_minutes_prepaid_column)
 
     def _add_from_did_column(self) -> None:
         with self._connect() as connection:
             connection.execute(USERS_FROM_DID_MIGRATION)
+
+    def _add_minutes_prepaid_column(self) -> None:
+        with self._connect() as connection:
+            connection.execute(USERS_MINUTES_PREPAID_MIGRATION)
 
     def get(self, user_id: UserId) -> UserRecord | None:
         with self._connect() as connection:
@@ -666,12 +704,13 @@ class NeonAccounts:
                         plan,
                         minutes_included,
                         minutes_used,
+                        minutes_prepaid,
                         retain_call_artifacts,
                         prefs,
                         stripe_synced_at,
                         created_at,
                         updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     _row_values(record),
                 )
@@ -696,6 +735,7 @@ class NeonAccounts:
                         plan = %s,
                         minutes_included = %s,
                         minutes_used = %s,
+                        minutes_prepaid = %s,
                         retain_call_artifacts = %s,
                         prefs = %s,
                         stripe_synced_at = %s,

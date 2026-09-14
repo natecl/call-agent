@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+from pydantic import ValidationError
 import typer
 
 from .accounts import (
@@ -29,6 +30,11 @@ from .linq import (
     LiveLinqHttp,
     resolve_webhook_url,
     validate_linq_live_token,
+)
+from .minutes import (
+    MeteredPackPurchase,
+    PackPurchaseBlocked,
+    purchase_metered_packs,
 )
 from .persistence import PersistenceConfigError
 from .runtime import (
@@ -57,6 +63,7 @@ from .verify_message import (
     verify_message,
 )
 from .verify_accounts import format_accounts_report, verify_accounts
+from .verify_minutes import format_minutes_report, verify_minutes
 from .verify_persistence import format_persistence_report, verify_persistence
 from .verify_webhooks import (
     VerifyWebhooksInput,
@@ -141,6 +148,7 @@ def account_upsert(
     from_did: str | None = typer.Option(None, "--from-did"),
     retain: bool = typer.Option(False, "--retain"),
     minutes: int = typer.Option(0, "--minutes"),
+    prepaid: int | None = typer.Option(None, "--prepaid"),
     user: str | None = typer.Option(None, "--user"),
     plan: str | None = typer.Option(None, "--plan"),
 ) -> None:
@@ -153,6 +161,7 @@ def account_upsert(
             user_id=UserId(user) if user is not None else None,
             plan=plan,
             minutes_included=minutes,
+            minutes_prepaid=prepaid,
             retain_call_artifacts=retain,
         )
         result = open_accounts(settings).upsert(write)
@@ -206,6 +215,48 @@ def account_list() -> None:
             f"{record.minutes_included:<7} "
             f"{'on' if record.retain_call_artifacts else 'off'}"
         )
+
+
+@account_app.command("credit-pack")
+def account_credit_pack(
+    phone: str = typer.Option(..., "--phone"),
+    packs: int = typer.Option(1, "--packs"),
+) -> None:
+    settings = Settings()
+    try:
+        receipt = purchase_metered_packs(
+            settings,
+            open_accounts(settings),
+            MeteredPackPurchase(phone=E164(phone), packs=packs),
+        )
+    except PersistenceConfigError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    except LookupError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except PackPurchaseBlocked as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    except ValidationError as error:
+        raise typer.BadParameter(str(error)) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "user_id": str(receipt.record.user_id),
+                "packs": receipt.packs,
+                "minutes_added": receipt.minutes_added,
+                "minutes_prepaid": receipt.record.minutes_prepaid,
+                "remaining": receipt.remaining,
+                "price_cents": receipt.price_cents,
+                "stripe_mode": receipt.stripe_mode,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 @app.command("quick-ask")
@@ -461,6 +512,13 @@ def verify_accounts_command() -> None:
     if not report.passed:
         raise typer.Exit(code=1)
 
+
+@app.command("verify-minutes")
+def verify_minutes_command() -> None:
+    report = verify_minutes()
+    typer.echo(format_minutes_report(report))
+    if not report.passed:
+        raise typer.Exit(code=1)
 
 
 def _require_live_gate(settings: Settings) -> None:

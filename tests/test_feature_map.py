@@ -82,15 +82,20 @@ def test_feature_map_lists_account_rows() -> None:
         "| `account upsert` | shipped |",
         "| `account get` | shipped |",
         "| `account list` | shipped |",
+        "| `account credit-pack` | shipped |",
         "| `POST /accounts/sync` | shipped |",
         "| `GET /accounts/dashboard` | shipped |",
         "| `verify-accounts` | shipped |",
         "| `Stripe → users sync` | gated |",
-        "| `minutes ledger` | not shipped |",
+        "| `minutes ledger` | shipped |",
+        "| prepaid metered packs | shipped |",
+        "| `POST /billing/metered-pack` | shipped |",
+        "| `verify-minutes` | shipped |",
         "| `kickoff account lookup` | shipped |",
         "| `kickoff from-DID` | shipped |",
         "| `no-account reply` | shipped |",
         "| `no-name reply` | shipped |",
+        "| `no-minutes reply` | shipped |",
         "| `no-from-did reply` | not shipped |",
         "| `LINQ_KICKOFF_USER_ID` | not shipped |",
     )
@@ -104,6 +109,8 @@ def test_feature_map_lists_account_rows() -> None:
     quick_ask_at = _heading_index(INVENTORY, "quick-ask")
     assert did_at < accounts_at < quick_ask_at
     assert "(./accounts.md)" in RECIPES
+    assert "(./minutes-cap.md)" in RECIPES
+    assert "(./verify-minutes.md)" in RECIPES
 
 
 def test_feature_map_lists_linq_to_call_rows() -> None:
@@ -122,6 +129,7 @@ def test_feature_map_lists_linq_to_call_rows() -> None:
         "| `kickoff from-DID` | shipped |",
         "| `no-account reply` | shipped |",
         "| `no-name reply` | shipped |",
+        "| `no-minutes reply` | shipped |",
         "| `no-from-did reply` | not shipped |",
         "| `no number_orders at dial` | shipped |",
         "| friendly iMessage errors | shipped |",
@@ -198,6 +206,7 @@ def test_feature_map_recipe_counts_match_levers() -> None:
     assert "8/8 passed" in readme
     assert "10/10 passed" in readme
     assert "4/4 passed" in skill
+    assert "6/6 passed" in skill
     assert "| `.cursor/skills/verify-call-agent/features/verify-quick-ask.md` | shipped | Covers the eight stub checks" in INVENTORY
     assert "| `.cursor/skills/verify-call-agent/features/verify-book.md` | shipped | Covers the ten stub checks" in INVENTORY
     assert "| `.cursor/skills/verify-call-agent/features/verify-persistence.md` | shipped | Covers the four stub checks" in INVENTORY
@@ -252,6 +261,8 @@ def test_book_feature_recipes_use_the_entry_contract() -> None:
         "verify-linq-call.md",
         "accounts.md",
         "verify-accounts.md",
+        "minutes-cap.md",
+        "verify-minutes.md",
     ):
         text = (features / name).read_text()
         positions = [text.find(section) for section in required]

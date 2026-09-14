@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
+from pydantic import ValidationError
+
 from .accounts import (
     AccountConflict,
     AccountSyncAuthError,
@@ -27,6 +30,13 @@ from .accounts import (
     open_accounts,
     parse_account_sync_payload,
     verify_account_sync_signature,
+)
+from .minutes import (
+    INVALID_PACKS,
+    MeteredPackPurchase,
+    PackPurchaseBlocked,
+    metered_pack_config,
+    purchase_metered_packs,
 )
 from .config import Settings
 from .dashboard import (
@@ -141,6 +151,7 @@ async def accounts_dashboard(request: Request) -> dict[str, object]:
             artifacts_dir=settings.call_agent_artifacts_dir,
             phone=phone,
             bot_number=str(bot) if bot is not None else None,
+            metered_pack=metered_pack_config(settings),
         )
     except AccountSyncAuthError as error:
         raise HTTPException(status_code=401, detail="unauthorized") from error
@@ -148,6 +159,57 @@ async def accounts_dashboard(request: Request) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except PersistenceConfigError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.post("/billing/metered-pack")
+async def metered_pack(request: Request) -> dict[str, object]:
+    body = await request.body()
+    settings = Settings()
+    secret = settings.account_sync_secret or ""
+    if not secret.strip():
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        verify_account_sync_signature(secret, body, request.headers)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AccountSyncPayloadError(
+                "metered pack body is not JSON"
+            ) from error
+        if not isinstance(payload, dict):
+            raise AccountSyncPayloadError("metered pack body must be an object")
+        purchase = MeteredPackPurchase.model_validate(payload)
+        receipt = purchase_metered_packs(
+            settings, open_accounts(settings), purchase
+        )
+    except AccountSyncAuthError as error:
+        raise HTTPException(status_code=401, detail="unauthorized") from error
+    except AccountSyncPayloadError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except PackPurchaseBlocked as error:
+        status = 400 if error.code == INVALID_PACKS else 409
+        raise HTTPException(
+            status_code=status,
+            detail={"ok": False, "error": error.code, "detail": str(error)},
+        ) from error
+    except (ValueError, TypeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PersistenceConfigError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    return {
+        "ok": True,
+        "user_id": str(receipt.record.user_id),
+        "packs": receipt.packs,
+        "minutes_added": receipt.minutes_added,
+        "minutes_prepaid": receipt.record.minutes_prepaid,
+        "remaining": receipt.remaining,
+        "price_cents": receipt.price_cents,
+        "stripe_mode": receipt.stripe_mode,
+    }
 
 
 @app.post("/webhooks/telnyx")

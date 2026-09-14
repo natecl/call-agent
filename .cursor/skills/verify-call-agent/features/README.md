@@ -39,6 +39,8 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Provision a number](./did-provision.md) covers first provision, repeat provision, a second user, and listing.
 - [Accounts](./accounts.md) covers `users` row seed (`account upsert --from-did` / `get` / `list`), omit-preserve on signed Fly sync, signed `GET /accounts/dashboard`, and `/start` name in settings.
 - [Verify accounts](./verify-accounts.md) covers the five-check `users` lever in stub mode and its exit codes.
+- [Minutes cap (prepaid packs)](./minutes-cap.md) covers refuse-at-zero, $1.00 per 5-minute pack, max 12 packs, and no auto-meter.
+- [Verify minutes](./verify-minutes.md) covers the six-check minute-cap lever in stub mode and its exit codes.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
 - [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, Responses delegation, `speak_first` append frames, and Realtime reject.
 - [Verify quick-ask](./verify-quick-ask.md) covers the eight-check lever in stub mode and its exit codes.

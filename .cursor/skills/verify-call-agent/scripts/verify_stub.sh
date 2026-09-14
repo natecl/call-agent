@@ -35,6 +35,7 @@ run "$CLI" --help | grep -q "verify-webhooks" || { echo "verify-webhooks verb mi
 run "$CLI" --help | grep -q "verify-persistence" || { echo "verify-persistence verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-linq-call" || { echo "verify-linq-call verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "verify-accounts" || { echo "verify-accounts verb missing from --help"; exit 1; }
+run "$CLI" --help | grep -q "verify-minutes" || { echo "verify-minutes verb missing from --help"; exit 1; }
 run "$CLI" --help | grep -q "account" || { echo "account verb missing from --help"; exit 1; }
 
 step "did provision twice returns the same DID"
@@ -44,13 +45,17 @@ SECOND="$(run "$CLI" did provision --user default | tail -n1)"
 run "$CLI" did list
 
 step "account upsert then get and list"
-run "$CLI" account upsert --phone +14155552671 --name Nathan --user acctnathan --from-did +15555550177
+run "$CLI" account upsert --phone +14155552671 --name Nathan --user acctnathan --from-did +15555550177 --minutes 30
 run "$CLI" account get --phone +14155552671
 run "$CLI" account list
 
 step "verify-accounts stub checklist"
 run "$CLI" verify-accounts | tee "$EVIDENCE/verify-accounts.txt" >/dev/null
 grep -q "5/5 passed" "$EVIDENCE/verify-accounts.txt"
+
+step "verify-minutes stub checklist"
+run "$CLI" verify-minutes | tee "$EVIDENCE/verify-minutes.txt" >/dev/null
+grep -q "6/6 passed" "$EVIDENCE/verify-minutes.txt"
 
 step "quick-ask stub writes a result then wipes artifacts"
 RESULT_JSON="$(run "$CLI" quick-ask --to +14155552671 --ask hours --name Nathan | tail -n1)"
