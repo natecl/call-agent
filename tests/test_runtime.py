@@ -638,6 +638,11 @@ def test_openai_responses_effort_rejects_unknown(
     monkeypatch.setenv("OPENAI_RESPONSES_EFFORT", "banana")
     with pytest.raises(ValidationError, match="OPENAI_RESPONSES_EFFORT"):
         Settings(_env_file=None)
+
+
+def test_telnyx_phone_number_alias_resolves_shared_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("TELNYX_FROM_NUMBER", raising=False)
     monkeypatch.setenv("TELNYX_PHONE_NUMBER", "+12135690899")
     settings = Settings(_env_file=None)
