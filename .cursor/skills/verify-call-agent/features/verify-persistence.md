@@ -31,4 +31,4 @@ Preconditions:
 - `account_roundtrip` upserts a `users` row on the same SQLite file as `dids`.
 - `verify-quick-ask` still uses a throwaway SQLite workspace. Do not point it at Neon.
 - A leftover `R2_ACCOUNT_ID` in the shell is enough to fail the lever. Unset the four required `R2_*` vars and `NEON_DATABASE_URL` before a stub drive.
-- Fly `hidden-beacon-080` needs `psycopg[binary]` when `NEON_DATABASE_URL` is set. pyproject lists that extra as a package dependency and the Dockerfile `pip install .` plus `import psycopg` so the next image deploy includes it. A machine-local `pip install` is wiped on redeploy.
+- Fly `hidden-beacon-080` needs `psycopg[binary]` when `NEON_DATABASE_URL` is set. pyproject lists that extra as a package dependency and the Dockerfile `pip install .` plus `import psycopg` so the next image deploy includes it. Tree shipped (#39). Live image still sha `ebcf350` (PR #35) until Cap/ops redeploys. A machine-local `pip install` is wiped on redeploy. Do not claim the Neon driver is live on Fly.
