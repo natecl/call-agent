@@ -42,7 +42,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Minutes cap (prepaid packs)](./minutes-cap.md) covers refuse-at-zero, $1.00 per 5-minute pack, max 12 packs, and no auto-meter.
 - [Verify minutes](./verify-minutes.md) covers the six-check minute-cap lever in stub mode and its exit codes.
 - [Ask a quick question](./quick-ask.md) covers a stub call for each question type, the result JSON, the artifacts, and the live gate.
-- [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, Responses delegation, `speak_first` append frames, and Realtime reject.
+- [GPT-Live prompt](./gpt-live-prompt.md) covers the live prompt lines in `session_start.json`, Responses delegation (`OPENAI_RESPONSES_EFFORT` default `light` → OpenAI `low`), `speak_first` append frames, and Realtime reject.
 - [Verify quick-ask](./verify-quick-ask.md) covers the eight-check lever in stub mode and its exit codes.
 - [Book a table](./book.md) covers a stub booking call, the result JSON, the artifacts, and the live gate.
 - [Verify book](./verify-book.md) covers the ten-check lever in stub mode and its exit codes.
@@ -52,5 +52,5 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Linq to call (closed alpha)](./linq-to-call.md) covers iMessage natural collect + confirm-before-dial → Fly `run_call` → result on the same chat.
 - [Verify linq-to-call](./verify-linq-call.md) covers the fourteen-check stub lever for that path.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.
-- [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, and the misconfig exit.
+- [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, the misconfig exit, and that live Fly sha `bb91810` has Neon/`psycopg[binary]` baked.
 - [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. Live Fly: prove-retain override OFF; wipe-unless-opted-in is the live default. The privacy page stays not shipped.

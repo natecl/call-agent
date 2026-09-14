@@ -32,3 +32,4 @@ Preconditions:
 - `StubGptLive.speak_first` only records the opener. It does not emit the two append frames. Prove those frames with `tests/test_wire.py`, not with stub artifacts.
 - Line 0 can also contain `on behalf of Nathan`. The stub and `disclosure_first` still require the opener on line 1 and the ask or facts on line 2.
 - 16 kHz L16 passthrough is already matched. It is not the silence fix. Silence is the Responses tool loop plus app-owned `end_call`.
+- Cap `OPENAI_RESPONSES_EFFORT=light` aliases to OpenAI `low` on `session.delegation.responses.reasoning.effort`. Speech `gpt-live-1` has no effort field. Stub `session_start.json` shows `low`.
