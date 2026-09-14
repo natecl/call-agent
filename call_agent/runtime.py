@@ -60,6 +60,7 @@ from .domain import (
     Transcript,
     WriteTaskEffect,
     exception_reason,
+    normalize_responses_effort,
     reduce,
 )
 from .gpt_live import (
@@ -362,6 +363,9 @@ class CallHandle:
             live_model=settings.openai_live_model,
             voice=settings.openai_live_voice,
             responses_model=settings.openai_responses_model or "gpt-5.6-terra",
+            responses_effort=normalize_responses_effort(
+                settings.openai_responses_effort
+            ),
             hangup_trailing_silence_s=settings.hangup_trailing_silence_s,
             hangup_drain_timeout_s=settings.hangup_drain_timeout_s,
             live_silence_failsafe_s=settings.live_silence_failsafe_s,

@@ -770,12 +770,18 @@ def _session_delegation_check(
         {},
     )
     instructions = str(session.get("instructions") or "")
+    reasoning = responses.get("reasoning") or {}
+    effort = (
+        reasoning.get("effort") if isinstance(reasoning, dict) else None
+    )
     passed = (
         delegation.get("type") == "responses"
         and bool(responses.get("model"))
         and names == {"record_task_result", "end_call"}
         and responses.get("parallel_tool_calls") is False
         and responses.get("tool_choice") == "auto"
+        and effort in {"none", "low", "medium", "high", "xhigh", "max"}
+        and "reasoning" not in session
         and DONE_STATE_LINE in instructions
         and "say a short goodbye" not in instructions
         and not (set(session) & forbidden)
@@ -791,6 +797,7 @@ def _session_delegation_check(
             f"type={delegation.get('type')} model={responses.get('model')} "
             f"tools={sorted(names)} parallel={responses.get('parallel_tool_calls')} "
             f"tool_choice={responses.get('tool_choice')} "
+            f"reasoning.effort={effort} "
             f"done_state={DONE_STATE_LINE in instructions} "
             f"audio_rate={audio_rate} media_rate={media_start.get('sample_rate')} "
             f"resampled={resampled} session_tools={has_session_tools}"
