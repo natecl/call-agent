@@ -1,6 +1,6 @@
 # Accounts sync contract
 
-This is the contract for the follow-up **call-agent-web** PR. This repository (`call-agent`) owns the `users` table and is the sole writer. Stripe stays checkout and billing. Do not treat a Stripe Customer as the runtime account Fly reads. Neon is out of scope on the website today (TRE-20); the website must not open `NEON_DATABASE_URL`.
+This is the contract for the follow-up **call-agent-web** PR. This repository (`call-agent`) owns the `users` table and is the sole writer. Stripe stays checkout and billing. Do not treat a Stripe Customer as the runtime account Fly reads. Prepaid packs are Cap locked at **$1.00 per 5 connected minutes**, max 12 packs. Stripe TEST only. Neon is out of scope on the website today (TRE-20); the website must not open `NEON_DATABASE_URL`.
 
 ## Cap account model
 
@@ -32,7 +32,7 @@ Columns (see `USERS_SCHEMA` in `call_agent/accounts.py`):
 | `from_did` | nullable legacy E.164. **Not unique.** Not required at kickoff. Rejected when equal to `phone`. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables. Omitted on upsert keeps the existing value. Not the iMessage bot (`LINQ_FROM_E164`) and not the live Telnyx FROM. |
 | `stripe_customer_id` | unique billing link |
 | `plan` | Stripe/TRE-20 plan metadata |
-| `minutes_included` / `minutes_used` | recorded; kickoff does not refuse at zero or decrement. Omitted `minutes_used` keeps the existing value. Explicit `0` writes 0. |
+| `minutes_included` / `minutes_used` / `minutes_prepaid` | remaining = included remaining + prepaid. Kickoff and `run_call` refuse at 0. No auto-meter. Prepaid packs are 5 minutes for $1.00, max 12 packs / 60 minutes. Omitted `minutes_used` / `minutes_prepaid` keep existing values. Explicit `0` writes 0. |
 | `retain_call_artifacts` | request flag on kickoff |
 | `prefs` | JSON object of string values (other personal info jobs need, e.g. full name). Display name is `first_name` + `prefs.full_name`. There is no `users.name` column. Omitted on upsert keeps the existing object. |
 | `stripe_synced_at` | last applied Stripe event time; older events skip |
@@ -63,7 +63,7 @@ Body:
 }
 ```
 
-`phone` is required. `first_name` may be omitted (row exists, kickoff will ask them to set it in account settings). Omitted `first_name` keeps the existing value so a later Stripe webhook without a name cannot wipe it. `from_did` is optional (legacy). The website is not expected to send `from_did`; omitted `from_did` keeps the existing value. Kickoff dials from `TELNYX_FROM_NUMBER`, not this field. Omitted `prefs` keeps the existing object. Omitted `minutes_used` keeps the existing count; explicit `0` writes 0. `stripe_event_created` is ISO-8601. Equal or older than `stripe_synced_at` returns `{"ok": true, "skipped": true, "user_id": "..."}`.
+`phone` is required. `first_name` may be omitted (row exists, kickoff will ask them to set it in account settings). Omitted `first_name` keeps the existing value so a later Stripe webhook without a name cannot wipe it. `from_did` is optional (legacy). The website is not expected to send `from_did`; omitted `from_did` keeps the existing value. Kickoff dials from `TELNYX_FROM_NUMBER`, not this field. Omitted `prefs` keeps the existing object. Omitted `minutes_used` / `minutes_prepaid` keep the existing counts; explicit `0` writes 0. `stripe_event_created` is ISO-8601. Equal or older than `stripe_synced_at` returns `{"ok": true, "skipped": true, "user_id": "..."}`.
 
 Status:
 
@@ -93,11 +93,29 @@ The website must not open `NEON_DATABASE_URL` or `R2_*`. This GET is the package
     "phone": "+14155552671",
     "first_name": "Nathan",
     "prefs": {"full_name": "Nathan Tester"},
-    "name": {"first_name": "Nathan", "full_name": "Nathan Tester"}
+    "name": {"first_name": "Nathan", "full_name": "Nathan Tester"},
+    "minutes": {
+      "included": 30,
+      "used": 0,
+      "included_remaining": 30,
+      "prepaid": 0,
+      "prepaid_room": 60,
+      "remaining": 30
+    }
   },
   "threads": [],
   "calls": [],
-  "bot_number": "+12138653024"
+  "bot_number": "+12138653024",
+  "metered_pack": {
+    "increment_minutes": 5,
+    "price_cents": 100,
+    "price_usd": 1.0,
+    "max_packs": 12,
+    "max_prepaid_minutes": 60,
+    "purchase_open": true,
+    "stripe_mode": "test",
+    "blocked_reason": null
+  }
 }
 ```
 
@@ -112,6 +130,34 @@ Status:
 - `401` missing secret, missing header, or bad HMAC
 - `500` ledger misconfig
 
+`user.minutes` is remaining = included remaining + prepaid. `metered_pack` is Cap locked: **$1.00 per 5 connected minutes**, max 12 packs / 60 prepaid minutes, Stripe TEST. Website checkout UI stays on Pages.
+
+## `POST /billing/metered-pack`
+
+Fly origin: `https://hidden-beacon-080.fly.dev/billing/metered-pack`.
+
+Same HMAC family as POST `/accounts/sync` (HMAC-SHA256 of the **raw body**). This tree does not charge Stripe. After Stripe TEST checkout succeeds, the website POSTs here so Fly credits `users.minutes_prepaid`.
+
+```json
+{
+  "phone": "+14155552671",
+  "packs": 1
+}
+```
+
+`packs` is 1–12. One pack = 5 connected minutes for $1.00 (`price_cents=100`). Wallet cap is remaining prepaid + new minutes ≤ 60. `sk_live_` on Fly is refused. `METERED_PACK_PRICE_CENTS=0` blocks purchase (ops kill switch). CLI `account credit-pack` is the stub seed path.
+
+Status:
+
+- `200` credit (`ok`, `minutes_added`, `minutes_prepaid`, `remaining`, `price_cents`, `stripe_mode=test`)
+- `400` invalid JSON / packs
+- `401` missing secret, missing header, or bad HMAC
+- `404` no `users` row for that phone
+- `409` `pack_cap_exceeded` or `stripe_live_forbidden`
+- `500` ledger misconfig
+
+This tree does not `fly deploy`.
+
 ## When the website should POST
 
 Map TRE-20 (account = Stripe Customer with phone, optional name, plan/minutes/retain metadata) onto this body. Do not invent fields TRE-20 does not have.
@@ -120,6 +166,7 @@ Map TRE-20 (account = Stripe Customer with phone, optional name, plan/minutes/re
 - `customer.updated`
 - `customer.subscription.updated` / `deleted`
 - Account-settings save (name edit). Write Stripe as the billing copy, then POST Fly so the `users` row is what kickoff reads.
+- Prepaid pack TEST payment succeeded → `POST /billing/metered-pack` with `{phone, packs}`. Do not write `minutes_prepaid` from the website.
 
 Idempotent upsert keyed on `stripe_customer_id`. First insert may omit `user_id` (Fly generates uuid4 hex). A CLI-seeded row with the same phone and no Stripe id is claimed by attaching `stripe_customer_id`.
 
@@ -128,7 +175,7 @@ Retry on 5xx (Fly down). Do not fall back to writing Neon from the website.
 ## L1 before the website PR
 
 ```bash
-call-agent account upsert --phone +17272701288 --name Nathan
+call-agent account upsert --phone +17272701288 --name Nathan --minutes 30
 ```
 
 That writes the same table. `--phone` is the user's own number (linked iMessage sender). Kickoff does not need `--from-did`. Set Fly `TELNYX_FROM_NUMBER` and `TELNYX_PHONE_NUMBER` to `+12135690899`. The bot people text is `LINQ_FROM_E164=+12138653024`. Do not pass the same E.164 as `--phone` and `--from-did` if you still seed the legacy column. Set Fly `ACCOUNT_SYNC_SECRET` when the website PR is ready. This climb does not `fly deploy`.
@@ -143,7 +190,11 @@ Row exists but `first_name` is empty:
 
 `I need your name for the call. Add it in your account settings, then text me again.`
 
-None of these is prefixed `Call failed:`. There is no `Call failed: missing caller name`. Empty `users.from_did` does not block. Live missing `TELNYX_FROM_NUMBER` texts `I couldn't place the call.` `LINQ_KICKOFF_CALLER` and `LINQ_KICKOFF_USER_ID` are gone.
+Included minutes and prepaid packs are both 0:
+
+`Your included minutes are used up. Buy a 5-minute pack in your account settings, then text me again.`
+
+None of these is prefixed `Call failed:`. There is no `Call failed: missing caller name`. Empty `users.from_did` does not block. Live missing `TELNYX_FROM_NUMBER` texts `I couldn't place the call.` `LINQ_KICKOFF_CALLER` and `LINQ_KICKOFF_USER_ID` are gone. Prepaid packs are **$1.00 per 5 connected minutes**, max 12 packs. Stripe stays TEST.
 
 ## Shared Telnyx FROM (Cap GO)
 

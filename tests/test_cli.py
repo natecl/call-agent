@@ -444,6 +444,8 @@ def test_book_stub_uses_shared_telnyx_from_not_users_row(
             "acctnathan",
             "--from-did",
             "+15555550177",
+            "--minutes",
+            "30",
         ],
         env=env,
     )

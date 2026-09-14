@@ -6,6 +6,7 @@ from typing import Any
 
 from .accounts import UserRecord
 from .domain import E164, UserId
+from .minutes import minutes_snapshot
 
 
 LINQ_SKIP_DIRS = frozenset({"pending"})
@@ -26,6 +27,7 @@ def account_display_name(record: UserRecord) -> dict[str, str | None]:
 def user_dashboard_payload(record: UserRecord) -> dict[str, Any]:
     payload = record.model_dump(mode="json")
     payload["name"] = account_display_name(record)
+    payload["minutes"] = minutes_snapshot(record)
     return payload
 
 
@@ -35,6 +37,7 @@ def build_account_dashboard(
     artifacts_dir: Path,
     phone: E164,
     bot_number: str | None = None,
+    metered_pack: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     threads, calls = scan_linq_artifacts(
         artifacts_dir,
@@ -47,6 +50,7 @@ def build_account_dashboard(
         "threads": threads,
         "calls": calls,
         "bot_number": bot_number,
+        "metered_pack": metered_pack,
     }
 
 

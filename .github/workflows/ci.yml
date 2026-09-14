@@ -26,6 +26,7 @@ jobs:
       - run: call-agent verify-linq-call
       - run: call-agent verify-persistence
       - run: call-agent verify-accounts
+      - run: call-agent verify-minutes
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

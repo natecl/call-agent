@@ -77,6 +77,13 @@ from .artifacts import (
     publish_durable_artifacts,
     wipe_run_dir,
 )
+from .minutes import (
+    assert_account_can_place_call,
+    billed_minutes,
+    consume_call_minutes,
+)
+from .accounts import open_accounts
+from .persistence import PersistenceConfigError
 from .report import JournalRow, Refs, build_call_report, redact_call_report
 from .telnyx import (
     LiveTelnyxHttp,
@@ -686,6 +693,30 @@ def assert_live_dial_origins(settings: Settings) -> None:
         )
 
 
+def _consume_minutes_after_call(
+    settings: Settings,
+    request: QuickAskRequest | BookRequest,
+    handle: CallHandle,
+) -> None:
+    try:
+        store = open_accounts(settings)
+    except PersistenceConfigError:
+        return
+    duration_ms = 0
+    report_path = handle.run_dir.path / "call_report.json"
+    if report_path.is_file():
+        try:
+            raw = json.loads(report_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        if isinstance(raw, dict):
+            try:
+                duration_ms = int(raw.get("duration_ms") or 0)
+            except (TypeError, ValueError):
+                duration_ms = 0
+    consume_call_minutes(store, request.user_id, billed_minutes(duration_ms))
+
+
 async def run_call(
     request: QuickAskRequest | BookRequest,
     settings: Settings,
@@ -697,6 +728,7 @@ async def run_call(
     if request.mode is Mode.LIVE:
         validate_live(settings)
         assert_live_dial_origins(settings)
+    assert_account_can_place_call(settings, request.user_id)
     settings.ledger_config()
     artifact_store = open_artifact_store(settings)
     run_id = RunId(str(uuid.uuid4()))
@@ -747,6 +779,7 @@ async def run_call(
     BOOK.register(run_id, handle)
     try:
         result = await handle.run()
+        _consume_minutes_after_call(settings, request, handle)
         try:
             if should_retain_call_artifacts(settings, request):
                 if handle.artifact_store is not None:

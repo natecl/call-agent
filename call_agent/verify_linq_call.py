@@ -179,6 +179,7 @@ def verify_linq_call(
             phone=E164(INBOUND_SENDER),
             first_name="Nathan",
             user_id=UserId("acctnathan"),
+            minutes_included=30,
         )
     ).record
 
@@ -461,6 +462,7 @@ def verify_linq_call(
         phone=E164("+15555550198"),
         first_name="Nathan",
         from_did=None,
+        minutes_included=30,
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
     )

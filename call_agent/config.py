@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     linq_webhook_signing_secret: str | None = None
     linq_webhook_url: str | None = None
     account_sync_secret: str | None = None
+    # Cap locked 2026-09-14: $1.00 per 5 connected minutes (100 cents).
+    # Env 0 blocks purchase (ops kill switch). Stripe TEST only (sk_test_).
+    metered_pack_price_cents: int | None = 100
+    stripe_secret_key: str | None = None
     openai_api_key: str | None = None
     openai_live_model: str = "gpt-live-1"
     openai_live_voice: str = "marin"
@@ -72,6 +76,23 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_openai_responses_effort(cls, value: object) -> str:
         return normalize_responses_effort(value)
+
+    @field_validator("metered_pack_price_cents", mode="before")
+    @classmethod
+    def _empty_pack_price(cls, value: object) -> object:
+        if value is None or value == "":
+            return 100
+        return value
+
+    @field_validator("stripe_secret_key", mode="before")
+    @classmethod
+    def _empty_stripe_secret(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
     def ledger_config(self) -> LedgerConfig:
         return parse_ledger_config(

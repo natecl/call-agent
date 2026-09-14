@@ -2,7 +2,7 @@
 
 Cap hold: the whole-product map, verifiers, and knowledge docs on this tree must match reality. This file is the hold plan, not a product change. Implementation lives in [`FEATURE_MAP.md`](FEATURE_MAP.md). CloudAgents start at [`../AGENTS.md`](../AGENTS.md).
 
-This wave is docs + maps + verifiers. No Fly deploy. No L1 redial. No minutes ledger. Do not decide remaining Cap questions. Wave 2 code is already in FEATURE_MAP: #37 shared Telnyx FROM / shared iMessage bot, #38 Responses effort, #39 `psycopg[binary]` (live Fly sha `bb91810`; health 200; Neon/psycopg baked).
+This wave is docs + maps + verifiers. No Fly deploy. No L1 redial. Cap later locked prepaid packs ($1.00 / 5 min, max 12 packs); that product change is in FEATURE_MAP, not this hold. Do not decide remaining Cap questions. Wave 2 code is already in FEATURE_MAP: #37 shared Telnyx FROM / shared iMessage bot, #38 Responses effort, #39 `psycopg[binary]` (live Fly sha `bb91810`; health 200; Neon/psycopg baked).
 
 ## Locked on this tree
 
@@ -28,7 +28,7 @@ This wave is docs + maps + verifiers. No Fly deploy. No L1 redial. No minutes le
 - TRE-19 qa live-prove sign-off.
 - Website writer live (TRE-20) and dashboard GO on Pages.
 - Live book redial (HOLD REDIAL).
-- Minutes ledger (not shipped).
+- Minutes ledger Cap locked 2026-09-14: $1.00 / 5 connected minutes, max 12 packs (60 prepaid minutes), no auto-meter. Enforcement shipped in tree (`verify-minutes` 6/6). Stripe live flip still Cap/ops blocked.
 - Stripe live flip (Cap/ops blocked on Nathan live keys). Not this climb.
 
 ## Out of this wave

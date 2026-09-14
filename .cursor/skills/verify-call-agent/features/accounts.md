@@ -8,17 +8,17 @@ The `users` table is the runtime account record. Cap model: one shared Treena iM
 - `from-did` nullable legacy E.164. Not unique. Rejected when equal to `phone`. Additive `ALTER TABLE` on existing SQLite and Neon `users` tables. Not the shared iMessage bot and not the live Telnyx FROM.
 - `shared-bot` `LINQ_FROM_E164` is the one Text Treena number (sandbox `+12138653024` until ~Sep 18). Dashboard `bot_number` is that key.
 - `shared-telnyx-from` `TELNYX_FROM_NUMBER` / `TELNYX_PHONE_NUMBER` is the one Telnyx FROM (Cap `+12135690899`). Kickoff dials from that env, not `users.from_did`.
-- `omit-preserve` omitted `first_name`, `prefs`, `minutes_used`, and `from_did` keep the existing values. Explicit `minutes_used` `0` writes 0.
+- `omit-preserve` omitted `first_name`, `prefs`, `minutes_used`, `minutes_prepaid`, and `from_did` keep the existing values. Explicit `minutes_used` / `minutes_prepaid` `0` writes 0.
 - `account-upsert` CLI seed without HMAC. `--phone` is the user's number. `--from-did` still writes the legacy column. Omitted `--from-did` and `--name` keep existing values.
 - `account-get` read-back of that phone, including `from_did`.
 - `account-list` every row (`USER PHONE NAME FROM_DID MINUTES RETAIN`).
 - `accounts-sync` HMAC `POST /accounts/sync` upserts; Fly is the only writer. Omitted name/prefs/`minutes_used`/`from_did` keep seeded values.
-- `accounts-dashboard` HMAC `GET /accounts/dashboard?phone=` packages `users` + `bot_number` + linq thread index + retained `call_report`/transcript. Empty lists when unknown or wiped.
+- `accounts-dashboard` HMAC `GET /accounts/dashboard?phone=` packages `users` + `minutes` snapshot + `metered_pack` ($1.00 / 5 min, max 12 packs, Stripe TEST) + `bot_number` + linq thread index + retained `call_report`/transcript. Empty lists when unknown or wiped.
 - `kickoff-lookup` inbound phone → `users.first_name` and `users.user_id`. Telnyx FROM is `TELNYX_FROM_NUMBER`.
 
 ## How to get to it (user POV)
 
-- Run `call-agent account upsert --phone +14155552671 --name Nathan --from-did +15555550177`.
+- Run `call-agent account upsert --phone +14155552671 --name Nathan --from-did +15555550177 --minutes 30`.
 - Run `call-agent account get --phone +14155552671`.
 - Run `call-agent account list`.
 - Website checkout/settings POST to Fly `/accounts/sync` (intended Fly route). Until the writer is live, CLI seed is the L1 path. Name is collected on website `/start` and copied into settings after signup. The website is not expected to send `from_did` this climb. Stripe events without a name must omit `first_name`.
@@ -30,7 +30,7 @@ Preconditions:
 
 - Baseline env from `README.md`. Stub mode needs no Stripe, Telnyx, or Linq keys.
 
-- **Upsert.** Run `.venv/bin/call-agent account upsert --phone +14155552671 --name Nathan --user acctnathan --from-did +15555550177`. Exit code `0`. Stdout is JSON with `"user_id": "acctnathan"`, `"first_name": "Nathan"`, and `"from_did": "+15555550177"`.
+- **Upsert.** Run `.venv/bin/call-agent account upsert --phone +14155552671 --name Nathan --user acctnathan --from-did +15555550177 --minutes 30`. Exit code `0`. Stdout is JSON with `"user_id": "acctnathan"`, `"first_name": "Nathan"`, and `"from_did": "+15555550177"`.
 - **Get.** Run `.venv/bin/call-agent account get --phone +14155552671`. Exit code `0`. Same `user_id` and `from_did`.
 - **List.** Run `.venv/bin/call-agent account list`. Exit code `0`. A row for `acctnathan`, `+14155552671`, and `+15555550177`.
 - **Missing.** Run `.venv/bin/call-agent account get --phone +15555550199`. Exit code `1`. Stderr contains `no account for`.

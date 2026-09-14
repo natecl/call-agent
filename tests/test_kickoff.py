@@ -21,6 +21,7 @@ from call_agent.kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
+    NO_MINUTES_TEXT,
     NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     TIME_ASK_TEXT,
@@ -68,6 +69,7 @@ def _account(**updates: object) -> UserRecord:
         from_did=E164("+15555550177"),
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
+        minutes_included=30,
     )
     values.update(updates)
     return UserRecord.model_validate(values)
@@ -274,6 +276,20 @@ def test_no_name_replies_plain_and_does_not_dial(tmp_path: Path) -> None:
     assert parsed.reply == NO_NAME_TEXT
     assert not parsed.reply.startswith("Call failed:")
     assert "missing caller name" not in parsed.reply
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+
+
+def test_no_minutes_replies_plain_and_does_not_dial(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    parsed = parse_kickoff(
+        "book +14155552671 party 2 at Friday 7pm",
+        settings,
+        account=_account(minutes_included=0, minutes_used=0, minutes_prepaid=0),
+    )
+
+    assert isinstance(parsed, KickoffBlocked)
+    assert parsed.reply == NO_MINUTES_TEXT
+    assert not parsed.reply.startswith("Call failed:")
     assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
 
 

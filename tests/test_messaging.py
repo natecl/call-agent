@@ -322,6 +322,7 @@ def _webhook_env(
                 phone=E164(INBOUND_SENDER),
                 first_name="Nathan",
                 from_did=E164("+15555550177"),
+                minutes_included=30,
             )
         )
 
@@ -896,7 +897,9 @@ def test_linq_webhook_without_users_from_did_still_collects(
         call_agent_artifacts_dir=artifacts,
     )
     open_accounts(settings).upsert(
-        AccountWrite(phone=E164(INBOUND_SENDER), first_name="Nathan")
+        AccountWrite(
+            phone=E164(INBOUND_SENDER), first_name="Nathan", minutes_included=30
+        )
     )
     event_id = "kickoff-route-no-from-did"
     body = kickoff_inbound_bytes(NATURAL_BOOK_TEXT, event_id)
