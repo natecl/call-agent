@@ -24,6 +24,7 @@ from .domain import (
     LiveSessionSpec,
     LiveStartedEvent,
     LiveToolCallEvent,
+    ResponsesEffort,
     SampleRate,
 )
 from .tools import SESSION_TOOLS
@@ -66,12 +67,17 @@ class _FunctionTool(_WireModel):
     parameters: dict[str, Any]
 
 
+class _ReasoningConfig(_WireModel):
+    effort: ResponsesEffort
+
+
 class _ResponsesConfig(_WireModel):
     model: str
     instructions: str
     tools: tuple[_FunctionTool, ...]
     tool_choice: Literal["auto"] = "auto"
     parallel_tool_calls: Literal[False] = False
+    reasoning: _ReasoningConfig
 
 
 class _Delegation(_WireModel):
@@ -168,6 +174,7 @@ def serialize_session_start(spec: LiveSessionSpec) -> dict[str, Any]:
                         _FunctionTool.model_validate(tool.model_dump())
                         for tool in tools
                     ),
+                    reasoning=_ReasoningConfig(effort=spec.responses_effort),
                 )
             ),
         )

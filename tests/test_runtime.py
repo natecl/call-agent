@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from call_agent.config import Settings
@@ -607,9 +608,36 @@ def test_settings_process_env_overrides_dotenv_webhook_url(
         assert_live_dial_origins(settings)
 
 
-def test_telnyx_phone_number_alias_resolves_shared_from(
+def test_openai_responses_effort_defaults_light_to_low(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("OPENAI_RESPONSES_EFFORT", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.openai_responses_effort == "low"
+
+
+def test_openai_responses_effort_env_light_aliases_to_low(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_RESPONSES_EFFORT", "light")
+    settings = Settings(_env_file=None)
+    assert settings.openai_responses_effort == "low"
+
+
+def test_openai_responses_effort_env_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_RESPONSES_EFFORT", "high")
+    settings = Settings(_env_file=None)
+    assert settings.openai_responses_effort == "high"
+
+
+def test_openai_responses_effort_rejects_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_RESPONSES_EFFORT", "banana")
+    with pytest.raises(ValidationError, match="OPENAI_RESPONSES_EFFORT"):
+        Settings(_env_file=None)
     monkeypatch.delenv("TELNYX_FROM_NUMBER", raising=False)
     monkeypatch.setenv("TELNYX_PHONE_NUMBER", "+12135690899")
     settings = Settings(_env_file=None)

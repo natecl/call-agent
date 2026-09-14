@@ -488,6 +488,34 @@ class LiveAudioFormat(FrozenModel):
         return cls(type="audio/pcmu", rate=8000)
 
 
+ResponsesEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+RESPONSES_EFFORT_ALIASES: dict[str, ResponsesEffort] = {"light": "low"}
+DEFAULT_RESPONSES_EFFORT: ResponsesEffort = "low"
+# Cap "light" is OpenAI gpt-5.6-terra `low`. Env default stays "light".
+DEFAULT_RESPONSES_EFFORT_ENV = "light"
+
+
+def normalize_responses_effort(value: object) -> ResponsesEffort:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        value = DEFAULT_RESPONSES_EFFORT_ENV
+    key = str(value).strip().casefold()
+    mapped = RESPONSES_EFFORT_ALIASES.get(key, key)
+    allowed: tuple[ResponsesEffort, ...] = (
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    )
+    if mapped not in allowed:
+        raise ValueError(
+            "OPENAI_RESPONSES_EFFORT must be one of none, low, medium, "
+            "high, xhigh, max (light aliases to low)"
+        )
+    return mapped  # type: ignore[return-value]
+
+
 class LiveSessionSpec(FrozenModel):
     model: str
     instructions: str
@@ -495,7 +523,13 @@ class LiveSessionSpec(FrozenModel):
     voice: str
     backend_instructions: str = ""
     responses_model: str = "gpt-5.6-terra"
+    responses_effort: ResponsesEffort = DEFAULT_RESPONSES_EFFORT
     tools: tuple[FunctionToolSpec, ...] = SESSION_TOOLS
+
+    @field_validator("responses_effort", mode="before")
+    @classmethod
+    def _normalize_responses_effort(cls, value: object) -> ResponsesEffort:
+        return normalize_responses_effort(value)
 
 
 class Turn(FrozenModel):
@@ -1002,12 +1036,18 @@ class ReduceSettings(FrozenModel):
     live_model: str
     voice: str
     responses_model: str = "gpt-5.6-terra"
+    responses_effort: ResponsesEffort = DEFAULT_RESPONSES_EFFORT
     hangup_trailing_silence_s: float = Field(ge=0)
     hangup_drain_timeout_s: float = Field(ge=0)
     live_silence_failsafe_s: float = Field(default=20.0, ge=0)
     farewell_idle_s: float = Field(default=0.8, ge=0)
     farewell_max_s: float = Field(default=4.0, ge=0)
     hangup_confirm_timeout_s: float = Field(default=5.0, ge=0)
+
+    @field_validator("responses_effort", mode="before")
+    @classmethod
+    def _normalize_responses_effort(cls, value: object) -> ResponsesEffort:
+        return normalize_responses_effort(value)
 
 
 def _collapsed_agent_text(transcript: Transcript) -> str:
@@ -1235,6 +1275,7 @@ def _maybe_open_live(
             voice=settings.voice,
             backend_instructions=build_backend_instructions(call.request),
             responses_model=settings.responses_model,
+            responses_effort=settings.responses_effort,
             tools=SESSION_TOOLS,
         )
         return (

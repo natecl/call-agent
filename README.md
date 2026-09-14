@@ -58,7 +58,7 @@ call-agent verify-book --to +15555550123 --name Nathan --party 2 --time "Friday 
 3. `disclosure_first`. The GPT-Live `session.start` instructions name the caller ("on behalf of Nathan") before the question, and the agent's first transcript turn does too.
 4. `clean_hangup`. The verdict comes from `record_task_result`, the agent calls `end_call`, this process farewells then drains, sends exactly one Telnyx mark named `hangup` once GPT-Live confirms the close, Telnyx echoes it, `HANGUP_TRAILING_SILENCE_S` (default 0.4 s) elapses, the hangup follows, and Telnyx confirms with `call.hangup`. `hangup.path` is `tool`. A drain that runs into `HANGUP_DRAIN_TIMEOUT_S` (default 10 s), or a call that sends more than one mark, fails this check.
 5. `result_artifact`. `result.json` is a valid `QuickAskResult`, its `transcript_ref` and `audio_ref` point at files that exist, and `call_report.json` is a valid `CallReport` whose refs exist.
-6. `session_delegation`. `session.start` has `delegation.type=responses`, tools `record_task_result` and `end_call`, audio 16 kHz, and no resample.
+6. `session_delegation`. `session.start` has `delegation.type=responses`, tools `record_task_result` and `end_call`, `reasoning.effort` on the Responses object (default OpenAI `low` from `OPENAI_RESPONSES_EFFORT=light`), audio 16 kHz, and no resample.
 7. `tool_loop`. A Responses delegation, tool calls, `tool_result` then `continue_response`, and `task.json` whose outcome maps to the result status.
 8. `app_owned_hangup`. Hangup path `tool`, one mark, trail before `call.hangup`, no silence-failsafe steer.
 

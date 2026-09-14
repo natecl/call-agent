@@ -332,6 +332,7 @@ def test_serialize_session_start_matches_gpt_live_payload() -> None:
     assert session["delegation"]["type"] == "responses"
     assert responses["model"] == "gpt-5.6-terra"
     assert responses["instructions"] == "Backend brief."
+    assert responses["reasoning"] == {"effort": "low"}
     assert [tool["name"] for tool in responses["tools"]] == [
         "record_task_result",
         "end_call",
@@ -342,6 +343,45 @@ def test_serialize_session_start_matches_gpt_live_payload() -> None:
     assert "modalities" not in session
     assert "tools" not in session
     assert "tool_choice" not in session
+    assert "reasoning" not in session
+
+
+def test_serialize_session_start_maps_light_effort_to_low() -> None:
+    spec = LiveSessionSpec(
+        model="gpt-live-1",
+        instructions="Call on behalf of Nathan.",
+        audio=LiveAudioFormat(type="audio/pcm", rate=16000),
+        voice="marin",
+        backend_instructions="Backend brief.",
+        responses_model="gpt-5.6-terra",
+        responses_effort="light",
+    )
+
+    payload = serialize_session_start(spec)
+    responses = payload["session"]["delegation"]["responses"]
+
+    assert spec.responses_effort == "low"
+    assert responses["reasoning"] == {"effort": "low"}
+    assert "reasoning" not in payload["session"]
+
+
+def test_serialize_session_start_sends_overridden_responses_effort() -> None:
+    spec = LiveSessionSpec(
+        model="gpt-live-1",
+        instructions="Call on behalf of Nathan.",
+        audio=LiveAudioFormat(type="audio/pcm", rate=16000),
+        voice="marin",
+        backend_instructions="Backend brief.",
+        responses_model="gpt-5.6-terra",
+        responses_effort="high",
+    )
+
+    payload = serialize_session_start(spec)
+    responses = payload["session"]["delegation"]["responses"]
+
+    assert responses["reasoning"] == {"effort": "high"}
+    assert payload["session"]["model"] == "gpt-live-1"
+    assert "reasoning" not in payload["session"]
 
 
 def test_parse_gpt_live_events_returns_domain_events() -> None:

@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .domain import DEFAULT_RESPONSES_EFFORT_ENV, normalize_responses_effort
 from .persistence import (
     ArtifactConfig,
     LedgerConfig,
@@ -43,6 +44,8 @@ class Settings(BaseSettings):
     openai_live_voice: str = "marin"
     openai_live_extra_headers: str | None = None
     openai_responses_model: str | None = None
+    # Cap light → OpenAI session.delegation.responses.reasoning.effort=low.
+    openai_responses_effort: str = DEFAULT_RESPONSES_EFFORT_ENV
     public_base_url: str = "https://stub.invalid"
     public_webhook_url: str | None = None
     port: int = Field(default=8000, validation_alias="CALL_AGENT_PORT")
@@ -64,6 +67,11 @@ class Settings(BaseSettings):
     farewell_max_s: float = 4.0
     hangup_confirm_timeout_s: float = 5.0
     retain_call_artifacts: bool = False
+
+    @field_validator("openai_responses_effort", mode="before")
+    @classmethod
+    def _normalize_openai_responses_effort(cls, value: object) -> str:
+        return normalize_responses_effort(value)
 
     def ledger_config(self) -> LedgerConfig:
         return parse_ledger_config(

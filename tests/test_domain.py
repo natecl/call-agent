@@ -410,6 +410,7 @@ def test_media_start_before_answer_opens_live_once_and_dedupes_webhook(
         "end_call",
     ]
     assert second_effects[0].spec.responses_model == "gpt-5.6-terra"
+    assert second_effects[0].spec.responses_effort == "low"
     assert not isinstance(call.live, LiveDormant)
     assert duplicate_call == call
     assert duplicate_effects == ()
