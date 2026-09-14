@@ -113,3 +113,18 @@ def test_psycopg_connect_fails_loud_when_driver_missing(
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(PersistenceConfigError, match="psycopg is not installed"):
         _psycopg_connect("postgresql://user:pass@ep-test/neondb")()
+
+
+def test_psycopg_binary_is_on_the_image_path() -> None:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    repo = Path(__file__).resolve().parents[1]
+    pyproject = (repo / "pyproject.toml").read_text()
+    dockerfile = (repo / "Dockerfile").read_text()
+
+    assert '"psycopg[binary]>=3,<4"' in pyproject
+    assert "pip install --no-cache-dir ." in dockerfile
+    assert 'python -c "import psycopg"' in dockerfile
+    assert callable(psycopg.connect)
+    assert dict_row is not None

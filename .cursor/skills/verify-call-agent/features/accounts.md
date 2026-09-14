@@ -39,7 +39,7 @@ Preconditions:
 
 ## Gotchas
 
-- SQLite `users` is the same file as `dids`. On Fly, set `NEON_DATABASE_URL` or the row dies on redeploy.
+- SQLite `users` is the same file as `dids`. On Fly, set `NEON_DATABASE_URL` or the row dies on redeploy. The Fly image installs `psycopg[binary]` from pyproject; a hot-install does not survive the next image deploy.
 - `account upsert` does not need `ACCOUNT_SYNC_SECRET`. The HTTP routes do.
 - Kickoff `BookRequest.user_id` is `users.user_id`. The outbound Telnyx caller ID is `TELNYX_FROM_NUMBER` / `TELNYX_PHONE_NUMBER`. Confirm/dial never calls `ledger.provision`. The iMessage bot is `LINQ_FROM_E164`. Kickoff ignores `users.from_did`.
 - `from_did` must not equal `phone`. Personal number is not the Telnyx from-number. Two accounts may share one legacy `from_did`.
