@@ -58,6 +58,7 @@ from .linq import (
     handle_inbound,
     messaging_port,
     reply_from_did,
+    shared_bot_e164,
     verify_linq_signature,
     write_inbound_artifact,
 )
@@ -134,10 +135,12 @@ async def accounts_dashboard(request: Request) -> dict[str, object]:
         )
         phone = E164(phone_raw)
         record = open_accounts(settings).get_by_phone(phone)
+        bot = shared_bot_e164(settings)
         return build_account_dashboard(
             record=record,
             artifacts_dir=settings.call_agent_artifacts_dir,
             phone=phone,
+            bot_number=str(bot) if bot is not None else None,
         )
     except AccountSyncAuthError as error:
         raise HTTPException(status_code=401, detail="unauthorized") from error

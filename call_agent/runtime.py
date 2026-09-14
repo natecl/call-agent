@@ -607,6 +607,34 @@ def webhook_and_stream_urls(settings: Settings) -> tuple[str, str]:
     )
 
 
+def shared_telnyx_from(settings: Settings) -> E164 | None:
+    """Sitewide Telnyx FROM. One number for every Treena user.
+
+    Driven by `TELNYX_FROM_NUMBER` or `TELNYX_PHONE_NUMBER`. Not a
+    unique DID per user and not the Linq iMessage bot.
+    """
+    raw = (settings.telnyx_from_number or "").strip()
+    if not raw:
+        return None
+    return E164(raw)
+
+
+def resolve_telnyx_from(settings: Settings, *, live: bool | None = None) -> E164:
+    from_did = shared_telnyx_from(settings)
+    if from_did is not None:
+        return from_did
+    is_live = settings.quick_ask_live if live is None else live
+    if is_live:
+        raise TelnyxFromConfigError(
+            "live dial requires TELNYX_FROM_NUMBER or TELNYX_PHONE_NUMBER"
+        )
+    return E164("+15555550100")
+
+
+class TelnyxFromConfigError(ValueError):
+    pass
+
+
 def validate_live(settings: Settings) -> None:
     missing: list[str] = []
     if not settings.quick_ask_live:
@@ -615,6 +643,8 @@ def validate_live(settings: Settings) -> None:
         missing.append("TELNYX_API_KEY")
     if not settings.telnyx_connection_id:
         missing.append("TELNYX_CONNECTION_ID")
+    if not (settings.telnyx_from_number or "").strip():
+        missing.append("TELNYX_FROM_NUMBER")
     if not settings.openai_api_key:
         missing.append("OPENAI_API_KEY")
     if not settings.openai_responses_model:

@@ -35,7 +35,7 @@ Preconditions:
 
 ## Gotchas
 
-- SMS is off. A 501 `missing_app_base_url` means the Worker has no FastAPI origin. FastAPI `POST /linq/webhook` verifies HMAC, then replies via MessagingPort. Live reply needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` on Fly.
+- SMS is off. A 501 `missing_app_base_url` means the Worker has no FastAPI origin. FastAPI `POST /linq/webhook` verifies HMAC, then replies via MessagingPort. Live reply needs `LINQ_API_TOKEN` and `LINQ_FROM_E164` (shared bot) on Fly.
 - Prod FastAPI is the always-on Fly host `https://hidden-beacon-080.fly.dev` (no path) with `LINQ_WEBHOOK_SIGNING_SECRET`. Nathan's laptop is not that host.
 - There is no `call-agent-web` map in this repository. The Worker name is `call-agent-webhooks`.
 - Pointing `PUBLIC_BASE_URL` at the Worker sends Telnyx media to `/media-stream` and gets 501.

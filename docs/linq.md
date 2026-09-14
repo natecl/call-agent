@@ -2,14 +2,14 @@
 
 Telnyx places the PSTN call. Linq Partner API V3 owns the peer iMessage kickoff thread (Instinct/Orchid class). That is not Apple Messages for Business. SMS stays off.
 
-Closed-alpha testers text Treena on this Linq path. The sending line is the sandbox DID (`LINQ_FROM_E164`; sandbox has used `+12138653024`). That is not a public landing claim and not a blue-bubble marketing claim. Builder-box outbound prove (not this VM): `message.parts` text from `+12138653024` landed on `+17272701288`.
+Closed-alpha testers text Treena on this Linq path. The sending line is the one shared Treena iMessage bot (`LINQ_FROM_E164`; Cap/ops sandbox `+12138653024` until ~Sep 18). That is not a unique DID per user, not a public landing claim, and not a blue-bubble marketing claim. Builder-box outbound prove (not this VM): `message.parts` text from `+12138653024` landed on `+17272701288`.
 
 ## Settings
 
-Read these from env. Do not hardcode the sandbox line as the only source.
+Read these from env. Do not hardcode the sandbox line as the only source. `.env.example` documents the Cap-confirmed sandbox value.
 
 - `LINQ_API_TOKEN`. Bearer token. Required for live send and `linq register-webhook`.
-- `LINQ_FROM_E164`. Sending line.
+- `LINQ_FROM_E164`. The one shared Treena iMessage bot (Text Treena). Sitewide. Not a per-user DID and not Telnyx FROM (`TELNYX_FROM_NUMBER`).
 - `LINQ_WEBHOOK_SIGNING_SECRET`. Standard Webhooks secret (`whsec_...`) from the create-subscription response. Lives on Builder's box. Not in this VM.
 - `LINQ_WEBHOOK_URL` or `PUBLIC_WEBHOOK_URL`. Always-on HTTPS URL for inbound. This is the Cloudflare Workers target, not `PUBLIC_BASE_URL`.
 
@@ -36,7 +36,7 @@ User: approve
 Treena: Okay, I'm going to call them now.
 ```
 
-Party and time come from the first text when present. If time is missing, Treena asks for time (or party and time) before the restaurant phone number. `at <restaurant>` is not a time. "2 people" alone does not unlock the phone ask. After the number she always asks to confirm before dial. Confirm / approve / yes are accepted. The first message never dials, even when it already includes `+E164`. Caller name comes from the `users` row for the inbound phone, never from iMessage and never from `LINQ_KICKOFF_CALLER`. Website `/start` collects that name; after signup the copy is in settings. `BookRequest.user_id` is that row's `user_id`. The outbound Telnyx caller ID is `users.from_did`, not the Linq sending line and not `ledger.provision`. No row, a row with no first name, or a row with no `from_did` texts a plain line (see [accounts.md](accounts.md)). Anything else stays on the `Received:` echo. Collect and confirm reply 200. Approve returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Failed talk and place-exceptions use friendly `user_text` (`I couldn't finish the call` / `I couldn't place the call`) and never echo raw R2, env, or HTTP. Mid-call chat is not shipped; clarification needed texts a plain intake line. Cap recorded `live-prove: PASS (#34)`. qa owns live-prove sign-off (TRE-19). This tree does not redial.
+Party and time come from the first text when present. If time is missing, Treena asks for time (or party and time) before the restaurant phone number. `at <restaurant>` is not a time. "2 people" alone does not unlock the phone ask. After the number she always asks to confirm before dial. Confirm / approve / yes are accepted. The first message never dials, even when it already includes `+E164`. Caller name comes from the `users` row for the inbound phone, never from iMessage and never from `LINQ_KICKOFF_CALLER`. Website `/start` collects that name; after signup the copy is in settings. `BookRequest.user_id` is that row's `user_id`. The outbound Telnyx caller ID is the shared env (`TELNYX_FROM_NUMBER` / `TELNYX_PHONE_NUMBER`), not `users.from_did`, not the shared Linq bot, and not `ledger.provision`. No row or a row with no first name texts a plain line (see [accounts.md](accounts.md)). Empty `users.from_did` still collects. Anything else stays on the `Received:` echo. Collect and confirm reply 200. Approve returns 202 `{ok, kicked_off, event_id}` and runs `run_call` in this process. After hangup it texts the result on `POST /chats/{chat_id}/messages`. Failed talk and place-exceptions use friendly `user_text` (`I couldn't finish the call` / `I couldn't place the call`) and never echo raw R2, env, or HTTP. Mid-call chat is not shipped; clarification needed texts a plain intake line. Cap recorded `live-prove: PASS (#34)`. qa owns live-prove sign-off (TRE-19). This tree does not redial.
 
 Prove the stub path:
 

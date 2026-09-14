@@ -43,11 +43,14 @@ from call_agent.runtime import (
     CallHandle,
     Ports,
     RunDir,
+    TelnyxFromConfigError,
     assert_live_dial_origins,
     normalized_public_host,
     public_url_host,
+    resolve_telnyx_from,
     run_call,
     run_quick_ask,
+    shared_telnyx_from,
 )
 from call_agent.telnyx import StubTelnyxHttp, parse_media_frame
 from call_agent.artifacts import artifact_dir, artifact_slug
@@ -604,6 +607,28 @@ def test_settings_process_env_overrides_dotenv_webhook_url(
         assert_live_dial_origins(settings)
 
 
+def test_telnyx_phone_number_alias_resolves_shared_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TELNYX_FROM_NUMBER", raising=False)
+    monkeypatch.setenv("TELNYX_PHONE_NUMBER", "+12135690899")
+    settings = Settings(_env_file=None)
+    assert shared_telnyx_from(settings) == E164("+12135690899")
+    assert resolve_telnyx_from(settings) == E164("+12135690899")
+
+
+def test_stub_without_telnyx_from_uses_stub_number(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TELNYX_FROM_NUMBER", raising=False)
+    monkeypatch.delenv("TELNYX_PHONE_NUMBER", raising=False)
+    settings = Settings(_env_file=None)
+    assert shared_telnyx_from(settings) is None
+    assert resolve_telnyx_from(settings, live=False) == E164("+15555550100")
+    with pytest.raises(TelnyxFromConfigError, match="TELNYX_FROM_NUMBER"):
+        resolve_telnyx_from(settings, live=True)
+
+
 async def test_run_call_live_fails_when_webhook_host_diverges(
     settings: Settings,
 ) -> None:
@@ -616,6 +641,7 @@ async def test_run_call_live_fails_when_webhook_host_diverges(
         telnyx_connection_id="connection-1",
         openai_api_key="test-openai",
         openai_responses_model="gpt-5.6-terra",
+        telnyx_from_number="+12135690899",
         public_base_url="https://hidden-beacon-080.fly.dev",
         public_webhook_url="https://stale-tunnel.trycloudflare.com",
     )

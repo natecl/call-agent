@@ -36,7 +36,12 @@ from .messaging import (
     followup_chat,
 )
 from .persistence import PersistenceConfigError
-from .runtime import normalized_public_host, run_call
+from .runtime import (
+    TelnyxFromConfigError,
+    normalized_public_host,
+    resolve_telnyx_from,
+    run_call,
+)
 from .artifacts import artifact_dir, artifact_slug
 from .user_text import intake_text, not_placed_text, result_text
 
@@ -59,10 +64,6 @@ NO_ACCOUNT_TEXT = (
 NO_NAME_TEXT = (
     "I need your name for the call. "
     "Add it in your account settings, then text me again."
-)
-NO_FROM_DID_TEXT = (
-    "This account doesn't have a Treena calling number assigned yet. "
-    "Ask support to assign one, then text me again."
 )
 
 _BOOK_RE = re.compile(
@@ -155,8 +156,9 @@ _AFFIRM_RE = re.compile(
 class KickoffParsed:
     """Confirmed book/ask ready to dial.
 
-    `from_did` is the Telnyx caller ID from the users row. Not
-    `KickoffSession.from_did`, which is the Linq iMessage line.
+    `from_did` is the shared Telnyx FROM (`TELNYX_FROM_NUMBER` /
+    `TELNYX_PHONE_NUMBER`). Not `KickoffSession.from_did`, which is the
+    shared Linq iMessage bot (`LINQ_FROM_E164`). Not `users.from_did`.
     """
 
     request: BookRequest | QuickAskRequest
@@ -474,6 +476,7 @@ def claim_kickoff(
             if account is not None
             else None
         ),
+        "dial_from": str(resolve_telnyx_from(settings)),
         "parsed_at": datetime.now(UTC).isoformat(),
     }
     return claim_path(path, payload)
@@ -646,7 +649,10 @@ def _decide(
     assert account is not None
     caller = FirstName(account.first_name or "")
     user_id = account.user_id
-    assert account.from_did is not None
+    try:
+        from_did = resolve_telnyx_from(settings)
+    except TelnyxFromConfigError:
+        return KickoffFailed("I couldn't place the call.", verb)
     if verb == "ask":
         return _decide_ask(
             extracted,
@@ -654,7 +660,7 @@ def _decide(
             caller,
             user_id,
             account,
-            account.from_did,
+            from_did,
             confirmed=confirmed,
         )
     return _decide_book(
@@ -663,7 +669,7 @@ def _decide(
         caller,
         user_id,
         account,
-        account.from_did,
+        from_did,
         confirmed=confirmed,
     )
 
@@ -1037,8 +1043,6 @@ def _account_gate(account: UserRecord | None) -> str | None:
         FirstName(raw)
     except ValueError:
         return NO_NAME_TEXT
-    if account.from_did is None:
-        return NO_FROM_DID_TEXT
     return None
 
 

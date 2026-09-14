@@ -34,6 +34,7 @@ def build_account_dashboard(
     record: UserRecord | None,
     artifacts_dir: Path,
     phone: E164,
+    bot_number: str | None = None,
 ) -> dict[str, Any]:
     threads, calls = scan_linq_artifacts(
         artifacts_dir,
@@ -45,6 +46,7 @@ def build_account_dashboard(
         "user": user_dashboard_payload(record) if record is not None else None,
         "threads": threads,
         "calls": calls,
+        "bot_number": bot_number,
     }
 
 

@@ -9,7 +9,7 @@
 - `cli-roundtrip` upserts `first_name`, `from_did`, prefs, and minutes, then get/list match.
 - `omit-preserve` omitted `first_name`, `prefs`, `minutes_used`, and `from_did` keep the existing values.
 - `sync-hmac` unsigned POST is 401; signed POST upserts Stripe ids without wiping name or from-DID.
-- `dashboard-get` unsigned GET is 401; signed GET packages `users` plus computed `user.name`. Unknown phone is empty lists. Dashboard UI stays on Pages (web).
+- `dashboard-get` unsigned GET is 401; signed GET packages `users` plus computed `user.name` and sitewide `bot_number` from `LINQ_FROM_E164`. Unknown phone is empty lists. Dashboard UI stays on Pages (web).
 - `no-name-column` schema has `first_name` and `prefs`, not `users.name`.
 
 ## How to get to it (user POV)

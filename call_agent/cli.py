@@ -31,7 +31,12 @@ from .linq import (
     validate_linq_live_token,
 )
 from .persistence import PersistenceConfigError
-from .runtime import assert_live_dial_origins, run_call, validate_live
+from .runtime import (
+    assert_live_dial_origins,
+    resolve_telnyx_from,
+    run_call,
+    validate_live,
+)
 from .server import probe_live_ingress, serve_in_process
 from .telnyx import LiveTelnyxHttp, StubTelnyxHttp, TelnyxHttp
 from .verify import (
@@ -472,16 +477,14 @@ def _resolve_from_did(
 ) -> E164:
     if flag:
         return E164(flag)
-    account = open_accounts(settings).get(user_id)
-    if account is not None and account.from_did is not None:
-        return account.from_did
-    if mode is Mode.STUB:
-        return STUB_FROM_DID
-    raise ValueError(
-        f"no from-DID for user {user_id}: pass --from-did or assign one with "
-        "`call-agent account upsert --phone <iMessage> --from-did "
-        "<Treena DID>`. Live calls never order a number."
-    )
+    try:
+        return resolve_telnyx_from(settings, live=(mode is Mode.LIVE))
+    except ValueError as error:
+        raise ValueError(
+            f"no from-DID for user {user_id}: pass --from-did or set "
+            "TELNYX_FROM_NUMBER / TELNYX_PHONE_NUMBER. "
+            "Live calls never order a number."
+        ) from error
 
 
 async def _run_request(

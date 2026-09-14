@@ -21,7 +21,6 @@ from call_agent.kickoff import (
     CONFIRM_ASK_TEXT,
     DIAL_NOW_TEXT,
     NO_ACCOUNT_TEXT,
-    NO_FROM_DID_TEXT,
     NO_NAME_TEXT,
     PHONE_ASK_TEXT,
     TIME_ASK_TEXT,
@@ -100,6 +99,7 @@ def _settings(tmp_path: Path, **updates: object) -> Settings:
         _env_file=None,
         linq_api_token=None,
         linq_from_e164="+15555550100",
+        telnyx_from_number="+12135690899",
         call_agent_db_path=tmp_path / "ledger.sqlite3",
         call_agent_artifacts_dir=tmp_path / "artifacts",
     )
@@ -310,7 +310,7 @@ def test_account_retain_flag_reaches_request(tmp_path: Path) -> None:
     assert parsed.request.retain_call_artifacts is True
 
 
-def test_no_from_did_replies_plain_and_does_not_dial(tmp_path: Path) -> None:
+def test_no_from_did_still_collects_and_does_not_dial(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     parsed = parse_kickoff(
         "book +14155552671 party 2 at Friday 7pm",
@@ -318,10 +318,34 @@ def test_no_from_did_replies_plain_and_does_not_dial(tmp_path: Path) -> None:
         account=_account(from_did=None),
     )
 
-    assert isinstance(parsed, KickoffBlocked)
-    assert parsed.reply == NO_FROM_DID_TEXT
-    assert not parsed.reply.startswith("Call failed:")
-    assert "missing caller name" not in parsed.reply
+    assert isinstance(parsed, KickoffCollecting)
+    assert parsed.pending.waiting_for == "confirm"
+    assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
+    approved = intake_kickoff(
+        APPROVE_FOLLOWUP_TEXT,
+        settings,
+        pending=parsed.pending,
+        account=_account(from_did=None),
+    )
+    assert isinstance(approved, KickoffParsed)
+    assert str(approved.from_did) == "+12135690899"
+
+
+def test_live_missing_shared_from_fails_friendly_without_env_names(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(
+        tmp_path, telnyx_from_number=None, quick_ask_live=True
+    )
+    parsed = parse_kickoff(
+        "book +14155552671 party 2 at Friday 7pm",
+        settings,
+        account=_account(from_did=None),
+    )
+
+    assert isinstance(parsed, KickoffFailed)
+    assert parsed.reason == "I couldn't place the call."
+    assert "TELNYX" not in parsed.reason
     assert not (tmp_path / "artifacts" / "stub-call-0001").exists()
 
 
@@ -338,11 +362,15 @@ def test_no_missing_caller_name_path() -> None:
             or "linq_kickoff_caller" in text
             or "LINQ_KICKOFF_USER_ID" in text
             or "linq_kickoff_user_id" in text
-            or "TELNYX_FROM_NUMBER" in text
-            or "telnyx_from_number" in text
         ):
             hits.append(path)
     assert hits == []
+    product = "".join(
+        path.read_text()
+        for path in root.rglob("*.py")
+        if not path.name.startswith("verify")
+    )
+    assert "+12135690899" not in product
 
 
 def test_missing_time_asks_for_time_not_phone(tmp_path: Path) -> None:
@@ -910,7 +938,7 @@ def test_verify_linq_call_passes() -> None:
         "call_ran",
         "cross_link",
         "same_host_dial",
-        "from_did_users_row",
+        "shared_from_did",
         "no_number_order",
     ]
     assert all(check.passed for check in report.checks)
@@ -921,7 +949,7 @@ def test_sender_constant_is_imessage_handle() -> None:
     assert IMESSAGE == "iMessage"
 
 
-async def test_run_kickoff_dials_from_users_row_not_linq_line(
+async def test_run_kickoff_dials_from_shared_env_not_linq_line(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path, retain_call_artifacts=True)
@@ -929,14 +957,22 @@ async def test_run_kickoff_dials_from_users_row_not_linq_line(
         kickoff_inbound_bytes(APPROVE_FOLLOWUP_TEXT, "evt-from-did")
     )
     assert inbound is not None
-    first = intake_kickoff(NATURAL_BOOK_TEXT, settings)
+    first = intake_kickoff(
+        NATURAL_BOOK_TEXT, settings, account=_account(from_did=None)
+    )
     assert isinstance(first, KickoffCollecting)
     phone = intake_kickoff(
-        PHONE_FOLLOWUP_TEXT, settings, pending=first.pending
+        PHONE_FOLLOWUP_TEXT,
+        settings,
+        pending=first.pending,
+        account=_account(from_did=None),
     )
     assert isinstance(phone, KickoffCollecting)
     parsed = intake_kickoff(
-        APPROVE_FOLLOWUP_TEXT, settings, pending=phone.pending
+        APPROVE_FOLLOWUP_TEXT,
+        settings,
+        pending=phone.pending,
+        account=_account(from_did=None),
     )
     assert isinstance(parsed, KickoffParsed)
     session = KickoffSession(
@@ -956,7 +992,7 @@ async def test_run_kickoff_dials_from_users_row_not_linq_line(
     from call_agent.domain import ClientState
     from call_agent.ledger import open_ledger
 
-    assert dial["from"] == "+15555550177"
+    assert dial["from"] == "+12135690899"
     assert dial["from"] != str(session.from_did)
     assert dial["from"] != INBOUND_SENDER
     assert ClientState.decode(dial["client_state"]).user_id == UserId(

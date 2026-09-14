@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .persistence import (
@@ -20,7 +20,20 @@ class Settings(BaseSettings):
     telnyx_connection_id: str | None = None
     telnyx_public_key: str | None = None
     telnyx_stream_codec: str = "L16"
+    # Shared Telnyx FROM for every Treena user (Cap). Fly live sets both
+    # TELNYX_FROM_NUMBER and TELNYX_PHONE_NUMBER to the same E.164.
+    # Do not default the digits here.
+    telnyx_from_number: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "telnyx_from_number",
+            "TELNYX_FROM_NUMBER",
+            "TELNYX_PHONE_NUMBER",
+        ),
+    )
     linq_api_token: str | None = None
+    # Shared Treena iMessage bot (Cap). One number for everyone.
+    # Sandbox +12138653024 until ~Sep 18. Not a per-user DID.
     linq_from_e164: str | None = None
     linq_webhook_signing_secret: str | None = None
     linq_webhook_url: str | None = None
