@@ -2,7 +2,7 @@
 
 Each call writes audio, transcript, and call-history files under the run directory while it is in progress. After hangup on the trail/success path, `run_call` deletes those files unless retention is opted in. Crash leftovers are accepted. Login and minute totals are out of scope here. The privacy page is not claimed live on this tree.
 
-Live Fly `hidden-beacon-080` image sha `ebcf350` (PR #35); secrets release v22 only. `RETAIN_CALL_ARTIFACTS` is unset (`None`). `settings.retain_call_artifacts=False`. `should_retain(request=None)=False`. **Prove-retain override OFF, wipe-unless-opted-in is the live default.** Account opt-in (`users.retain_call_artifacts`) still wins. This skill never `fly deploy` and never redials.
+Live Fly `hidden-beacon-080` image sha `bb91810` (PR #39); health 200; Neon/psycopg baked; secrets release v22 only. `RETAIN_CALL_ARTIFACTS` is unset (`None`). `settings.retain_call_artifacts=False`. `should_retain(request=None)=False`. **Prove-retain override OFF, wipe-unless-opted-in is the live default.** Account opt-in (`users.retain_call_artifacts`) still wins. This skill never `fly deploy` and never redials.
 
 ## Sub-features
 

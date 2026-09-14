@@ -50,5 +50,5 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Linq to call (closed alpha)](./linq-to-call.md) covers iMessage natural collect + confirm-before-dial → Fly `run_call` → result on the same chat.
 - [Verify linq-to-call](./verify-linq-call.md) covers the fourteen-check stub lever for that path.
 - [Verify webhooks](./verify-webhooks.md) covers the always-on Worker lever in stub mode and against a deployed URL.
-- [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, the misconfig exit, and that `psycopg[binary]` is tree-shipped while live Fly image deploy may still be pending.
+- [Verify persistence](./verify-persistence.md) covers the Neon and R2 port lever, the SQLite and local fallback, the misconfig exit, and that live Fly sha `bb91810` has Neon/`psycopg[binary]` baked.
 - [Default wipe at hangup](./privacy-wipe.md) covers write-then-delete after hangup unless retention is on. Live Fly: prove-retain override OFF; wipe-unless-opted-in is the live default. The privacy page stays not shipped.
