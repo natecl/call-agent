@@ -219,10 +219,20 @@ def test_feature_map_records_cap_locks() -> None:
     assert "Intended Fly route" in INVENTORY
     assert "shared Treena iMessage bot" in INVENTORY
     assert "shared Telnyx from" in INVENTORY
+    assert "| Responses effort | shipped |" in INVENTORY
+    assert "| psycopg[binary] | shipped |" in INVENTORY
+    assert "Neon/psycopg baked" in INVENTORY
+    assert "sha `bb91810`" in INVENTORY
+    assert "Do not claim the Neon driver is live on Fly" not in INVENTORY
+    assert "until Cap/ops redeploys" not in INVENTORY
+    assert "Fly image deploy pending" not in INVENTORY
     assert "LINQ_FROM_E164" in INVENTORY
     assert "TELNYX_FROM_NUMBER" in INVENTORY
     assert "+12138653024" in INVENTORY
     assert "+12135690899" in INVENTORY
+    assert "OPENAI_RESPONSES_EFFORT" in INVENTORY
+    assert "psycopg[binary]" in INVENTORY
+    assert "Live Fly `hidden-beacon-080` sha `bb91810`" in INVENTORY
     assert "missing_public_key" in INVENTORY
     assert "bad_signature" in INVENTORY
     assert "website `/start`" in INVENTORY
@@ -231,6 +241,11 @@ def test_feature_map_records_cap_locks() -> None:
     assert "verify-accounts" in agents
     assert "Prove-retain override OFF" in plan
     assert "wipe-unless-opted-in is the live default" in plan
+    assert "psycopg[binary]" in plan
+    assert "sha `bb91810`" in plan
+    assert "Neon/psycopg baked" in plan
+    assert "until Cap/ops redeploys" not in plan
+    assert "OPENAI_RESPONSES_EFFORT" in plan
 
 
 def test_book_feature_recipes_use_the_entry_contract() -> None:

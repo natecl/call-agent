@@ -31,4 +31,4 @@ Preconditions:
 - `account_roundtrip` upserts a `users` row on the same SQLite file as `dids`.
 - `verify-quick-ask` still uses a throwaway SQLite workspace. Do not point it at Neon.
 - A leftover `R2_ACCOUNT_ID` in the shell is enough to fail the lever. Unset the four required `R2_*` vars and `NEON_DATABASE_URL` before a stub drive.
-- Fly `hidden-beacon-080` needs `psycopg[binary]` when `NEON_DATABASE_URL` is set. pyproject lists that extra as a package dependency and the Dockerfile `pip install .` plus `import psycopg` so the next image deploy includes it. A machine-local `pip install` is wiped on redeploy.
+- Fly `hidden-beacon-080` needs `psycopg[binary]` when `NEON_DATABASE_URL` is set. pyproject lists that extra as a package dependency and the Dockerfile `pip install .` plus `import psycopg`. Live Fly sha `bb91810` (PR #39): health 200, Neon/psycopg baked. A machine-local `pip install` is wiped on redeploy.
